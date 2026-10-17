@@ -1,0 +1,6 @@
+<!doctype html><meta charset="utf-8"><title>Disposable Browser Acceptance</title>
+<style>body{font:24px sans-serif;background:#eef8ff;color:#123;padding:32px}textarea{display:block;width:700px;height:180px;font:24px monospace}button{font:24px sans-serif;margin:20px;padding:15px}#space{height:1900px;background:linear-gradient(#eef8ff,#cfd)}#bottom{background:#064;color:white;padding:30px}</style>
+<h1>DISPOSABLE LOCAL BROWSER TEST</h1><p>No accounts, messages, or external pages.</p><textarea aria-label="Scratch text" id="scratch"></textarea>
+<button id="apply" onclick="document.getElementById('result').textContent='Applied: '+document.getElementById('scratch').value">Apply scratch text</button><output id="result">Not applied yet</output>
+<button onclick="let a=document.createElement('a');a.href=window.URL.createObjectURL(new Blob([document.getElementById('scratch').value],{type:'text/plain'}));a.download='browser-scratch.txt';a.click()">Download scratch file</button>
+<div id="space">Scroll down to the green end marker.</div><h2 id="bottom">BROWSER END MARKER 090</h2>
