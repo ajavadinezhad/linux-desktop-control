@@ -24,11 +24,13 @@ import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import Gio, GLib, Gst
 
-VERSION = '0.6.3'
+VERSION = '0.6.4'
 DEST = 'org.freedesktop.portal.Desktop'
 PATH = '/org/freedesktop/portal/desktop'
 RD = 'org.freedesktop.portal.RemoteDesktop'
 SC = 'org.freedesktop.portal.ScreenCast'
+
+class CaptureTimeout(RuntimeError):pass
 
 class Desktop:
     def __init__(self):
@@ -128,24 +130,29 @@ class Desktop:
                     'OpenPipeWireRemote', GLib.Variant('(oa{sv})', (self.session, {})),
                     GLib.VariantType('(h)'), Gio.DBusCallFlags.NONE, 5000, None, None)
                 self.fd = fds.get(reply.unpack()[0])
-                self.pipeline = Gst.parse_launch('pipewiresrc name=source do-timestamp=true ! '
-                    'queue max-size-buffers=1 max-size-bytes=0 max-size-time=0 leaky=downstream ! '
-                    'videorate max-rate=5 ! video/x-raw,framerate=5/1 ! '
-                    'videoconvert ! video/x-raw,format=RGB ! pngenc compression-level=1 ! '
-                    'appsink name=sink max-buffers=1 drop=true sync=false')
-                source = self.pipeline.get_by_name('source')
-                source.set_property('fd', self.fd)
-                source.set_property('path', str(self.node))
-                if self.props.get('pipewire-serial'):
-                    source.set_property('target-object', str(self.props['pipewire-serial']))
-                self.sink = self.pipeline.get_by_name('sink')
-                self.pipeline.set_state(Gst.State.PLAYING)
-                self.pipeline.get_state(3 * Gst.SECOND)
+                self._start_capture_pipeline()
                 self.capture()
                 return self.status()
             except BaseException:
                 self.close()
                 raise
+
+    def _start_capture_pipeline(self):
+        self.check()
+        self.pipeline = Gst.parse_launch('pipewiresrc name=source do-timestamp=true ! '
+            'queue max-size-buffers=1 max-size-bytes=0 max-size-time=0 leaky=downstream ! '
+            'videorate drop-only=true max-rate=5 ! video/x-raw,framerate=5/1 ! '
+            'videoconvert ! video/x-raw,format=RGB ! pngenc compression-level=1 ! '
+            'appsink name=sink max-buffers=1 drop=true sync=false')
+        source = self.pipeline.get_by_name('source')
+        source.set_property('fd', self.fd)
+        source.set_property('path', str(self.node))
+        if self.props.get('pipewire-serial'):
+            source.set_property('target-object', str(self.props['pipewire-serial']))
+        self.sink = self.pipeline.get_by_name('sink')
+        self.pipeline.set_state(Gst.State.PLAYING)
+        self.pipeline.get_state(3 * Gst.SECOND)
+        self.check()
 
     def on_session_closed(self,connection,sender,path,interface,name,parameters,user):
         if path==self.session:
@@ -184,30 +191,45 @@ class Desktop:
     def capture(self):
         with self.lock:
             self.check()
-            # Require a frame captured after a settling fence, not merely the next
-            # PNG emitted by an encoder that may still be processing older input.
-            clock=self.pipeline.get_clock()
-            if clock is None: raise RuntimeError('Screen pipeline has no clock')
-            fence=clock.get_time()-self.pipeline.get_base_time()+350*Gst.MSECOND
-            deadline = time.monotonic()+5
-            while time.monotonic() < deadline:
+            try:return self._capture_once()
+            except CaptureTimeout:
+                # Reconnect only capture, once, under the existing consent. No
+                # input, portal restart, or cached-frame timestamp substitution.
                 self.check()
-                sample = self.sink.emit('try-pull-sample', 100 * Gst.MSECOND)
-                if sample:
-                    buf = sample.get_buffer()
-                    if buf.pts == Gst.CLOCK_TIME_NONE or buf.pts < fence:
-                        continue
-                    age_ms=max(0,(clock.get_time()-self.pipeline.get_base_time()-buf.pts)/Gst.MSECOND)
-                    if age_ms>750:continue
-                    self.capture_info={'frame_id':self.frames+1,'settling_ms':350,
-                        'frame_age_ms':age_ms}
-                    png = buf.extract_dup(0, buf.get_size())
-                    self.frames += 1
-                    return png
-                error = self.pipeline.get_bus().pop_filtered(Gst.MessageType.ERROR)
-                if error:
-                    raise RuntimeError(str(error.parse_error()[0]))
-            raise RuntimeError('No fresh screen frame received within 5 seconds')
+                self.pipeline.set_state(Gst.State.NULL)
+                self.pipeline=None
+                self.pause(.35)
+                self._start_capture_pipeline()
+                png=self._capture_once(new_stream=True)
+                self.capture_info['pipeline_reconnected']=True
+                return png
+
+    def _capture_once(self,new_stream=False):
+        self.check()
+        # Require a frame captured after a settling fence, not merely the next
+        # PNG emitted by an encoder that may still be processing older input.
+        clock=self.pipeline.get_clock()
+        if clock is None: raise RuntimeError('Screen pipeline has no clock')
+        fence=0 if new_stream else clock.get_time()-self.pipeline.get_base_time()+350*Gst.MSECOND
+        deadline = time.monotonic()+5
+        while time.monotonic() < deadline:
+            self.check()
+            sample = self.sink.emit('try-pull-sample', 100 * Gst.MSECOND)
+            if sample:
+                buf = sample.get_buffer()
+                if buf.pts == Gst.CLOCK_TIME_NONE or buf.pts < fence:
+                    continue
+                age_ms=max(0,(clock.get_time()-self.pipeline.get_base_time()-buf.pts)/Gst.MSECOND)
+                if age_ms>750:continue
+                self.capture_info={'frame_id':self.frames+1,'settling_ms':350,
+                    'frame_age_ms':age_ms,'freshness':'new_stream' if new_stream else 'post_settle_frame'}
+                png = buf.extract_dup(0, buf.get_size())
+                self.frames += 1
+                return png
+            error = self.pipeline.get_bus().pop_filtered(Gst.MessageType.ERROR)
+            if error:
+                raise RuntimeError(str(error.parse_error()[0]))
+        raise CaptureTimeout('No fresh screen frame received within 5 seconds')
 
     def notify(self, method, sig, *args):
         self.check()
