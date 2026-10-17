@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+.env.*
+*.log
+test-evidence/
+extension-backups/
+*_RESULT.json
+*_RESULT.txt
+work/
+recordings/
+*.webm
+*.mp4
+
+# Installer-generated, machine-specific launch paths
+plugins/linux-desktop-control/.mcp.json
+
+# Local recorder status sidecars
+*.webm.status.json

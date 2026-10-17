@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "linux_desktop": {
+      "command": "/usr/bin/python3",
+      "args": [
+        "desktop.py"
+      ],
+      "enabled": true,
+      "startup_timeout_sec": 10,
+      "tool_timeout_sec": 150,
+      "env_vars": [
+        "DBUS_SESSION_BUS_ADDRESS",
+        "XDG_RUNTIME_DIR",
+        "WAYLAND_DISPLAY",
+        "DISPLAY",
+        "XDG_SESSION_TYPE",
+        "XDG_CURRENT_DESKTOP"
+      ]
+    }
+  }
+}

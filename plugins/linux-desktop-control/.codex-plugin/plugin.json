@@ -1,0 +1,12 @@
+{
+  "name": "linux-desktop-control",
+  "version": "0.6.3",
+  "description": "Observe and control GNOME Wayland applications through a consented desktop portal session.",
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "requires_local_executor": true,
+  "interface": {
+    "displayName": "Linux Desktop Control",
+    "shortDescription": "Control GNOME Wayland desktop applications"
+  }
+}
