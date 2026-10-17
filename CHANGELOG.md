@@ -1,5 +1,11 @@
 # Changes
 
+## 0.6.4
+
+- Recover a stalled capture stream once under existing consent, without replaying input or substituting cached images. Retain cancellation and frame age checks; drop-only rate limiting avoids duplicated frames.
+- Add six capture recovery regressions; 159 automated tests pass.
+- Complete 49 scoped real app/control assertions, including Chrome/Firefox multilingual workflows, Files, GNOME window controls and human Pause/Continue/Stop. Document focus and timing failures plus remaining limits in docs/ACCEPTANCE_0_6_4.md.
+
 ## 0.6.3
 
 - Reject malformed tool arguments without disconnecting the backend.

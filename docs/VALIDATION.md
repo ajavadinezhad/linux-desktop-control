@@ -1,3 +1,7 @@
+# Current acceptance
+
+See [0.6.4 desktop acceptance](ACCEPTANCE_0_6_4.md) for 49 real application/control assertions, physical toolbar acceptance and capture recovery. The current automated suite has 159 tests. Older sections below retain their original version scope.
+
 # Validation scope
 
 ## Automated and loader checks
