@@ -39,3 +39,5 @@ The actual assistant connection reports server_version 0.6.3. Consented visual i
 Optional target inspection returned D-Bus AccessDenied on this assistant connection. No target identity was issued or claimed, and no access policy was changed. Guarded multi-window host acceptance therefore remains incomplete. Physical Pause/Continue and Emergency Stop checks for this version are still pending; historical results above do not substitute for them.
 
 Malformed tool-call arguments, stale Pause events, stale-epoch Emergency Stop and invalid numeric/key input have automated regression coverage. The real Codex loader discovered all seven tools at version 0.6.3, and environment preflight passed.
+
+Final cleanup for the 0.6.3 host check confirmed stopped state, portal_closed_confirmed=true, capture/input disabled and no cleanup warning. No physical Pause/Continue event was received before the session ended. The explicit desktop_stop tool cleanup passed; physical Emergency Stop remains unverified for this version.
