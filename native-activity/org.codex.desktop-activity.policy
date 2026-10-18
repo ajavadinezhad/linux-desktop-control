@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN" "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>Independent Linux Desktop Control project</vendor>
+  <action id="org.codex.desktop-activity.monitor">
+    <description>Temporarily monitor keyboard and pointer activity for desktop takeover</description>
+    <message>Administrator approval is required for the temporary desktop activity monitor. It reduces device events locally to a stop signal.</message>
+    <defaults><allow_any>no</allow_any><allow_inactive>no</allow_inactive><allow_active>auth_admin</allow_active></defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/libexec/codex-desktop-activity</annotate>
+  </action>
+</policyconfig>

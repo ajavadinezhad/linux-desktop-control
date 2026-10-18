@@ -1,6 +1,12 @@
 # Validation
 
-## 0.7.6 release candidate
+## 0.8.0 native helper candidate
+
+The replacement uses a separately installed administrator-authorized native helper, not the failed Clutter input filter. The 204-test isolated suite and real five-tool loader passed before adding four release-evidence tests; those four targeted tests pass. Native C collector, session watcher and confinement fixtures compile and pass separately with an extracted local GCC toolchain. Unix-socket fixture tests need a host run when the sandbox disallows socket binding. No real devices are opened by those fixtures.
+
+The optional helper package contains only a root-owned executable and polkit policy. Live startup and browser input succeeded after descriptor cleanup. The user-confirmed one-second held-key attempt failed: 960 characters completed without cancellation (result0e2c7f56251f467c87cfde4c071a34a7). Held-button dragging remains unverified. The complete Python suite passes228tests. Live calibration failed; a diagnostic trial also timed out without a report. Final race/diagnostic fixes pass isolated C collector tests, including actual seccomp and sockets, but have not passed live acceptance. Tests are not evidence of universal coverage or atomic input arbitration.
+
+## Historical 0.7.6 candidate
 
 The combined isolated suite passes 194 tests. The real application loader confirms version 0.7.6 and exactly five tools: desktop_start, desktop_observe, desktop_action, desktop_status and desktop_close. Loader assertions include the explicit, default-off physical_takeover option. Tests use fake settings and isolated subprocesses for crash/recovery checks; no live sharing or preference activation is needed.
 

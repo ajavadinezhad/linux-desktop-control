@@ -1,5 +1,13 @@
 # Changes
 
+## 0.8.0
+
+- Replace the failed optional Clutter filter with a separately authorized native device-activity helper. Missing or untrusted helper refuses before sharing. Default control needs no helper or administrator authorization.
+- Split portal consent from capture: administrator approval and native ARM acknowledgment precede screenshots/input. Activity and faults invalidate pending work independently of foreground tracking.
+- Add root-owned optional helper package: read-only input descriptors, UID/capability drop, private fixed-token channel, peer pidfd, topology/session monitors, heartbeat expiry and seccomp confinement. No persistent service, setuid installation, input-group change or device ACL change.
+- Require a fresh keyboard/pointer calibration before protected capture/input; refuse on missing activity rather than treating handshake readiness as device coverage. Split heartbeat, lease and clock failure exit diagnostics.
+- The earlier same-window typing test failed; no live success is claimed for the replacement until separate typing and dragging tests pass.
+
 ## 0.7.6
 
 - Bound cursor-watchdog heartbeat writes; recover safely after owner/worker failure, settings errors and journal failures. Preserve later user choices.

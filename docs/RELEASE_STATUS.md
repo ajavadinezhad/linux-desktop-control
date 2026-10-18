@@ -1,7 +1,11 @@
-# Private review status — 0.7.6
+# Private review status — 0.8.0 candidate
 
-Recovery and display hardening are integrated. Cursor owner/worker crash tests use isolated fake settings; they do not crash the live desktop. The optional native device-source activity candidate is disabled by default and requires a manually loaded helper revision 4 before live acceptance. No new same-window physical takeover claim is made.
+The 0.7.6 same-window typing acceptance failed: the human confirmed a key during typing, but 1719 characters completed before the 15-second deadline. The Clutter filter path is not used by the new backend. Dragging was not run on that failed detector.
 
-The prior live 0.7.5 save/reopen, cursor restoration and physical Alt+Tab evidence remains in LIVE_0_7_5.md. Physical multi-monitor, mixed-DPI/hotplug and held-input takeover checks remain hardware/human-dependent. See COMPATIBILITY.md, SAME_WINDOW_TAKEOVER.md and ZAPZAP_DIAGNOSIS.md.
+A separately administrator-authorized native helper and desktop integration are built as an optional replacement. Default physical_takeover=false does not launch it. The helper package is reviewable and installed; startup and one browser-focus gesture succeeded, but typing/dragging acceptance remains incomplete. The latest held-key attempt (result `0e2c7f56251f467c87cfde4c071a34a7`) completed 960 characters without an activity signal; the user confirmed a one-second physical key hold while text grew. At about120seconds the helper faulted (that historical build conflated lease expiry and heartbeat loss) and closed sharing with no held virtual input or cleanup warning. All 228 Python tests pass; this does not prove physical input coverage. See native-activity/README.md for scope and limitations.
 
-Source remains private; project reuse licensing is deferred. Third-party cursor asset terms remain unchanged.
+The prior live 0.7.5 save/reopen, glow/restoration and physical Alt+Tab evidence remains valid only for that scope. Real multi-monitor/mixed-DPI testing remains unverified. Source remains private; reuse licensing is deferred.
+
+The mandatory native calibration was installed and attempted. It timed out before ARMED; capture/input remained disabled and portal closure was confirmed with no held input or cleanup warning. The user confirmed both physical actions within the calibration interval; this is a confirmed live coverage failure. Protected typing/dragging cannot proceed until device coverage is established.
+
+A subsequent diagnostic trial emitted the actual CALIBRATING readiness cue, then timed out with no diagnostic payload (helper exit126). This does not establish which category was missing. The reviewed source now handles REPORT racing completed calibration, distinguishes control/watch/poll/report failure codes, and labels missing diagnostic responses. An isolated full-collector fixture with the real seccomp filter and socket syscalls verifies report, raw descriptor closure and exit0. The rebuilt package is ready; these final changes still need live installation/acceptance.
