@@ -17,7 +17,7 @@ import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import Gio, GLib, Gst
 
-VERSION = '0.7.2'
+VERSION = '0.7.3'
 DEST = 'org.freedesktop.portal.Desktop'
 PATH = '/org/freedesktop/portal/desktop'
 RD = 'org.freedesktop.portal.RemoteDesktop'
@@ -724,12 +724,18 @@ class Server:
 
     def capture_result(self,allowed,expected_window=None,transition_settle=False):
         required=getattr(self.backend,'requires_window_guard',False)
-        before=self.read_window_context(2 if transition_settle else 0) if required else None
-        if expected_window is not None and self.window_guard_module().WindowGuard.signature(before)!=expected_window:raise RuntimeError('Foreground changed after input; session must close')
-        self.guard(allowed);png=self.backend.capture();self.guard(allowed)
-        after=self.read_window_context() if required else None
-        if required and self.window_guard_module().WindowGuard.signature(before)!=self.window_guard_module().WindowGuard.signature(after):
-            raise RuntimeError('Foreground changed while capturing; no image is published')
+        deadline=time.monotonic()+2
+        attempts=0
+        while True:
+            before=self.read_window_context(max(0,deadline-time.monotonic()) if transition_settle else 0) if required else None
+            if expected_window is not None and self.window_guard_module().WindowGuard.signature(before)!=expected_window:raise RuntimeError('Foreground changed after input; session must close')
+            self.guard(allowed);png=self.backend.capture();self.guard(allowed)
+            after=self.read_window_context() if required else None
+            if not required or self.window_guard_module().WindowGuard.signature(before)==self.window_guard_module().WindowGuard.signature(after):break
+            # Only the already-authorized single transition may settle across a
+            # capture race. Discard pixels and observe again; never repeat input.
+            attempts+=1
+            if not transition_settle or attempts>=2 or time.monotonic()>=deadline:raise RuntimeError('Foreground changed while capturing; no image is published')
         self.state='active';self.recovery.observed();self.window_record=None
         observation={'available':False}
         if after:

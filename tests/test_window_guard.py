@@ -164,3 +164,25 @@ class PointerMappingTests(unittest.TestCase):
  def test_historical_signal_does_not_cancel_fresh_observation(self):
   b=Bridge();cancelled=threading.Event();w=g.WindowGuard(b,b.context(),cancelled.set)
   w.changed(9);w.changed(10);self.assertFalse(cancelled.is_set());w.changed(11);self.assertTrue(cancelled.is_set())
+
+class TransitionCaptureRaceTests(unittest.TestCase):
+ def test_single_transition_discards_changed_capture_and_never_replays_input(self):
+  s,b=WindowServerTests().make();original=s.backend.capture;calls=[]
+  def capture():
+   calls.append(True)
+   if len(calls)==1:b.value.update(window_id='save-dialog',epoch=11)
+   return original()
+  s.backend.capture=capture
+  content=s.capture_result(('active',),transition_settle=True)
+  self.assertEqual(len(calls),2);self.assertEqual(s.backend.actions,0)
+  self.assertTrue(any(c['type']=='image' for c in content));self.assertEqual(s.window_record['context']['window_id'],'save-dialog')
+ def test_second_change_and_protected_context_never_publish(self):
+  for unavailable in (False,True):
+   s,b=WindowServerTests().make();original=s.backend.capture;calls=[]
+   def capture():
+    calls.append(True);b.value['epoch']+=1
+    if unavailable:b.value['available']=False
+    return original()
+   s.backend.capture=capture
+   with self.assertRaises(RuntimeError):s.capture_result(('active',),transition_settle=True)
+   self.assertEqual(len(calls),1 if unavailable else 2);self.assertEqual(s.backend.actions,0)

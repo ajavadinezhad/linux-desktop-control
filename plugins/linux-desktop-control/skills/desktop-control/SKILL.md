@@ -2,7 +2,7 @@
 name: desktop-control
 description: Observe and operate consented GNOME Wayland apps, with an optional passive pointer label.
 ---
-Use only for user-authorized desktop tasks. This is an independent local backend. Confirm server_version=0.7.2 and five tools: desktop_start, desktop_observe, desktop_action, desktop_status and desktop_close. Older chats may retain a stale catalog after installation; do not claim it refreshed.
+Use only for user-authorized desktop tasks. This is an independent local backend. Confirm server_version=0.7.3 and five tools: desktop_start, desktop_observe, desktop_action, desktop_status and desktop_close. Older chats may retain a stale catalog after installation; do not claim it refreshed.
 
 
 Consent-first orchestration is mandatory. Before desktop_start succeeds with active=true and a fresh image has actually been inspected, never launch, focus or change any app through shell/subprocess, xdg-open, wmctrl, D-Bus activation or a fixture. Those channels bypass the intended desktop-consent workflow even though they do not breach the portal. After consent, launch and operate apps only through the observed GUI. No preparatory test windows before consent. Denied/cancelled consent means no app launch. examples/consent_first.py demonstrates the ordering without an app command runner.
@@ -28,3 +28,5 @@ Call desktop_close at completion/error and verify portal_closed_confirmed with n
 Capture accepts recent frames with a settling fence. One capture-only reconnection can occur under existing consent on a timeout, without replaying input or opening a new portal; another timeout propagates. This may add latency and does not establish app readiness. Evidence is scoped in docs/VALIDATION.md; universal app support and a fix for the prior host pointer jitter are not claimed.
 
 After an explicit one-gesture app transition only, the backend can wait up to2seconds for an available foreground context before capture. This wait sends no input, never replays the gesture or reclaims focus, and honors cancellation/revocation. Ordinary input batches still reject context loss immediately. A timeout closes the session; no automatic new session is allowed.
+
+After one explicit transition only, a foreground change between two available contexts during capture discards that image and permits at most one capture-only retry within the two-second transition deadline. No input is repeated. Unavailable/protected post-capture context, cancellation, revocation, ordinary actions, a second change or the publication fence still refuses and closes. This does not prove app readiness or distinguish concurrent human activity.
