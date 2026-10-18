@@ -10,17 +10,9 @@ case "${1:-}" in
 esac
 # Fail before writing launch paths, copying extensions or changing user settings.
 /usr/bin/python3 "$root/check_environment.py"
-# This client requires resolved local paths in compatibility MCP declarations.
-/usr/bin/python3 - "$root" <<'PYCONFIG'
-import json,pathlib,sys
-root=pathlib.Path(sys.argv[1])/'plugins/linux-desktop-control'
-p=root/'.mcp.json'
-config=json.loads((root/'.mcp.template.json').read_text())
-server=config['mcpServers']['linux_desktop']
-server['args']=[str(root/'desktop.py')]
-server['cwd']=str(root)
-p.write_text(json.dumps(config,indent=2)+'\n')
-PYCONFIG
+# The CLI copies this declaration into the versioned cache before starting the
+# provider. Never launch an installed version from the mutable staging tree.
+/usr/bin/python3 "$root/configure-runtime.py" "$root"
 /usr/bin/python3 "$root/install-indicator.py"
 /usr/bin/python3 "$root/install-cursor-theme.py"
 "$codex_bin" plugin marketplace add "$root" --json

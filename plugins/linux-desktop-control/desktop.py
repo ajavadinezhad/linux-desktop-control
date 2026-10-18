@@ -17,7 +17,21 @@ import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import Gio, GLib, Gst
 
-VERSION = '0.8.0'
+VERSION = '0.8.1'
+# Freeze identity at module load: old providers must never report a new disk build.
+_build_spec = importlib.util.spec_from_file_location('_desktop_runtime_build', os.path.join(os.path.dirname(__file__), 'runtime_build.py'))
+_runtime_build = importlib.util.module_from_spec(_build_spec)
+_build_spec.loader.exec_module(_runtime_build)
+SERVER_BUILD = _runtime_build.fingerprint(os.path.dirname(__file__))
+
+def require_current_runtime():
+    try:
+        current = _runtime_build.fingerprint(os.path.dirname(__file__))
+    except Exception:
+        raise RuntimeError('Desktop runtime source unavailable; restart the provider before sharing') from None
+    if current != SERVER_BUILD:
+        raise RuntimeError('Desktop runtime source changed; restart the provider before sharing')
+
 DEST = 'org.freedesktop.portal.Desktop'
 PATH = '/org/freedesktop/portal/desktop'
 RD = 'org.freedesktop.portal.RemoteDesktop'
@@ -134,10 +148,12 @@ class Desktop:
             self.check()
             if self.pipeline is not None:return self.status()
             try:
+                require_current_runtime()
                 reply,fds=self.bus.call_with_unix_fd_list_sync(DEST,PATH,SC,
                     'OpenPipeWireRemote',GLib.Variant('(oa{sv})',(self.session,{})),
                     GLib.VariantType('(h)'),Gio.DBusCallFlags.NONE,5000,None,None)
                 self.fd=fds.get(reply.unpack()[0])
+                require_current_runtime()
                 self._start_capture_pipeline();self.capture()
                 return self.status()
             except BaseException:
@@ -667,7 +683,9 @@ class Server:
         raw.setdefault('input_release',{'attempted':0,'confirmed':0,'failed':0})
         active=bool(raw.get('active')) and self.state=='active'
         if not active and self.state=='active':self.state='closed'
-        result=dict(raw,server_version=VERSION,active=active,session_state=self.state,
+        try:disk_match=_runtime_build.fingerprint(os.path.dirname(__file__))==SERVER_BUILD
+        except Exception:disk_match=False
+        result=dict(raw,server_version=VERSION,server_build=SERVER_BUILD,server_disk_match=disk_match,active=active,session_state=self.state,
             capture_allowed=active,input_allowed=active and not self.recovery.inspection_required,
             recovery=self.recovery.snapshot(),fresh_observation_required=not active or self.recovery.inspection_required)
         if not active:result['logical_size']=[0,0]
@@ -681,13 +699,21 @@ class Server:
         if self.cursor_glow_warning:result['cursor_glow_warning']=self.cursor_glow_warning
         return result
 
+    def require_runtime(self):
+        try:require_current_runtime()
+        except RuntimeError:
+            self.invalidate();self.close_backend()
+            raise
+
     def preflight_context(self):
+        self.require_runtime()
         path=os.path.join(os.path.dirname(__file__),'indicator_bridge.py')
         spec=importlib.util.spec_from_file_location('desktop_indicator_preflight',path)
         module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
         bridge=module.IndicatorBridge(self.status);bridge.preflight();return bridge
 
     def native_activity_module(self):
+        self.require_runtime()
         path=os.path.join(os.path.dirname(__file__),'native_activity.py')
         spec=importlib.util.spec_from_file_location('desktop_native_activity',path)
         module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
@@ -697,6 +723,7 @@ class Server:
         self.native_activity_module().validate_helper()
 
     def calibration_notice_module(self):
+        self.require_runtime()
         path=os.path.join(os.path.dirname(__file__),'calibration_notice.py')
         spec=importlib.util.spec_from_file_location('desktop_calibration_notice',path)
         module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
@@ -715,6 +742,7 @@ class Server:
         controller.start()
         if controller.status().get('active') is not True:raise RuntimeError('Native activity observer did not arm')
         self.guard(('opening','active'))
+        self.require_runtime()
         self.physical_takeover=True;self.physical_takeover_warning=None
 
     def native_activity_lost(self,expected,error=None):
@@ -726,6 +754,7 @@ class Server:
         threading.Thread(target=cleanup,daemon=True).start()
 
     def show_indicator(self):
+        self.require_runtime()
         if self.factory is not Desktop:return
         try:
             path=os.path.join(os.path.dirname(__file__),'indicator_bridge.py')
@@ -767,6 +796,7 @@ class Server:
         if self.cursor_glow is not None:return
         if self.cursor_glow_pending is not None:raise RuntimeError('Previous cursor restoration is unconfirmed; no new glow lease is allowed')
         config=self.cursor_glow_config()
+        self.require_runtime()
         path=os.path.join(os.path.dirname(__file__),'cursor_glow_service.py')
         spec=importlib.util.spec_from_file_location('desktop_cursor_glow',path)
         module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
@@ -826,6 +856,7 @@ class Server:
     def inspect_keyboard_target(self):
         self.target_gate()
         if self.target_provider is None:
+            self.require_runtime()
             path=os.path.join(os.path.dirname(__file__),'target_guard.py')
             spec=importlib.util.spec_from_file_location('desktop_target_guard',path)
             module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
@@ -853,6 +884,7 @@ class Server:
             else:time.sleep(.05)
 
     def window_guard_module(self):
+        self.require_runtime()
         path=os.path.join(os.path.dirname(__file__),'window_guard.py')
         spec=importlib.util.spec_from_file_location('desktop_window_guard',path)
         module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
@@ -877,6 +909,7 @@ class Server:
         while True:
             before=(self.stable_transition_context(deadline) if transition_settle else self.read_window_context()) if required else None
             if expected_window is not None and self.window_guard_module().WindowGuard.signature(before)!=expected_window:raise RuntimeError('Foreground changed after input; session must close')
+            self.require_runtime()
             self.guard(allowed);png=self.backend.capture();self.guard(allowed)
             after=self.read_window_context(max(0,deadline-time.monotonic()) if transition_settle else 0) if required else None
             if not required or self.window_guard_module().WindowGuard.signature(before)==self.window_guard_module().WindowGuard.signature(after):break
@@ -899,6 +932,8 @@ class Server:
         if name=='desktop_status':return [text(self.status())]
         if name=='desktop_close':
             self.invalidate();self.close_backend();return [text(self.status())]
+        if name in ('desktop_start','desktop_action','desktop_observe'):
+            self.require_runtime()
         self.guard()
         if name=='desktop_start':
             physical=args.get('physical_takeover',False)
@@ -918,6 +953,7 @@ class Server:
                         if getattr(self.backend,'requires_window_guard',False):
                             self.backend.wait_interruptibly(.2)
                             self.read_window_context(2)
+                        self.require_runtime()
                         self.backend.finish_start()
                     else:
                         self.backend.start();self.show_indicator()

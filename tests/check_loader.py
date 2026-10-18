@@ -9,13 +9,22 @@ with tempfile.TemporaryDirectory(prefix='desktop-plugin-loader-') as home:
     bundle=pathlib.Path(home)/'bundle'
     shutil.copytree(ROOT,bundle,ignore=shutil.ignore_patterns('.git','__pycache__','recordings','test-evidence'))
     plugin=bundle/'plugins/linux-desktop-control'
-    declaration=plugin/'.mcp.json';config=json.loads((plugin/'.mcp.template.json').read_text())
-    config['mcpServers']['linux_desktop']['args']=[str(plugin/'desktop.py')]
-    config['mcpServers']['linux_desktop']['cwd']=str(plugin)
-    declaration.write_text(json.dumps(config))
+    subprocess.run(['/usr/bin/python3',str(bundle/'configure-runtime.py'),str(bundle)],
+                   env=env,check=True,capture_output=True,text=True,timeout=5)
+    version=json.loads((plugin/'.codex-plugin/plugin.json').read_text())['version']
+    runtime=pathlib.Path(home)/'plugins/cache/local-linux-desktop/linux-desktop-control'/version
+    expected_launch={'args':[str(runtime/'desktop.py')],'cwd':str(runtime)}
+    declaration=plugin/'.mcp.json'
+    launch=json.loads(declaration.read_text())['mcpServers']['linux_desktop']
+    assert all(launch[key]==value for key,value in expected_launch.items()),launch
+    assert not launch['args'][0].startswith(str(bundle)),launch
     for args in [['plugin','marketplace','add',str(bundle),'--json'],
                  ['plugin','add','linux-desktop-control@local-linux-desktop','--json']]:
         subprocess.run([CODEX,*args],env=env,check=True,capture_output=True,text=True,timeout=15)
+    installed=json.loads((runtime/'.mcp.json').read_text())['mcpServers']['linux_desktop']
+    assert all(installed[key]==value for key,value in expected_launch.items()),installed
+    assert (runtime/'desktop.py').is_file(),runtime
+    assert json.loads((runtime/'.codex-plugin/plugin.json').read_text())['version']==version
     p=subprocess.Popen([CODEX,'app-server'],env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True,bufsize=1)
     def rpc(i,method,params):
         p.stdin.write(json.dumps({'id':i,'method':method,'params':params})+'\n');p.stdin.flush()
@@ -35,6 +44,7 @@ with tempfile.TemporaryDirectory(prefix='desktop-plugin-loader-') as home:
         inventory=rpc(2,'mcpServerStatus/list',{'serverName':'linux_desktop'})
         server=inventory['data'][0]
         expected={'desktop_start','desktop_observe','desktop_action','desktop_status','desktop_close'}
+        assert server['serverInfo']['version']=='0.8.1',server['serverInfo']
         assert server['toolsError'] is None,server['toolsError']
         assert set(server['tools'])==expected,server['tools']
         assert not server['tools']['desktop_status']['inputSchema']['properties']

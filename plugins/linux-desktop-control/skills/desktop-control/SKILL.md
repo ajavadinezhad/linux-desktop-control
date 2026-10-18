@@ -2,7 +2,7 @@
 name: desktop-control
 description: Observe and operate consented GNOME Wayland apps, with an optional passive pointer label.
 ---
-Use only for user-authorized desktop tasks. This is an independent local backend. Confirm server_version=0.8.0 and five tools: desktop_start, desktop_observe, desktop_action, desktop_status and desktop_close. Older chats may retain a stale catalog after installation; do not claim it refreshed.
+Use only for user-authorized desktop tasks. This is an independent local backend. Confirm server_version=0.8.1 and five tools: desktop_start, desktop_observe, desktop_action, desktop_status and desktop_close. Status also reports a frozen 64-character server_build source fingerprint; a changed runtime refuses new sharing until its provider restarts. Older chats may retain a stale catalog after installation; do not claim it refreshed.
 
 
 Consent-first orchestration is mandatory. Before desktop_start succeeds with active=true and a fresh image has actually been inspected, never launch, focus or change any app through shell/subprocess, xdg-open, wmctrl, D-Bus activation or a fixture. Those channels bypass the intended desktop-consent workflow even though they do not breach the portal. After consent, launch and operate apps only through the observed GUI. No preparatory test windows before consent. Denied/cancelled consent means no app launch. examples/consent_first.py demonstrates the ordering without an app command runner.

@@ -361,4 +361,34 @@ class NativeActivityTests(unittest.TestCase):
   with self.assertRaisesRegex(m.NativeFailure,'notification closure unconfirmed'):c.start()
   self.assertNotIn('ARM',self.brokers[-1].commands);self.assertFalse(c.calibration_verified);self.assertFalse(c.ready);status=c.status()['calibration_notice'];self.assertTrue(status['delivery_unknown']);self.assertFalse(status['request_active']);self.assertFalse(status['visibility_verified']);self.assertIsNotNone(status['warning']);self.assertTrue(c.notice_open);self.assertLessEqual(notice.calls,2)
 
+ def test_late_calibrated_after_original_deadline_refused_without_arm(self):
+  c=self.controller();c.calibration_state='waiting';clock=[0.0];sent=[];reads=[0];c._send=sent.append
+  def read(timeout):
+   reads[0]+=1
+   if reads[0]==1:clock[0]=30.01;return 'CALIBRATED'
+   return 'CAL_DIAG_11011000'
+  c._read=read
+  with patch.object(m.time,'monotonic',side_effect=lambda:clock[0]):
+   with self.assertRaisesRegex(m.NativeFailure,'challenge timed out'):c._wait_calibrated()
+  self.assertEqual(sent,['REPORT']);self.assertTrue(c.calibration_late_result);self.assertFalse(c.calibration_verified)
+ def test_revocation_or_stop_during_calibrated_read_refuses_success(self):
+  for stop in (False,True):
+   c=self.controller();c.calibration_state='waiting';authorized=[True];c.active=lambda:authorized[0];sent=[];c._send=sent.append
+   def read(timeout):
+    if stop:c.stop.set()
+    else:authorized[0]=False
+    return 'CALIBRATED'
+   c._read=read
+   with self.assertRaisesRegex(m.NativeFailure,'authorization ended'):c._wait_calibrated()
+   self.assertEqual(sent,[]);self.assertFalse(c.calibration_verified)
+ def test_revocation_during_notice_closure_refuses_arm(self):
+  authorized=[True]
+  class Notice:
+   def show(self,reset=False):return True
+   def close(self):authorized[0]=False;return True
+   def status(self):return {'request_active':False,'delivery_unknown':False,'warning':None}
+  c=self.controller(notice=Notice());c.active=lambda:authorized[0]
+  with self.assertRaisesRegex(m.NativeFailure,'authorization ended'):c.start()
+  self.assertNotIn('ARM',self.brokers[-1].commands);self.assertFalse(c.calibration_verified)
+
 if __name__=='__main__':unittest.main()
