@@ -52,6 +52,6 @@ def main():
  else:
   for c in result['checks']:
    print(('OK' if c['ok'] else 'MISSING' if c['required'] else 'OPTIONAL')+': '+c['name']+' — '+c['detail'])
-  print('Environment checks passed; live toolbar/portal checks still run before sharing.' if result['ready'] else 'Installation stopped before changes. Resolve the missing requirements and retry.')
+  print('Environment checks passed; portal checks still run before sharing.' if result['ready'] else 'Installation stopped before changes. Resolve the missing requirements and retry.')
  return 0 if result['ready'] else 1
 if __name__=='__main__':sys.exit(main())

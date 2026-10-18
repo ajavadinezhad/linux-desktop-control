@@ -2,7 +2,7 @@
 """Explicitly consented, silent demo recording. Separate from desktop control.
 
 Only run with the clean scratch scene visible. Stop before switching apps.
-Pause/Stop on the desktop toolbar DOES NOT stop this independent recorder.
+The recorder is independent of the desktop input session.
 """
 import argparse,json,os,signal,threading,time,uuid,tempfile
 from pathlib import Path

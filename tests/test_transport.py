@@ -9,7 +9,7 @@ class Blocking(Fake):
     def action(self,a):
         self.held=True;self.entered.set()
         try:
-            if not self.stopped.wait(3):raise RuntimeError('test timeout waiting for cancellation')
+            if not self.cancelled.wait(3):raise RuntimeError('test timeout waiting for cancellation')
             raise RuntimeError('cancelled in '+a['type'])
         finally:
             self.held=False;self.was_released=True;self.finished.set()
@@ -43,7 +43,7 @@ class TransportTests(unittest.TestCase):
         try:
             h.begin('drag')
             started=time.monotonic()
-            h.send({'jsonrpc':'2.0','id':43,'method':'tools/call','params':{'name':'desktop_stop'}})
+            h.send({'jsonrpc':'2.0','id':43,'method':'tools/call','params':{'name':'desktop_close'}})
             self.assertTrue(h.backend.finished.wait(1))
             self.assertLess(time.monotonic()-started,1)
             self.assertTrue(h.backend.was_released)
@@ -67,7 +67,7 @@ class TransportTests(unittest.TestCase):
             h.send({'jsonrpc':'2.0','method':'notifications/cancelled','params':{'requestId':999}})
             h.send({'jsonrpc':'2.0','id':99,'method':'ping'})
             self.assertFalse(h.backend.finished.wait(.05))
-            self.assertFalse(h.backend.stopped.is_set())
+            self.assertFalse(h.backend.cancelled.is_set())
         finally:h.finish()
         self.assertTrue(h.backend.was_released)
     def test_eof_interrupts_typing_and_runs_shutdown(self):
@@ -105,29 +105,14 @@ class TransportTests(unittest.TestCase):
             self.assertTrue(h.thread.is_alive())
             self.assertIn('"id": 300',h.output.getvalue())
             self.assertFalse(h.backend.was_shutdown)
-            self.assertFalse(h.backend.stopped.is_set())
+            self.assertFalse(h.backend.cancelled.is_set())
         finally:h.finish()
         replies=list(map(json.loads,h.output.getvalue().splitlines()))
         self.assertEqual(sum('error' in r for r in replies),9)
-    def test_stale_pause_does_not_interrupt_new_session(self):
-        h=Harness()
-        try:
-            h.transport.panel_control('pause',expected_epoch=h.server.control_epoch-1)
-            self.assertEqual(h.server.state,'active')
-            self.assertFalse(h.backend.stopped.is_set())
-            self.assertTrue(h.transport.pending.empty())
-        finally:h.finish()
-    def test_emergency_stop_accepts_stale_toolbar_epoch(self):
-        h=Harness()
-        try:
-            h.transport.panel_control('stop',expected_epoch=h.server.control_epoch-1)
-            self.assertTrue(h.backend.stopped.is_set())
-            self.assertIn(h.server.state,('stopping','stopped'))
-        finally:h.finish()
     def test_stop_surfaces_cleanup_warning_at_tool_boundary(self):
         server=m.Server(Blocking);server.backend=Blocking()
         server.backend.status=lambda:{'active':False,'cleanup_warning':'portal close unconfirmed'}
-        result=server.handle({'id':1,'method':'tools/call','params':{'name':'desktop_stop'}})
+        result=server.handle({'id':1,'method':'tools/call','params':{'name':'desktop_close'}})
         payload=json.loads(result['result']['content'][0]['text'])
         self.assertEqual(payload['cleanup_warning'],'portal close unconfirmed')
 

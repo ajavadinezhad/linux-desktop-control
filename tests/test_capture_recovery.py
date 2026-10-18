@@ -10,7 +10,7 @@ class CaptureRecoveryTests(unittest.TestCase):
  backend=test_control.Tests.backend
  def setup_backend(self):
   d=self.backend();d.pipeline=Pipeline();d.capture_info={};d.restarts=0;d.waits=[]
-  d.pause=lambda seconds:d.waits.append(seconds)
+  d.wait_interruptibly=lambda seconds:d.waits.append(seconds)
   def start():d.check();d.restarts+=1;d.pipeline=Pipeline()
   d._start_capture_pipeline=start
   return d
@@ -34,17 +34,17 @@ class CaptureRecoveryTests(unittest.TestCase):
   self.assertEqual(calls,[False,True]);self.assertEqual(d.restarts,1)
  def test_revoked_session_never_reconnects(self):
   d=self.setup_backend()
-  def capture(new_stream=False):d.stopped.set();raise m.CaptureTimeout('stalled')
+  def capture(new_stream=False):d.cancelled.set();raise m.CaptureTimeout('stalled')
   d._capture_once=capture
-  with self.assertRaisesRegex(RuntimeError,'stopped'):d.capture()
+  with self.assertRaisesRegex(RuntimeError,'closed'):d.capture()
   self.assertEqual(d.restarts,0)
  def test_cancel_during_settling_never_reconnects(self):
   d=self.setup_backend()
   def capture(new_stream=False):raise m.CaptureTimeout('stalled')
   d._capture_once=capture
-  def pause(seconds):d.stopped.set();d.check()
-  d.pause=pause
-  with self.assertRaisesRegex(RuntimeError,'stopped'):d.capture()
+  def interrupted_wait(seconds):d.cancelled.set();d.check()
+  d.wait_interruptibly=interrupted_wait
+  with self.assertRaisesRegex(RuntimeError,'closed'):d.capture()
   self.assertEqual(d.restarts,0)
  def test_other_capture_errors_are_not_retried(self):
   d=self.setup_backend()

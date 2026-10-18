@@ -14,7 +14,7 @@ m=importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
 
 class Fake:
-    def __init__(self): self.stopped=threading.Event(); self.active=False
+    def __init__(self): self.cancelled=threading.Event(); self.active=False
     def start(self): self.active=True
     def status(self): return {'active':self.active,'logical_size':[1920,1080]}
     def capture(self): return b'\x89PNG\r\n\x1a\n'+b'\0'*8+struct.pack('>II',3840,2160)
@@ -33,7 +33,7 @@ class Tests(unittest.TestCase):
         self.assertEqual(p.returncode,0,p.stderr)
         replies=list(map(json.loads,p.stdout.splitlines()))
         self.assertEqual(len(replies),3)
-        self.assertEqual(len(replies[1]['result']['tools']),7)
+        self.assertEqual(len(replies[1]['result']['tools']),5)
         self.assertFalse(json.loads(replies[2]['result']['content'][0]['text'])['active'])
     def test_image_content_and_scaling(self):
         s=m.Server(Fake)
@@ -41,7 +41,7 @@ class Tests(unittest.TestCase):
         self.assertEqual(content[1]['mimeType'],'image/png')
         self.assertTrue(base64.b64decode(content[1]['data']).startswith(b'\x89PNG'))
         self.assertEqual(json.loads(content[0]['text'])['pixel_size'],[3840,2160])
-        s.call('desktop_stop',{})
+        s.call('desktop_close',{})
         self.assertFalse(s.backend.active)
     def test_tool_error_is_protocol_result(self):
         s=m.Server(Fake)
@@ -49,7 +49,7 @@ class Tests(unittest.TestCase):
         self.assertTrue(r['result']['isError'])
     def backend(self):
         d=object.__new__(m.Desktop)
-        d.lock=threading.RLock(); d.stopped=threading.Event(); d.session='/test'
+        d.lock=threading.RLock(); d.cancelled=threading.Event(); d.session='/test'
         d.node=1;d.width=1920;d.height=1080;d.held=[];d.events=[]
         d.call=lambda *args,**kw:d.events.append(args)
         return d
@@ -67,10 +67,10 @@ class Tests(unittest.TestCase):
                 self.assertEqual(d.events,[])
     def test_drag_releases_after_interruption(self):
         d=self.backend()
-        def pause(t):
-            d.stopped.set()
-            raise RuntimeError('stopped')
-        d.pause=pause
+        def interrupted_wait(t):
+            d.cancelled.set()
+            raise RuntimeError('closed')
+        d.wait_interruptibly=interrupted_wait
         with self.assertRaises(RuntimeError): d.action({'type':'drag','path':[[1,1],[20,20]]})
         self.assertFalse(d.held)
         self.assertEqual(d.events[-1][1],'NotifyPointerButton')
@@ -80,7 +80,7 @@ class Tests(unittest.TestCase):
         with self.assertRaises(ValueError):d.action({'type':'drag','path':[[1,1],[5000,20]]})
         self.assertFalse(d.events)
     def test_revocation_blocks_input(self):
-        d=self.backend();d.stopped.set()
+        d=self.backend();d.cancelled.set()
         with self.assertRaises(RuntimeError):d.action({'type':'click','x':1,'y':1})
         self.assertFalse(d.events)
     def test_nonfinite_coordinate_rejected(self):
@@ -102,7 +102,7 @@ class FocusTests(unittest.TestCase):
             d.action({'type':'keys','keys':['Ctrl','a']})
         self.assertFalse(d.events)
     def test_target_acquired_in_same_transaction(self):
-        d=self.backend();d.pause=lambda seconds:None
+        d=self.backend();d.wait_interruptibly=lambda seconds:None
         steps=[];d._primitive=lambda a:steps.append(a)
         d.action({'type':'text','text':'test','focus':{'x':40,'y':50}})
         self.assertEqual(steps[0],{'type':'click','x':40,'y':50})
@@ -120,7 +120,7 @@ class FocusTests(unittest.TestCase):
         self.assertFalse(d.events)
     def test_sequence_stops_before_later_step(self):
         d=self.backend();steps=[]
-        def step(a):steps.append(a);d.stopped.set()
+        def step(a):steps.append(a);d.cancelled.set()
         d._primitive=step
         with self.assertRaises(RuntimeError):
             d.action({'type':'sequence','steps':[{'type':'click','x':10,'y':10},{'type':'text','text':'never'}]})
@@ -163,7 +163,7 @@ class ReliabilityTests(unittest.TestCase):
             if method=='NotifyKeyboardKeysym':raise RuntimeError('injected release failure')
         d.call=call
         self.assertTrue(d.release())
-        self.assertTrue(d.stopped.is_set())
+        self.assertTrue(d.cancelled.is_set())
         self.assertIsNone(d.session)
         self.assertIn('Close',d.events)
         self.assertFalse(d.held)
@@ -178,7 +178,7 @@ class ReliabilityTests(unittest.TestCase):
         self.assertEqual(d.transaction_info['failed_step'],2)
     def test_smooth_move_has_intermediate_points_and_exact_endpoint(self):
         d=self.backend();d.pointer_position=(10,10);points=[]
-        d.position=lambda x,y:points.append((x,y));d.pause=lambda t:None
+        d.position=lambda x,y:points.append((x,y));d.wait_interruptibly=lambda t:None
         d.move_to(100,70,.25)
         self.assertGreater(len(points),5)
         self.assertEqual(points[-1],(100,70))
@@ -186,8 +186,8 @@ class ReliabilityTests(unittest.TestCase):
     def test_smooth_move_interrupts(self):
         d=self.backend();d.pointer_position=(0,0);points=[]
         d.position=lambda x,y:points.append((x,y))
-        def pause(t):raise RuntimeError('stop')
-        d.pause=pause
+        def interrupted_wait(t):raise RuntimeError('stop')
+        d.wait_interruptibly=interrupted_wait
         with self.assertRaises(RuntimeError):d.move_to(100,100,.25)
         self.assertEqual(len(points),1)
         self.assertNotEqual(points[-1],(100,100))
@@ -206,7 +206,7 @@ class UnicodeAndCleanupTests(unittest.TestCase):
     backend=Tests.backend
     def test_unicode_uses_gnome_compose_then_hex_and_commit(self):
         d=self.backend();d.keysym=lambda k:{'Ctrl':1,'Shift':2,'u':3}[k]
-        events=[];d.state=lambda kind,code,down:events.append((code,down));d.pause=lambda t:None
+        events=[];d.state=lambda kind,code,down:events.append((code,down));d.wait_interruptibly=lambda t:None
         d.type_character('é','gnome_unicode')
         self.assertEqual(events[:6],[(1,True),(2,True),(3,True),(3,False),(2,False),(1,False)])
         self.assertEqual(events[6:],[(ord('e'),True),(ord('e'),False),(ord('9'),True),(ord('9'),False),(0xff0d,True),(0xff0d,False)])
@@ -220,7 +220,7 @@ class UnicodeAndCleanupTests(unittest.TestCase):
         def fail(*args,**kwargs):raise RuntimeError('connection lost')
         d.call=fail
         self.assertTrue(d.release())
-        self.assertTrue(d.stopped.is_set())
+        self.assertTrue(d.cancelled.is_set())
         self.assertIn('GNOME indicator',d.cleanup_warning)
 
 class RevocationTests(unittest.TestCase):
@@ -238,6 +238,6 @@ class RevocationTests(unittest.TestCase):
         d=self.backend();d.portal_closed=False
         d.on_session_closed(None,None,'/different',None,None,None,None)
         self.assertFalse(d.portal_closed)
-        self.assertFalse(d.stopped.is_set())
+        self.assertFalse(d.cancelled.is_set())
 
 if __name__=='__main__':unittest.main()

@@ -1,87 +1,27 @@
 # Linux Desktop Control
 
-**0.6.5 candidate files installed; live test blocked.** GNOME still caches the old extension and refuses hot reload. The extension is disabled; save work and manually log out/in before testing. The reported pointer issue is not established as resolved. See [pointer incident and source changes](docs/POINTER_RECOVERY_0_6_5.md).
+Version **0.7.0** is a private local MCP integration using GNOME Wayland's public desktop portal. It is an independent project, not an official OpenAI product.
 
-Consent-based desktop tools for **GNOME 51 on Wayland**, with a small human-operated **Pause · Continue · Stop** toolbar.
+Five tools: `desktop_start`, `desktop_observe`, `desktop_action`, `desktop_status`, `desktop_close`. The final tool releases session resources. Each new session needs personal GNOME monitor/keyboard/pointer consent. GNOME's native sharing control remains available independently.
 
-Version **0.6.5** is an independent local MCP integration for the Codex desktop app. It uses the public XDG Desktop Portal, PipeWire and a user-scoped GNOME extension. It is not an official OpenAI product, and it does not provide universal Linux desktop support.
+An optional indicator-only GNOME extension displays **Mouse is being controlled by ChatGPT** below the pointer while the assistant session is active. It is passive, non-focusable and untracked by the Shell input-region/workarea manager. It disappears on closure, disconnection, lease expiry or disable. It never moves or hides the cursor, captures input or registers shortcuts. The real cursor remains unchanged: a safe public API for directly applying a glow to the hardware cursor has not been established. No surrounding ring or duplicate cursor is drawn.
 
-## What it does
-
-- Observes one personally selected primary monitor and operates keyboard/pointer input.
-- Keeps a visible human control toolbar outside assistant-clickable space.
-- Closes capture and input on Pause; Continue requires fresh personal sharing consent and a fresh assistant observation.
-- Stops queued work, releases held input, closes sharing and clears the in-memory handoff on Stop.
-- Optionally binds keyboard input to a short-lived, single-use accessible control identity. Changed, protected or unsupported targets are refused when a guard is requested. Multiple reported active windows are accepted only when exactly one focused editable control is found.
-
-**No root input devices, remote listener, clipboard access, unattended consent, or private GNOME Shell Eval.**
-
-## Compatibility
-
-Validated environment: Ubuntu GNOME Shell **51**, Wayland, system Python 3 with PyGObject/Gio/GLib/GStreamer, PipeWire, GNOME's desktop portal, and libxkbcommon. The GStreamer elements `pipewiresrc`, `queue`, `videorate`, `videoconvert`, `pngenc` and `appsink` must be available. GTK fixture tests additionally use GTK3/GTK4 and Pillow.
-
-Actual assistant tests passed GNOME Text Editor multilingual editing/save/reopen and separate windows, human Pause/Continue reconciliation, and Chrome 155 local ASCII form/scroll/download workflows. Version 0.6.1 passed guarded typing in a GTK4 editor and Save filename field, an exact 20-byte saved file, and stale-token rejection with zero delivered events. Other GNOME versions, other desktops, browser Unicode/native browser dialogs, Firefox, Qt and Electron are unverified. See [validation and limitations](docs/VALIDATION.md).
+Core control has no extension prerequisite. `indicator_warning` explicitly reports an unavailable label. Loading a newly installed GNOME extension can require a manual logout/login; the installer never restarts the session. No live input acceptance of 0.7.0 has been performed.
 
 ## Install
 
-Keep this checkout in a stable folder, then run:
+Run `./install.sh --check` for read-only environment checks, then `./install.sh` to prepare paths, copy the optional indicator and install the local plugin. Refresh the app's MCP connection after updating; already connected chats can retain an older catalog. The optional indicator installer is `python3 install-indicator.py`. Remove only that indicator with `python3 uninstall-indicator.py`.
 
-```sh
-./install.sh
-```
+## Use
 
-Run `./install.sh --check` first for read-only environment checks. Normal installation also refuses missing requirements before any changes. The installer resolves the local server path, installs the user-scoped extension `desktop-toolbar@local.codex`, and registers the local plugin marketplace. It preserves other enabled extensions. Set `CODEX_BIN` if your Codex executable is not `/usr/lib/chatgpt/resources/codex`.
+Inspect each fresh screenshot before input. Coordinates use logical monitor units. Keyboard/text input must acquire focus in the same call. Bounded sequences allow 1–8 steps and begin with an observed click or a visible focus shortcut. Discrete wheel steps and paced Unicode composition are supported; clipboard access is absent. Initial pointer motion can jump because the portal exposes no reliable pointer position; the label's position is not a tool observation. Dispatch does not prove semantic success.
 
-First extension discovery may require you to save your work and log out/in. The installer never restarts your desktop. Refresh the app's MCP connection after installation. Check that `desktop_status` reports version 0.6.5 and that the optional `inspect_target` / `target_id` arguments are present.
+After uncertain input, obtain and inspect `desktop_observe` and pass its recovery token before further input. Never replay automatically. Optional accessibility identities are single-use and refuse ambiguous/protected/stale controls without fallback. Some connections return AccessDenied.
 
-Ask the assistant to perform a disposable task. Personally select one primary monitor and enable keyboard/pointer control in GNOME. The assistant must never approve that sharing dialog or click Pause/Continue/Stop for you.
+Call `desktop_close` on completion or error and check `portal_closed_confirmed` and `cleanup_warning`. Cancellation, client disconnection, process termination and idle expiry also close the session. Portal closure is attempted before bounded capture teardown. Blocking OS calls can still delay cleanup; use GNOME's native sharing control if closure cannot be confirmed. The portal does not reliably distinguish human from synthetic input; moving the physical mouse alone is not an automatic cancellation signal.
 
-## Tools
+## Verify
 
-| Tool | Purpose |
-| --- | --- |
-| `desktop_status` | State metadata without capture; bounded foreground state waiting |
-| `desktop_start` | New personal GNOME sharing session and first image |
-| `desktop_observe` | Fresh image; optional editable-control identity |
-| `desktop_action` | One bounded, interruptible input transaction and fresh image |
-| `desktop_pause` | Close sharing and retain a nonsecret task handoff |
-| `desktop_resume` | Resume only after explicit human readiness and new consent |
-| `desktop_stop` | Release input, close sharing and clear handoff |
+`/usr/bin/python3 -m unittest discover -s tests` checks input validation, release/cancellation/disconnect behavior, fresh capture recovery, target identity and uncertain-input reconciliation without sharing. `python3 tests/check_loader.py` checks the real app loader and all five schemas in a temporary Codex home. The indicator bridge has isolated transport tests; the new extension has no live-host acceptance. Do not run a headless GNOME compositor on a live user manager: it can change activation display settings even with a private D-Bus bus. Use a separate test environment for graphical tests.
 
-Inspect every returned image. A dispatched transaction is not proof of semantic app success. After uncertain partial input, inspect a new observation and acknowledge its recovery token before deciding the next action. Never automatically replay an uncertain save/send. Input batches are interruptible, not atomic or reversible transactions.
-
-Continue can restore sharing for an active foreground assistant waiting on status. **It cannot wake an assistant turn that has already ended.** Send a new chat message in that case.
-
-## Repeated host approvals
-
-App tool approval and GNOME sharing consent are separate. The host supports persisted approval for individual plugin tools in the user config; installation does not silently grant this permission. See [configuration](docs/INSTALLATION.md#optional-standing-tool-authorization) for an explicit opt-in scoped to the seven existing tools. A post-app-restart test completed eight actual tool calls without host approval prompts; GNOME consent remained required.
-
-## Demo and privacy
-
-[Demo instructions](demo/README.md) use only disposable text and an optional consented, silent WebM recorder. No personal footage or historic desktop screenshots are included in this repository. The recorder is independent of desktop control; stop it before leaving the clean demo window.
-
-The backend normally keeps images in memory and returns them to the MCP host. The host's conversation history may retain those images. Accessibility checks read identity/state/geometry, not accessible names, text values, selections, passwords or clipboard contents. See [privacy](docs/PRIVACY.md) and [architecture](docs/ARCHITECTURE.md).
-
-## Test
-
-```sh
-/usr/bin/python3 -m unittest discover -s tests -p 'test_*.py'
-/usr/bin/python3 tests/check_loader.py
-```
-
-The unit suite contains 172 tests. The loader test uses a temporary Codex home, loads the real installed client, checks all seven tool schemas, and never requests desktop sharing. Isolated toolbar rendering can be tested with `dbus-run-session -- /usr/bin/python3 tests/check_toolbar_shell.py`; this refuses an existing GNOME Shell bus. On a dbus-broker host without dbus-run-session, use `python3 tests/check_private_toolbar.py`. JavaScript feedback regressions use Node.js (`NODE_BIN` can select its path). Live human acceptance is separate from unit and isolated rendering tests.
-
-## Remove
-
-Stop sharing first. Then:
-
-```sh
-/usr/bin/python3 uninstall-toolbar.py
-/usr/lib/chatgpt/resources/codex plugin remove linux-desktop-control@local-linux-desktop
-```
-
-Use your configured `CODEX_BIN` path if different. Remove any standing approval entries you added. This removes only this extension/plugin; it leaves your source checkout and other extensions intact.
-
-## License
-
-A license has not yet been selected by the project owner. No license grant is implied by this private release preparation. The owner intends compensation for commercial use; terms are pending. Dependencies retain their own licenses. See [licensing review](docs/LICENSING_REVIEW.md), especially the GNOME Shell extension constraint.
+Source remains private; reuse licensing is deferred. No compensation or distribution terms are assigned. See docs/LICENSING_REVIEW.md.

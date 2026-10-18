@@ -1,7 +1,6 @@
 #!/usr/bin/python3
 """GNOME Wayland desktop backend. No root privileges or private compositor APIs."""
 import base64
-import hashlib
 import ctypes
 import json
 import math
@@ -14,17 +13,11 @@ import time
 import uuid
 import importlib.util
 
-def load_toolbar_bridge():
-    path=os.path.join(os.path.dirname(__file__),"toolbar_bridge.py")
-    spec=importlib.util.spec_from_file_location("desktop_panel_bridge",path)
-    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
-    return module.ToolbarBridge
-
 import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import Gio, GLib, Gst
 
-VERSION = '0.6.5'
+VERSION = '0.7.0'
 DEST = 'org.freedesktop.portal.Desktop'
 PATH = '/org/freedesktop/portal/desktop'
 RD = 'org.freedesktop.portal.RemoteDesktop'
@@ -44,7 +37,7 @@ class Desktop:
         self.fd = None
         self.closed_sub = None
         self.portal_closed = False
-        self.stopped = threading.Event()
+        self.cancelled = threading.Event()
         self.lock = threading.RLock()
         self.held = []
         self.last_used = time.monotonic()
@@ -57,10 +50,10 @@ class Desktop:
 
     def _watchdog(self):
         while not self.shutdown_requested:
-            if self.stopped.wait(.05) or (self.session and time.monotonic()-self.last_used > 300):
+            if self.cancelled.wait(.05) or (self.session and time.monotonic()-self.last_used > 300):
                 with self.lock:
-                    if self.stopped.is_set() or (self.session and time.monotonic()-self.last_used > 300):
-                        self.stopped.set()
+                    if self.cancelled.is_set() or (self.session and time.monotonic()-self.last_used > 300):
+                        self.cancelled.set()
                         self.close()
                 time.sleep(.05)
 
@@ -86,7 +79,7 @@ class Desktop:
                 raise RuntimeError('Portal did not honor request handle token')
             deadline = time.monotonic() + 120
             while not done.wait(.05):
-                if self.stopped.is_set() or (getattr(self,'request_cancel',None) and self.request_cancel.is_set()) or time.monotonic() > deadline:
+                if self.cancelled.is_set() or (getattr(self,'request_cancel',None) and self.request_cancel.is_set()) or time.monotonic() > deadline:
                     self.call('org.freedesktop.portal.Request', 'Close', '()', (), path=actual)
                     raise RuntimeError('Portal request stopped or timed out')
             code, data = result
@@ -98,13 +91,15 @@ class Desktop:
 
     def start(self):
         with self.lock:
-            if self.session and not self.stopped.is_set():
+            if self.session and not self.cancelled.is_set():
                 return self.status()
             self.close()
+            if self.session is not None:raise RuntimeError('Previous portal closure is unconfirmed; end sharing in GNOME before a new session')
+            self.cleanup_warning=None
             self.portal_closed = False
-            self.stopped.clear()
+            self.cancelled.clear()
             if getattr(self,'request_cancel',None) and self.request_cancel.is_set():
-                self.stopped.set()
+                self.cancelled.set()
                 raise RuntimeError('Desktop start cancelled before permission request')
             self.last_used = time.monotonic()
             try:
@@ -158,14 +153,14 @@ class Desktop:
         if path==self.session:
             self.portal_closed=True
             self.cleanup_warning=None
-            self.stopped.set()
+            self.cancelled.set()
 
     def status(self):
-        return {'active': bool(self.session) and not self.stopped.is_set(),
+        return {'active': bool(self.session) and not self.cancelled.is_set(),
                 'monitor': self.monitor_geometry(),
                 'pid': os.getpid(), 'idle_timeout_seconds': 300,
                 'logical_size': [getattr(self,'width',0), getattr(self,'height',0)],
-                'stop': f'kill -USR1 {os.getpid()}',
+
                 'cleanup_warning':getattr(self,'cleanup_warning',None),
                 'portal_closed_confirmed':getattr(self,'portal_closed',False) or (self.session is None and not getattr(self,'cleanup_warning',None))}
 
@@ -176,16 +171,16 @@ class Desktop:
         return None
 
     def check(self):
-        if getattr(self,'request_cancel',None) and self.request_cancel.is_set():self.stopped.set()
-        if self.stopped.is_set() or not self.session:
-            raise RuntimeError('Desktop session is stopped; call desktop_start for new consent')
+        if getattr(self,'request_cancel',None) and self.request_cancel.is_set():self.cancelled.set()
+        if self.cancelled.is_set() or not self.session:
+            raise RuntimeError('Desktop session is closed; call desktop_start for new consent')
         if getattr(self,'action_deadline',None) and time.monotonic()>self.action_deadline:
             raise RuntimeError('Input sequence exceeded 15 seconds; stopped before next event')
         self.last_used = time.monotonic()
 
-    def pause(self, seconds):
-        if self.stopped.wait(seconds):
-            raise RuntimeError('Desktop control stopped')
+    def wait_interruptibly(self, seconds):
+        if self.cancelled.wait(seconds):
+            raise RuntimeError('Desktop session closed')
         self.check()
 
     def capture(self):
@@ -198,7 +193,7 @@ class Desktop:
                 self.check()
                 self.pipeline.set_state(Gst.State.NULL)
                 self.pipeline=None
-                self.pause(.35)
+                self.wait_interruptibly(.35)
                 self._start_capture_pipeline()
                 png=self._capture_once(new_stream=True)
                 self.capture_info['pipeline_reconnected']=True
@@ -259,7 +254,7 @@ class Desktop:
             t=i/count
             blend=t*t*(3-2*t)
             self.position(start[0]+(x-start[0])*blend,start[1]+(y-start[1])*blend)
-            self.pause(seconds/count)
+            self.wait_interruptibly(seconds/count)
 
     def state(self, kind, code, down):
         method = 'NotifyKeyboardKeysym' if kind == 'key' else 'NotifyPointerButton'
@@ -280,7 +275,7 @@ class Desktop:
                 self.call(RD, method, '(oa{sv}iu)', (self.session, {}, code, 0))
             except Exception:
                 failed=True
-                self.stopped.set()
+                self.cancelled.set()
                 # Fail closed: remove the portal's virtual input devices instead
                 # of silently continuing with a potentially held button/key.
                 try:
@@ -311,18 +306,18 @@ class Desktop:
         if code>127 and mode=='gnome_unicode':
             chord=[self.keysym(k) for k in ('Ctrl','Shift','u')]
             for sym in chord:self.state('key',sym,True)
-            self.pause(.02)
+            self.wait_interruptibly(.02)
             for sym in reversed(chord):self.state('key',sym,False)
-            self.pause(.1)
+            self.wait_interruptibly(.1)
             for digit in format(code,'x'):
                 self.state('key',ord(digit),True);self.state('key',ord(digit),False)
-                self.pause(.015)
+                self.wait_interruptibly(.015)
             self.state('key',0xff0d,True);self.state('key',0xff0d,False)
-            self.pause(.1)
+            self.wait_interruptibly(.1)
         else:
             sym={'\n':0xff0d,'\t':0xff09}.get(char,code if 0x20<=code<=0xff else 0x01000000|code)
             self.state('key',sym,True);self.state('key',sym,False)
-            self.pause(.005)
+            self.wait_interruptibly(.005)
 
     def validate_action(self, a, in_sequence=False):
         if not isinstance(a, dict): raise ValueError('Action must be an object')
@@ -417,7 +412,7 @@ class Desktop:
                     self.check()
                     if 'focus' in step:
                         self._primitive({'type':'click',**step['focus']})
-                        self.pause(.15)
+                        self.wait_interruptibly(.15)
                     if target is not None:
                         if index==0 and step['type']=='click':
                             self._primitive(step);target.acquire();acquired=True
@@ -451,9 +446,9 @@ class Desktop:
                     if count not in (1,2,3): raise ValueError('count must be 1..3')
                     for _ in range(count):
                         self.state('button',button,True)
-                        self.pause(.04)
+                        self.wait_interruptibly(.04)
                         self.state('button',button,False)
-                        self.pause(.07)
+                        self.wait_interruptibly(.07)
                 elif kind == 'scroll':
                     dx, dy = float(a.get('dx',0)), float(a.get('dy',0))
                     if not all(map(math.isfinite,(dx,dy))) or max(abs(dx),abs(dy)) > 2000:
@@ -466,7 +461,7 @@ class Desktop:
                         raise ValueError('Provide 1..8 key names')
                     syms = [self.keysym(k) for k in keys]
                     for sym in syms: self.state('key',sym,True)
-                    self.pause(.04)
+                    self.wait_interruptibly(.04)
                     for sym in reversed(syms): self.state('key',sym,False)
                 elif kind == 'text':
                     value = a['text']
@@ -487,52 +482,53 @@ class Desktop:
                     self.state('button',272,True)
                     for point in path[1:]:
                         self.position(*point)
-                        self.pause(.02)
+                        self.wait_interruptibly(.02)
                     self.state('button',272,False)
                 elif kind == 'wait':
                     seconds = float(a.get('seconds',.2))
                     if not math.isfinite(seconds) or not 0<=seconds<=5:
                         raise ValueError('Wait must be 0..5 seconds')
-                    self.pause(seconds)
+                    self.wait_interruptibly(seconds)
                 elif kind != 'move' and kind not in ('click','scroll'):
                     raise ValueError('Unknown action type')
-                self.pause(.1)
+                self.wait_interruptibly(.1)
             finally:
                 if self.release():
-                    raise RuntimeError('Input release failed; control stopped and portal closure attempted. Check desktop_status and GNOME sharing indicator.')
+                    raise RuntimeError('Input release failed; session closed and portal closure attempted. Check desktop_status and GNOME sharing indicator.')
 
     def close(self):
         with self.lock:
-            self.stopped.set()
-            try:self.release()
-            except Exception:self.cleanup_warning='Input release failed; portal closure attempted. Check sharing.'
-            # Always attempt portal closure even when capture/fd cleanup fails.
-            if self.pipeline:
-                try:self.pipeline.set_state(Gst.State.NULL)
-                except Exception:self.cleanup_warning='Capture shutdown failed; portal closure attempted. Check sharing.'
-                finally:self.pipeline=None
-            if self.fd is not None:
-                try:os.close(self.fd)
-                except OSError:self.cleanup_warning='Capture descriptor cleanup failed; portal closure attempted. Check sharing.'
-                finally:self.fd=None
+            self.cancelled.set()
+            # Close virtual devices before capture teardown, which can stall in Gst.
             if self.session:
                 if not getattr(self,'portal_closed',False):
-                    try:
-                        self.call('org.freedesktop.portal.Session','Close','()',(),path=self.session)
-                        self.portal_closed=True
-                    except Exception:
-                        if not getattr(self,'portal_closed',False):
-                            self.cleanup_warning='Portal closure could not be confirmed. Use the GNOME sharing indicator to stop sharing.'
-                self.session=None
+                    try:self.call('org.freedesktop.portal.Session','Close','()',(),path=self.session);self.portal_closed=True
+                    except Exception:self.cleanup_warning='Portal closure could not be confirmed. End sharing in GNOME.'
+                if getattr(self,'portal_closed',False):self.session=None
+            try:self.release()
+            except Exception:self.cleanup_warning='Input release failed; portal closure attempted. Check GNOME sharing.'
+            if self.fd is not None:
+                try:os.close(self.fd)
+                except OSError:self.cleanup_warning='Capture descriptor cleanup failed; portal closure attempted.'
+                finally:self.fd=None
+            pipeline=self.pipeline;self.pipeline=None
+            if pipeline:
+                done=threading.Event();failure=[]
+                def teardown():
+                    try:pipeline.set_state(Gst.State.NULL)
+                    except Exception:failure.append(True)
+                    finally:done.set()
+                threading.Thread(target=teardown,daemon=True).start()
+                if not done.wait(2) or failure:self.cleanup_warning='Capture teardown incomplete; check GNOME sharing. Virtual session closure was attempted first.'
             if self.closed_sub:
                 try:self.bus.signal_unsubscribe(self.closed_sub)
-                except Exception:self.cleanup_warning='Portal signal cleanup failed. Check sharing.'
+                except Exception:self.cleanup_warning='Portal signal cleanup failed; check GNOME sharing.'
                 finally:self.closed_sub=None
             self.pointer_position=None
 
     def shutdown(self):
         self.shutdown_requested = True
-        self.stopped.set()
+        self.cancelled.set()
         self.close()
         self.loop.quit()
 
@@ -561,19 +557,13 @@ ACTION_SCHEMA['properties']['type']['enum'].append('sequence')
 ACTION_SCHEMA['properties']['steps']={'type':'array','items':STEP_SCHEMA,'minItems':1,'maxItems':8}
 
 def tools():
-    specs = [
-      ('desktop_start','Request GNOME permission for one monitor, keyboard and mouse; return screenshot. Optional nonsecret task_summary preserves intent if the human presses Pause.',{'task_summary':{'type':'string','minLength':1,'maxLength':1000}}),
-      ('desktop_observe','Return fresh PNG and dimensions. Optional inspect_target=true binds an opaque single-use identity to the currently focused editable accessibility control, without reading names/text/values. Inspect image before using target_id; unavailable accessibility is explicit.',{'inspect_target':{'type':'boolean'}}),
-      ('desktop_action','Perform one approved desktop transaction and return a fresh screenshot. Approval may focus ChatGPT: text/keys require focus:{x,y} to click the target in THIS call. Alternatively type=sequence with 1..8 steps, starting with a target click or keys:[Alt,F2]/[Super], then text/keys without another approval. Never split focus acquisition and typing across calls. Sequences are bounded, interruptible, not rollback-atomic. Coordinates use logical_size, relative to selected monitor. Scrolling uses discrete wheel steps: integer dx/dy in -50..50, positive dy down. Smooth pixels are unsupported. Text defaults to GNOME Unicode composition for non-ASCII; text_mode=keysyms is optional but may drop unsupported characters. Verify the exact rendered text. Within one sequence, later pointer moves/clicks interpolate from the known current point; the first movement may jump after approval. Drag uses path of [x,y]. Keys is a simultaneous chord, e.g. [Ctrl,a]. Text entry does not change the clipboard.',{'action':ACTION_SCHEMA,'target_id':{'type':'string','minLength':32,'maxLength':32,'description':'Optional single-use identity from desktop_observe(inspect_target=true). Reject vanished, hidden, changed or wrongly focused controls; no coordinate fallback. Use focus or initial click to reacquire the observed window after approval, then exact control focus is checked before keys. Expires after60seconds and any input/observe/Pause/Stop. Guarded text is limited to32characters across the action; accessibility latency is extra and may cause an honest partial result at the15second dispatch deadline.'},'recovery_observation_id':{'type':'string','description':'After uncertain input, inspect desktop_observe image and pass the returned recovery.observation_id before deciding another action.'},'task_checkpoint':{'type':'object','description':'Nonsecret confirmed progress before this action and remaining intent; never action payloads or credentials.','properties':{'completed_summary':{'type':'string','maxLength':1000},'next_step':{'type':'string','minLength':1,'maxLength':1000}},'required':['completed_summary','next_step'],'additionalProperties':False}}),
-      ('desktop_pause','Hand the desktop back to the human for any needed input, judgment, information or human-only action. Interrupt current work, invalidate queued input/capture, release input and close the portal. No screenshots while paused. Explain the reason to the user; never include credentials in context.',{'reason':{'type':'string','minLength':1,'maxLength':500},'task_summary':{'type':'string','minLength':1,'maxLength':1000},'handoff_kind':{'type':'string','enum':['human_action','background_wait','manual_takeover']},'job_reference':{'type':'string','maxLength':500}}),
-      ('desktop_resume','Only after the human explicitly says ready/continue: resume this handoff, request fresh GNOME consent and return a fresh screenshot before any input. Never resume on elapsed time or guess that the human finished. No cached pointer/window assumptions.',{'handoff_id':{'type':'string'},'human_ready':{'type':'boolean','const':True}}),
-      ('desktop_stop','Release input, close capture/control, and clear in-memory handoff context. Full status includes cleanup warnings.',{}),
-      ('desktop_status','Get state without capturing. For an unfinished foreground task, pass the last status_revision as wait_after and timeout_seconds (1–50) to wait for a control/task state change. This never resumes or captures; Continue and consent are still human actions. Reissue after timeout while the task remains pending.',{'wait_after':{'type':'string','maxLength':64},'timeout_seconds':{'type':'number','minimum':1,'maximum':50}})]
-    return [{'name':n,'description':d,'inputSchema':{'type':'object','properties':p,
-             'required':[k for k in p if k not in ('recovery_observation_id','task_checkpoint','target_id') and n not in ('desktop_start','desktop_status','desktop_observe') and (n!='desktop_pause' or k in ('reason','task_summary'))],'additionalProperties':False},
-             'annotations':{'readOnlyHint':n in ('desktop_status','desktop_observe'),
-                            'destructiveHint':n=='desktop_action','openWorldHint':True}}
-            for n,d,p in specs]
+    specs=[
+      ('desktop_start','Request personal GNOME consent for one monitor, keyboard and pointer; return a fresh screenshot.',{}),
+      ('desktop_observe','Return a fresh screenshot and dimensions. Optional inspect_target binds a single-use editable accessibility identity; inspect before input.',{'inspect_target':{'type':'boolean'}}),
+      ('desktop_action','Perform bounded input and return a fresh screenshot. Text/keys need same-call focus or a sequence beginning with a target click/focus shortcut. Coordinates use logical_size. Discrete wheel steps only. Text uses GNOME Unicode composition by default; verify actual results. Never replay uncertain input.',{'action':ACTION_SCHEMA,'target_id':{'type':'string','minLength':32,'maxLength':32},'recovery_observation_id':{'type':'string'}}),
+      ('desktop_status','Read session and cleanup state without capturing or sending input.',{}),
+      ('desktop_close','Close this session and release virtual input, capture and the portal. This is resource cleanup; a later session requires fresh GNOME consent.',{})]
+    return [{'name':n,'description':d,'inputSchema':{'type':'object','properties':props,'required':['action'] if n=='desktop_action' else [],'additionalProperties':False},'annotations':{'readOnlyHint':n in ('desktop_status','desktop_observe'),'destructiveHint':n=='desktop_action','openWorldHint':True}} for n,d,props in specs]
 
 class RecoveryLedger:
     """Bounded, nonsecret action outcome metadata; never replay desktop input."""
@@ -612,30 +602,59 @@ class RecoveryLedger:
         if self.inspection_required:self.observation_id=uuid.uuid4().hex
 
 class Server:
-    def __init__(self, factory=Desktop):
-        self.factory=factory
-        self.backend=None
-        self.cancel_token=None
-        self.request_epoch=None
-        self.boundary_prepared=False
-        self.state_lock=threading.RLock()
-        self.control_epoch=0
-        self.state='stopped'
-        self.handoff=None
-        self.recovery=RecoveryLedger()
-        self.panel=None
-        self.task_summary="Desktop task; consult the conversation before continuing"
-        self.panel_control=None
-        self.panel_resume=False
-        self.toolbar_session_ready=False
-        self.toolbar_geometry=None
-        self.awaiting_assistant_observation=False
-        self.task_checkpoint=None
-        self.resume_event=None
-        self.operation_active=False
-        self.target_provider=None
-        self.target_record=None
-        self.target_cleanup_warning=None
+    def __init__(self,factory=Desktop):
+        self.factory=factory;self.backend=None;self.cancel_token=None;self.request_epoch=None
+        self.state_lock=threading.RLock();self.generation=0;self.state='closed'
+        self.recovery=RecoveryLedger();self.target_provider=None;self.target_record=None
+        self.target_cleanup_warning=None;self.indicator=None;self.indicator_warning=None
+
+    def invalidate(self):
+        if self.backend:self.backend.cancelled.set()
+        with self.state_lock:
+            self.generation+=1;self.state='closing';self.target_record=None
+
+    def guard(self,allowed=None):
+        if self.request_epoch is not None and self.request_epoch!=self.generation:
+            raise RuntimeError('Request invalidated by session closure')
+        if self.cancel_token is not None and self.cancel_token.is_set():
+            if self.backend:self.backend.cancelled.set()
+            raise RuntimeError('Request cancelled before further input/capture')
+        if allowed is not None and self.state not in allowed:raise RuntimeError('Desktop session is not active')
+
+    def status(self):
+        raw=self.backend.status() if self.backend else {'active':False,'portal_closed_confirmed':True}
+        active=bool(raw.get('active')) and self.state=='active'
+        if not active and self.state=='active':self.state='closed'
+        result=dict(raw,server_version=VERSION,active=active,session_state=self.state,
+            capture_allowed=active,input_allowed=active and not self.recovery.inspection_required,
+            recovery=self.recovery.snapshot(),fresh_observation_required=not active or self.recovery.inspection_required)
+        if not active:result['logical_size']=[0,0]
+        if self.target_cleanup_warning:result['accessibility_cleanup_warning']=self.target_cleanup_warning
+        if self.indicator_warning:result['indicator_warning']=self.indicator_warning
+        return result
+
+    def show_indicator(self):
+        if self.factory is not Desktop:return
+        try:
+            path=os.path.join(os.path.dirname(__file__),'indicator_bridge.py')
+            spec=importlib.util.spec_from_file_location('desktop_indicator',path)
+            module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+            self.indicator=module.IndicatorBridge(self.status)
+            self.indicator.start();self.indicator_warning=None
+        except Exception:
+            if self.indicator:self.indicator.close()
+            self.indicator=None;self.indicator_warning='Passive pointer label unavailable in this session; core desktop control has no extension prerequisite.'
+
+    def close_backend(self):
+        if self.indicator:self.indicator.close();self.indicator=None
+        if self.backend:self.backend.cancelled.set();self.backend.close();self.backend.pointer_position=None
+        self.target_record=None;self.close_target_provider();self.state='closed'
+
+    def ensure_backend(self):
+        self.guard()
+        if self.backend is None:self.backend=self.factory()
+        self.backend.request_cancel=self.cancel_token
+        self.guard()
 
     def close_target_provider(self):
         provider=self.target_provider;self.target_provider=None
@@ -643,6 +662,7 @@ class Server:
             try:confirmed=provider.close() is not False
             except Exception:confirmed=False
             self.target_cleanup_warning=None if confirmed else 'Accessibility connection closure unconfirmed; target access is disabled.'
+
 
     def inspect_keyboard_target(self):
         self.target_gate()
@@ -654,268 +674,36 @@ class Server:
         self.target_gate()
         return self.target_provider.snapshot(self.target_gate)
 
+
     def target_gate(self):
         self.guard(('active',))
         if callable(getattr(self.backend,'check',None)):self.backend.check()
 
-    def prepare_toolbar(self):
-        if self.panel_control and self.factory is Desktop:
-            if self.panel is None:self.panel=load_toolbar_bridge()(self.status,self.panel_control)
-            self.panel.preflight(self.guard)
-
-    def ensure_panel(self):
-        if self.panel_control and self.factory is Desktop:
-            if self.panel is None:self.panel=load_toolbar_bridge()(self.status,self.panel_control)
-            if not self.panel.bound:self.panel.start(self.guard)
-        if self.panel and (self.panel.failed or not self.panel.bound):
-            raise RuntimeError('Desktop toolbar unavailable; enable its GNOME extension and reconnect the MCP server')
-        if self.panel:self.panel.wait_visible(self.guard)
-
-    def protect_toolbar(self,action):
-        if not self.panel:return
-        try:diagnostics=self.panel.diagnostics()
-        except Exception:
-            self.panel.fail()
-            raise RuntimeError('Toolbar connection lost; desktop input refused')
-        if diagnostics.get('visible') is not True:
-            raise RuntimeError('Toolbar is hidden by system UI; observe and reassess before input')
-        rect=diagnostics.get('rect');monitor=diagnostics.get('monitor_bounds')
-        if not isinstance(rect,list) or len(rect)!=4 or not isinstance(monitor,dict):
-            raise RuntimeError('Toolbar geometry unavailable; desktop input refused')
-        position=getattr(self.backend,'props',{}).get('position')
-        ox,oy=position if isinstance(position,(tuple,list)) and len(position)==2 else (monitor['x'],monitor['y'])
-        left,top,width,height=rect
-        self.toolbar_geometry={'excluded_rect':[left-ox,top-oy,width,height]}
-        def check(a):
-            points=[]
-            if 'x' in a and 'y' in a:points.append((a['x'],a['y']))
-            if isinstance(a.get('focus'),dict):points.append((a['focus'].get('x'),a['focus'].get('y')))
-            points.extend(a.get('path',[]))
-            for point in points:
-                if len(point)!=2:continue
-                x,y=point
-                if isinstance(x,(int,float)) and isinstance(y,(int,float)) and left<=x+ox<left+width and top<=y+oy<top+height:
-                    raise ValueError('Synthetic input cannot target the human toolbar; choose an app target outside its excluded rectangle')
-            for step in a.get('steps',[]):check(step)
-        check(action)
-
-    @staticmethod
-    def validate_handoff(args):
-        for key,limit in (('reason',500),('task_summary',1000)):
-            value=args.get(key)
-            if not isinstance(value,str) or not value.strip() or len(value)>limit:
-                raise ValueError(f'{key} must be nonempty text of at most {limit} characters; do not include credentials')
-
-        if args.get('handoff_kind','human_action') not in ('human_action','background_wait','manual_takeover'):
-            raise ValueError('Unknown handoff kind')
-        if not isinstance(args.get('job_reference',''),str) or len(args.get('job_reference',''))>500:
-            raise ValueError('job_reference must be at most 500 characters; no secrets')
-
-    def begin_boundary(self,name,args):
-        if name=='desktop_pause':self.validate_handoff(args)
-        # Cooperative interruption does not wait for resource cleanup/state writes.
-        if self.backend:self.backend.stopped.set()
-        with self.state_lock:
-            self.control_epoch+=1
-            self.target_record=None
-            self.state='pausing' if name=='desktop_pause' else 'stopping'
-            if name=='desktop_pause':
-                self.handoff={'id':uuid.uuid4().hex,'reason':args['reason'].strip(),
-                    'task_summary':args['task_summary'].strip(),
-                    'kind':args.get('handoff_kind','human_action'),
-                    'job_reference':args.get('job_reference','').strip(),
-                    'task_checkpoint':dict(self.task_checkpoint) if self.task_checkpoint else None}
-            else:self.handoff=None
-            return self.control_epoch
-
-    def admission_error(self,name):
-        with self.state_lock:
-            if name in ('desktop_action','desktop_observe') and self.state!='active':
-                return 'Desktop input/capture is not active; paused work requires explicit desktop_resume and a fresh observation'
-            if name=='desktop_resume' and self.state!='paused':
-                return 'Resume is accepted only after pause completed and the human explicitly said ready/continue'
-            if name=='desktop_start' and self.state not in ('stopped','active'):
-                return 'desktop_start cannot bypass a handoff; use desktop_resume after explicit human readiness'
-        return None
-
-    def guard(self,allowed=None,ignore_cancel=False):
-        with self.state_lock:
-            if self.request_epoch is not None and self.request_epoch!=self.control_epoch:
-                raise RuntimeError('Request invalidated by a later pause/stop; obtain a fresh observation after explicit resume')
-            if not ignore_cancel and self.cancel_token is not None and self.cancel_token.is_set():
-                if self.backend:self.backend.stopped.set()
-                raise RuntimeError('Request cancelled before further desktop input/capture')
-            if allowed is not None and self.state not in allowed:
-                raise RuntimeError('Desktop is '+self.state+'; input and capture require an active session')
-
-    @staticmethod
-    def validate_task_checkpoint(value):
-        if not isinstance(value,dict) or set(value)!={'completed_summary','next_step'}:
-            raise ValueError('task_checkpoint requires only completed_summary and next_step; no action payloads or credentials')
-        for key in ('completed_summary','next_step'):
-            if not isinstance(value[key],str) or len(value[key])>1000:
-                raise ValueError('Use nonsecret checkpoint summaries of at most 1000 characters')
-        if not value['next_step'].strip():raise ValueError('Checkpoint next_step must name remaining work')
-        return {key:value[key].strip() for key in ('completed_summary','next_step')}
-
-    def task_status(self,active):
-        if self.state in ('paused','pausing'):phase='wait'
-        elif self.state in ('starting','resuming'):phase='consent'
-        elif self.state in ('stopped','stopping'):phase='end'
-        elif self.operation_active:phase='working'
-        elif active and (self.awaiting_assistant_observation or (self.recovery.inspection_required and not self.recovery.observation_id)):phase='observe'
-        elif active and self.recovery.inspection_required:phase='plan_ack'
-        else:phase='waiting_executor'
-        task=dict(self.task_checkpoint) if self.task_checkpoint else None
-        if task:
-            task['last_result_id']=(self.recovery.last or {}).get('result_id')
-            task['epoch']=self.control_epoch
-        return {'task':task,'resume_event':dict(self.resume_event) if self.resume_event else None,
-                'operation_active':self.operation_active,'next_required_action':phase,
-                'executor_note':'Toolbar Continue restores consented sharing only. An active foreground assistant must observe and continue the remaining intent; an idle assistant needs a new chat message.'}
-
-    def status(self):
-        with self.state_lock:
-            raw=self.backend.status() if self.backend else {'active':False,'portal_closed_confirmed':True}
-            if self.state=='active' and not raw.get('active'):
-                self.state='stopped'
-            active=self.state=='active' and raw.get('active',False)
-            result=dict(raw,server_version=VERSION,active=active,control_state=self.state,control_epoch=self.control_epoch,
-                toolbar=self.toolbar_geometry,toolbar_session_ready=self.toolbar_session_ready,capture_allowed=active,input_allowed=active and not self.recovery.inspection_required,
-                recovery=self.recovery.snapshot(),
-                ready_to_observe=active and self.awaiting_assistant_observation,
-                handoff=dict(self.handoff) if self.handoff else None,
-                fresh_observation_required=not active or self.recovery.inspection_required)
-            if self.target_cleanup_warning:result['accessibility_cleanup_warning']=self.target_cleanup_warning
-            result.update(self.task_status(active))
-            if not active:result['logical_size']=[0,0]
-            if self.handoff:
-                result['human_instructions']='Control and capture are suspended only when state is paused and portal closure is confirmed. Complete the human step, then explicitly tell the assistant ready/continue. Resume requests fresh GNOME consent. Do not share passwords or credentials.'
-            revision={k:result.get(k) for k in ('control_state','control_epoch','resume_event','next_required_action','portal_closed_confirmed','cleanup_warning')}
-            result['status_revision']=hashlib.sha256(json.dumps(revision,sort_keys=True).encode()).hexdigest()
-            return result
-
-    def clear_observation(self):
-        self.target_record=None
-        self.awaiting_assistant_observation=False
-        if self.backend:
-            self.backend.pointer_position=None
-            self.backend.capture_info={}
-
-    def close_backend(self):
-        if self.backend:
-            self.backend.stopped.set()
-            self.backend.close()
-        self.clear_observation()
-        self.close_target_provider()
-
-    def closure_confirmed(self):
-        if self.backend is None:return True
-        raw=self.backend.status()
-        return not raw.get('active') and not raw.get('cleanup_warning') and (
-            raw.get('portal_closed_confirmed') is True or getattr(self.backend,'session',None) is None)
-
-    def ensure_backend(self):
-        self.guard()
-        if self.backend is None:self.backend=self.factory()
-        self.backend.request_cancel=self.cancel_token
-        self.guard()
 
     def capture_result(self,allowed):
-        self.guard(allowed)
-        png=self.backend.capture()
-        self.guard(allowed)
-        with self.state_lock:
-            self.guard(allowed)
-            self.state='active'
-            self.recovery.observed()
+        self.guard(allowed);png=self.backend.capture();self.guard(allowed)
+        self.state='active';self.recovery.observed()
         import struct
         w,h=struct.unpack('>II',png[16:24])
-        return [text(dict(self.status(),pixel_size=[w,h],
-                    capture=getattr(self.backend,'capture_info',{}),
-                    transaction=getattr(self.backend,'transaction_info',{}),
-                    coordinate_rule='x_logical=x_pixel*logical_width/pixel_width; likewise y')),image(png)]
+        return [text(dict(self.status(),pixel_size=[w,h],capture=getattr(self.backend,'capture_info',{}),transaction=getattr(self.backend,'transaction_info',{}),coordinate_rule='x_logical=x_pixel*logical_width/pixel_width; likewise y')),image(png)]
 
     def call(self,name,args):
-        if name not in {x['name'] for x in tools()}:raise ValueError('Unknown tool')
+        if name not in {t['name'] for t in tools()}:raise ValueError('Unknown tool')
+        if not isinstance(args,dict):raise ValueError('Arguments must be an object')
         if name=='desktop_status':return [text(self.status())]
-        if name in ('desktop_pause','desktop_stop'):
-            if name=='desktop_pause':self.validate_handoff(args)
-            if not self.boundary_prepared:self.begin_boundary(name,args)
-            self.guard(ignore_cancel=name=='desktop_stop')
-            self.close_backend()
-            self.guard(ignore_cancel=name=='desktop_stop')
-            with self.state_lock:
-                if name=='desktop_pause':
-                    if not self.closure_confirmed():
-                        raise RuntimeError('Input is gated, but portal closure is unconfirmed. Stop sharing in GNOME before sensitive human work; resume is blocked.')
-                    self.state='paused'
-                else:
-                    self.state='stopped';self.handoff=None
-                    self.task_checkpoint=None;self.resume_event=None
-            if name=='desktop_stop' and self.closure_confirmed() and self.panel:
-                self.panel.close();self.panel=None
-                self.toolbar_session_ready=False;self.toolbar_geometry=None
-            return [text(self.status())]
+        if name=='desktop_close':
+            self.invalidate();self.close_backend();return [text(self.status())]
         self.guard()
-        problem=self.admission_error(name)
-        if problem:raise RuntimeError(problem)
-        if name=='desktop_resume':
-            if not self.closure_confirmed():raise RuntimeError('Previous portal closure is unconfirmed; stop sharing in GNOME before resuming')
-            if args.get('human_ready') is not True:raise ValueError('Explicit human readiness is required; never resume on a timer')
-            with self.state_lock:
-                if not self.handoff or args.get('handoff_id')!=self.handoff['id']:
-                    raise ValueError('Handoff ID does not match the current paused task')
-                self.state='resuming'
-            try:
-                self.clear_observation()
-                self.ensure_backend()
-                self.prepare_toolbar()
-                self.backend.start()
-                self.toolbar_session_ready=True
-                self.ensure_panel()
-                content=self.capture_result(('resuming',))
-                if self.panel_resume:
-                    # This response has no assistant recipient. Never count the
-                    # discarded image as an assistant observation.
-                    with self.state_lock:
-                        self.awaiting_assistant_observation=True
-                        self.recovery.inspection_required=True
-                        self.recovery.observation_id=None
-                    return [text(self.status())]
-                return content
-            except BaseException:
-                self.close_backend()
-                with self.state_lock:
-                    if self.state=='resuming':self.state='paused'
-                raise
         if name=='desktop_start':
-            summary=args.get('task_summary',self.task_summary)
-            if not isinstance(summary,str) or not summary.strip() or len(summary)>1000:raise ValueError('task_summary must be nonsecret text of at most 1000 characters')
-            if self.task_checkpoint is None:
-                self.task_checkpoint={'intent':summary,'completed_summary':'','next_step':'Inspect current state and plan remaining work'}
-            self.task_summary=summary
-            if not self.closure_confirmed() and self.state!='active':raise RuntimeError('Previous portal closure is unconfirmed; stop sharing in GNOME before starting')
-            with self.state_lock:
-                self.state='starting';self.toolbar_session_ready=False
-            try:
-                self.ensure_backend()
-                self.prepare_toolbar()
-                self.backend.start()
-                self.toolbar_session_ready=True
-                self.ensure_panel()
-                return self.capture_result(('starting',))
-            except BaseException:
-                self.close_backend()
-                with self.state_lock:
-                    if self.state=='starting':self.state='stopped'
-                raise
-        self.guard(('active',))
-        self.ensure_backend()
+            self.ensure_backend()
+            if not self.backend.status().get('active'):
+                self.state='opening';self.target_record=None
+                try:self.backend.start();content=self.capture_result(('opening',));self.show_indicator();content[0]=text(dict(json.loads(content[0]['text']),**{'indicator_warning':self.indicator_warning}) if self.indicator_warning else json.loads(content[0]['text']));return content
+                except BaseException:self.close_backend();raise
+            return self.capture_result(('active',))
+        self.guard(('active',));self.ensure_backend()
         if name=='desktop_action':
             record=self.target_record;self.target_record=None
-            checkpoint=self.validate_task_checkpoint(args['task_checkpoint']) if 'task_checkpoint' in args else None
-            self.protect_toolbar(args['action'])
             self.recovery.begin(args.get('recovery_observation_id'))
             target=None
             # Reset before backend validation, so an old call cannot contaminate
@@ -923,15 +711,12 @@ class Server:
             self.backend.transaction_info={'completed_steps':0,'failed_step':None,'input_events_attempted':0,'input_characters_completed':0}
             try:
                 if 'target_id' in args:
-                    if not record or args['target_id']!=record['id'] or record['epoch']!=self.control_epoch or time.monotonic()-record['issued']>60:
+                    if not record or args['target_id']!=record['id'] or record['epoch']!=self.generation or time.monotonic()-record['issued']>60:
                         raise RuntimeError('Target identity expired or invalid; inspect a fresh desktop_observe(inspect_target=true) result before input')
                     target=record['target'];target.live();self.guard(('active',))
-                if checkpoint is not None:self.task_checkpoint={'intent':self.task_summary,**checkpoint}
-                self.operation_active=True
                 self.backend.target_guard=target
                 try:self.backend.action(args['action'])
                 finally:
-                    self.operation_active=False
                     self.backend.target_guard=None
                 content=self.capture_result(('active',))
             except BaseException:
@@ -941,7 +726,6 @@ class Server:
             # Capture assembled status before finish; refresh only metadata.
             metadata=json.loads(content[0]['text'])
             metadata['recovery']=self.recovery.snapshot()
-            metadata.update(self.task_status(True))
             content[0]=text(metadata)
             return content
         self.target_record=None
@@ -953,9 +737,7 @@ class Server:
                 target_error=str(error)[:300]
         content=self.capture_result(('active',))
         if name=='desktop_observe':
-            with self.state_lock:self.awaiting_assistant_observation=False
             metadata=json.loads(content[0]['text'])
-            metadata['ready_to_observe']=False
             if args.get('inspect_target') is True:
                 if target is not None:
                     try:
@@ -963,22 +745,26 @@ class Server:
                         self.guard(('active',))
                         with self.state_lock:
                             self.guard(('active',))
-                            record={'id':uuid.uuid4().hex,'epoch':self.control_epoch,'issued':time.monotonic(),'target':target}
+                            record={'id':uuid.uuid4().hex,'epoch':self.generation,'issued':time.monotonic(),'target':target}
                             self.target_record=record
                             metadata['target']={'available':True,'target_id':record['id'],'epoch':record['epoch'],'expires_seconds':60,**target.describe()}
                     except Exception as error:
                         self.guard(('active',));target_error=str(error)[:300]
                 if target_error is not None:metadata['target']={'available':False,'reason':target_error,'no_fallback':True}
-            metadata.update(self.task_status(True))
             content[0]=text(metadata)
         return content
 
+
     def error_result(self,error,name=None):
+        if name in ('desktop_start','desktop_observe','desktop_action'):
+            try:self.close_backend()
+            except Exception:pass
         progress=getattr(self.backend,'transaction_info',{}) if name=='desktop_action' else {}
         return {'isError':True,'content':[text({'error':str(error),'transaction':progress,
             'observe_before_retry':self.recovery.inspection_required,
             'recovery':self.recovery.snapshot(),
             'session':self.status()})]}
+
 
     def handle(self,request):
         method,params=request.get('method'),request.get('params',{})
@@ -996,244 +782,79 @@ class Server:
         else:return {'jsonrpc':'2.0','id':request.get('id'),'error':{'code':-32601,'message':'Method not found'}}
         return {'jsonrpc':'2.0','id':request.get('id'),'result':result}
 
+
     def fence_response(self,request,response):
-        # Caller holds state_lock through write/flush. Already-published frames
-        # cannot be retracted, but no later stale frame may cross this fence.
         content=(response or {}).get('result',{}).get('content',[])
         if any(c.get('type')=='image' for c in content):
-            if request.get('_control_epoch',self.control_epoch)!=self.control_epoch or self.state!='active' or (self.cancel_token is not None and self.cancel_token.is_set()) or (self.backend is not None and self.backend.stopped.is_set()):
-                name=request.get('params',{}).get('name')
-                self.recovery.observation_id=None
-                self.target_record=None
-                if name=='desktop_action':
-                    self.recovery.finish(getattr(self.backend,'transaction_info',{}),failed=True)
-                return {'jsonrpc':'2.0','id':request.get('id'),'result':self.error_result('Screenshot invalidated by pause/stop; no image published',name)}
+            if request.get('_generation',self.generation)!=self.generation or self.state!='active' or (self.cancel_token and self.cancel_token.is_set()) or (self.backend and self.backend.cancelled.is_set()):
+                name=request.get('params',{}).get('name');self.recovery.observation_id=None;self.target_record=None
+                if name=='desktop_action':self.recovery.finish(getattr(self.backend,'transaction_info',{}),failed=True)
+                return {'jsonrpc':'2.0','id':request.get('id'),'result':self.error_result('Screenshot invalidated by session closure; no image published',name)}
         return response
 
     def shutdown(self):
-        self.close_target_provider()
-        if self.panel:self.panel.close()
+        self.close_backend()
         if self.backend:self.backend.shutdown()
-        with self.state_lock:
-            self.state='stopped';self.handoff=None;self.control_epoch+=1
-            self.task_checkpoint=None;self.resume_event=None;self.operation_active=False;self.target_record=None
 
 class StdioTransport:
-    """Read interruption signals independently; serialize all desktop operations."""
+    """Serialize desktop work; read cancellation and closure independently."""
     def __init__(self,server):
-        self.server=server
-        self.pending=queue.Queue()
-        self.tokens={}
-        self.token_lock=threading.Lock()
-        self.disconnected=threading.Event()
-        self.resume_pending=False
-        self.state_changed=threading.Condition()
-        self.output_lock=threading.Lock()
-        self.wait_lock=threading.Lock()
-        self.wait_threads=[]
-        self.emergency_requested=threading.Event()
-        self.server.panel_control=self.panel_control
-
-    def request_emergency_stop(self):
-        # Signal handlers only set cancellation flags; cleanup runs off-handler.
-        if self.server.backend:self.server.backend.stopped.set()
-        self.emergency_requested.set()
-
-    def watch_emergency(self):
-        while not self.disconnected.is_set():
-            if self.emergency_requested.wait(.05):
-                self.emergency_requested.clear()
-                self.panel_control('stop')
-
-    def notify_state(self):
-        with self.state_changed:self.state_changed.notify_all()
-
-    def wait_status(self,request,token,output_stream):
-        # Separate read-only waiter: never occupies the serial desktop worker,
-        # which must remain able to process physical Continue and consent.
-        try:
-            args=request['params'].get('arguments',{})
-            after=args.get('wait_after');timeout=args.get('timeout_seconds',30)
-            if not isinstance(after,str) or len(after)>64:raise ValueError('wait_after must be a status_revision string')
-            if isinstance(timeout,bool) or not isinstance(timeout,(int,float)) or not math.isfinite(timeout) or not 1<=timeout<=50:raise ValueError('timeout_seconds must be between 1 and 50')
-            deadline=time.monotonic()+timeout
-            with self.state_changed:
-                while True:
-                    status=self.server.status()
-                    changed=status['status_revision']!=after
-                    cancelled=token.is_set() or self.disconnected.is_set()
-                    remaining=deadline-time.monotonic()
-                    if changed or cancelled or remaining<=0:break
-                    self.state_changed.wait(min(remaining,.25))
-            status['wait_outcome']='cancelled' if cancelled else ('changed' if changed else 'timeout')
-            result={'content':[text(status)]}
-        except Exception as e:result=self.server.error_result(e,'desktop_status')
-        try:
-            if not self.disconnected.is_set():
-                with self.output_lock:
-                    output_stream.write(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':result})+'\n');output_stream.flush()
-        except (BrokenPipeError,OSError):self.disconnected.set()
-        finally:
-            with self.token_lock:self.tokens.pop(request.get('id'),None)
-            self.wait_lock.release()
-
-    def panel_control(self,event,expected_epoch=None):
-        if self.disconnected.is_set():return
-        if event=='continue':
-            with self.server.state_lock:
-                if expected_epoch is not None and expected_epoch!=self.server.control_epoch:return
-                if self.server.state!='paused' or not self.server.handoff:return
-                with self.token_lock:
-                    if self.resume_pending:return
-                    self.resume_pending=True
-                args={'handoff_id':self.server.handoff['id'],'human_ready':True}
-                epoch=self.server.control_epoch
-                self.server.resume_event={'id':uuid.uuid4().hex,'epoch':epoch,'source':'toolbar_continue'}
-            request={'jsonrpc':'2.0','method':'tools/call',
-                     'params':{'name':'desktop_resume','arguments':args},
-                     '_control_epoch':epoch,'_panel_event':True,
-                     '_panel_resume':True,'_resume_reserved':True}
-            self.pending.put((request,threading.Event()))
-            self.notify_state()
-            return
-        if event not in ('pause','stop'):return
-        name="desktop_pause" if event=="pause" else "desktop_stop"
-        args={"reason":"You pressed Pause in the desktop toolbar", "task_summary":self.server.task_summary, "handoff_kind":"manual_takeover"} if event=="pause" else {}
-        with self.server.state_lock:
-            # Ignore stale Pause before touching the current backend. Emergency
-            # Stop remains effective even when its toolbar epoch is outdated.
-            if event=='pause':
-                if expected_epoch is not None and expected_epoch!=self.server.control_epoch:return
-                if self.server.state!='active':return
-            if self.server.backend:self.server.backend.stopped.set()
-            epoch=self.server.begin_boundary(name,args)
-        self.interrupt(all_requests=True)
-        request={"jsonrpc":"2.0","method":"tools/call","params":{"name":name,"arguments":args},"_control_epoch":epoch,"_boundary_prepared":True,"_panel_event":True}
-        self.pending.put((request,threading.Event()))
-        self.notify_state()
-
+        self.server=server;self.pending=queue.Queue();self.tokens={};self.token_lock=threading.Lock();self.disconnected=threading.Event()
     def interrupt(self,request_id=None,all_requests=False):
         with self.token_lock:
-            if all_requests:
-                for token in self.tokens.values():token.set()
-            elif request_id in self.tokens:
-                self.tokens[request_id].set()
-        # Do not interrupt an unrelated active request when one queued ID is cancelled.
-        self.notify_state()
+            for key,token in self.tokens.items():
+                if all_requests or key==request_id:token.set()
         active=self.server.cancel_token
-        if self.server.backend and (all_requests or (active is not None and active.is_set())):
-            self.server.backend.stopped.set()
-
+        if self.server.backend and (all_requests or (active is not None and active.is_set())):self.server.backend.cancelled.set()
     def read(self,stream):
         try:
             for line in stream:
                 try:
                     request=json.loads(line)
-                    if not isinstance(request,dict):raise ValueError('Request must be an object')
-                    if not isinstance(request.get('method'),str):raise ValueError('Method must be a string')
-                    request_id=request.get('id')
-                    if request_id is not None and (not isinstance(request_id,(str,int)) or isinstance(request_id,bool)):
-                        raise ValueError('Request ID must be a string or integer')
+                    if not isinstance(request,dict) or not isinstance(request.get('method'),str):raise ValueError('Invalid request')
                     params=request.get('params',{})
                     if not isinstance(params,dict):raise ValueError('Params must be an object')
-                    if request.get('method')=='tools/call':
-                        if not isinstance(params.get('name'),str):raise ValueError('Tool name must be a string')
-                        if not isinstance(params.get('arguments',{}),dict):raise ValueError('Tool arguments must be an object')
-                    if request.get('method')=='notifications/cancelled':
-                        self.interrupt(params.get('requestId'))
-                        continue
-                    if request.get('method')=='tools/call':
-                        name=params.get('name')
-                        if name in ('desktop_pause','desktop_stop'):
-                            try:
-                                self.server.begin_boundary(name,params.get('arguments',{}))
-                            except Exception as e:request['_admission_error']=str(e)
-                            else:
-                                self.interrupt(all_requests=True)
-                                request['_boundary_prepared']=True
-                        else:
-                            request['_admission_error']=self.server.admission_error(name)
-                            if name=='desktop_resume' and not request['_admission_error']:
-                                with self.token_lock:
-                                    if self.resume_pending:request['_admission_error']='A resume is already pending; wait for its result and a new human instruction before retrying'
-                                    else:self.resume_pending=True;request['_resume_reserved']=True
-                    with self.server.state_lock:request['_control_epoch']=self.server.control_epoch
-                    token=threading.Event()
-                    request_id=request.get('id')
-                    if request_id is not None:
-                        with self.token_lock:self.tokens[request_id]=token
+                    rid=request.get('id')
+                    if rid is not None and (not isinstance(rid,(str,int)) or isinstance(rid,bool)):raise ValueError('Invalid request ID')
+                    if request['method']=='notifications/cancelled':self.interrupt(params.get('requestId'));continue
+                    if request['method']=='tools/call':
+                        if not isinstance(params.get('name'),str) or not isinstance(params.get('arguments',{}),dict):raise ValueError('Invalid tool arguments')
+                        if params['name']=='desktop_close':self.interrupt(all_requests=True);self.server.invalidate()
+                    request['_generation']=self.server.generation;token=threading.Event()
+                    if rid is not None:
+                        with self.token_lock:self.tokens[rid]=token
                     self.pending.put((request,token))
-                except Exception as e:
-                    self.pending.put(({'_parse_error':str(e)},threading.Event()))
-        finally:
-            self.disconnected.set()
-            self.interrupt(all_requests=True)
-            self.pending.put(None)
-
+                except Exception as error:self.pending.put(({'_parse_error':str(error)},threading.Event()))
+        finally:self.disconnected.set();self.interrupt(all_requests=True);self.pending.put(None)
     def run(self,input_stream,output_stream):
-        reader=threading.Thread(target=self.read,args=(input_stream,),daemon=True)
-        reader.start()
-        emergency=threading.Thread(target=self.watch_emergency,daemon=True)
-        emergency.start()
+        threading.Thread(target=self.read,args=(input_stream,),daemon=True).start()
         try:
             while True:
                 item=self.pending.get()
                 if item is None:break
-                request,token=item
-                params=request.get('params') or {}
-                if params.get('name')=='desktop_status' and 'wait_after' in params.get('arguments',{}):
-                    if self.wait_lock.acquire(blocking=False):
-                        waiter=threading.Thread(target=self.wait_status,args=(request,token,output_stream),daemon=True)
-                        self.wait_threads=[t for t in self.wait_threads if t.is_alive()]
-                        self.wait_threads.append(waiter);waiter.start()
-                        continue
-                    request['_admission_error']='Only one bounded status wait may be pending'
+                request,token=item;params=request.get('params') or {}
                 try:
-                    if '_parse_error' in request:
-                        response={'jsonrpc':'2.0','id':None,'error':{'code':-32700,'message':request['_parse_error']}}
+                    if '_parse_error' in request:response={'jsonrpc':'2.0','id':request.get('id'),'error':{'code':-32700,'message':request['_parse_error']}}
                     else:
-                        self.server.cancel_token=token
-                        self.server.request_epoch=request.get('_control_epoch')
-                        self.server.boundary_prepared=request.get('_boundary_prepared',False)
-                        self.server.panel_resume=request.get('_panel_resume',False)
-                        # Discovery/status may complete after stdin EOF; new desktop
-                        # access must never start after the client has disconnected.
-                        name=(request.get('params') or {}).get('name')
-                        if self.disconnected.is_set() and request.get('method')=='tools/call' and name not in ('desktop_stop','desktop_status'):
-                            token.set()
+                        self.server.cancel_token=token;self.server.request_epoch=request.get('_generation')
+                        if self.disconnected.is_set() and request.get('method')=='tools/call' and params.get('name') not in ('desktop_status','desktop_close'):token.set()
                         response=self.server.handle(request)
-                    if response is not None and not request.get("_panel_event"):
+                    if response is not None:
                         with self.server.state_lock:
                             response=self.server.fence_response(request,response)
-                            with self.output_lock:
-                                output_stream.write(json.dumps(response)+'\n');output_stream.flush()
-                except (BrokenPipeError,OSError):
-                    self.disconnected.set();self.interrupt(all_requests=True);break
+                            output_stream.write(json.dumps(response)+'\n');output_stream.flush()
+                except (BrokenPipeError,OSError):self.disconnected.set();self.interrupt(all_requests=True);break
                 finally:
-                    self.server.cancel_token=None
-                    self.server.request_epoch=None
-                    self.server.boundary_prepared=False
-                    self.server.panel_resume=False
-                    self.notify_state()
-                    with self.token_lock:
-                        self.tokens.pop(request.get('id'),None)
-                        if request.get('_resume_reserved'):self.resume_pending=False
-        finally:
-            self.disconnected.set()
-            self.interrupt(all_requests=True)
-            self.server.shutdown()
-            self.notify_state()
-            for waiter in self.wait_threads:waiter.join(1)
-            emergency.join(1)
-
+                    self.server.cancel_token=None;self.server.request_epoch=None
+                    with self.token_lock:self.tokens.pop(request.get('id'),None)
+        finally:self.disconnected.set();self.interrupt(all_requests=True);self.server.shutdown()
 
 def main():
-    server=Server()
-    transport=StdioTransport(server)
-    def stop(signum,frame):
-        transport.request_emergency_stop()
-        if signum!=signal.SIGUSR1:raise SystemExit(0)
-    for s in (signal.SIGINT,signal.SIGTERM,signal.SIGUSR1):signal.signal(s,stop)
+    server=Server();transport=StdioTransport(server)
+    def terminate(signum,frame):
+        if server.backend:server.backend.cancelled.set()
+        raise SystemExit(0)
+    for signum in (signal.SIGINT,signal.SIGTERM):signal.signal(signum,terminate)
     transport.run(sys.stdin,sys.stdout)
 
-if __name__ == '__main__':main()
+if __name__=='__main__':main()

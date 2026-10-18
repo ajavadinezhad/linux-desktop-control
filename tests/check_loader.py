@@ -34,18 +34,14 @@ with tempfile.TemporaryDirectory(prefix='desktop-plugin-loader-') as home:
         p.stdin.write('{"method":"initialized","params":{}}\n');p.stdin.flush()
         inventory=rpc(2,'mcpServerStatus/list',{'serverName':'linux_desktop'})
         server=inventory['data'][0]
-        expected={'desktop_start','desktop_observe','desktop_action','desktop_status','desktop_stop','desktop_pause','desktop_resume'}
+        expected={'desktop_start','desktop_observe','desktop_action','desktop_status','desktop_close'}
         assert server['toolsError'] is None,server['toolsError']
         assert set(server['tools'])==expected,server['tools']
-        status_schema=server['tools']['desktop_status']['inputSchema']
-        assert 'wait_after' in status_schema['properties'],status_schema
-        assert 'timeout_seconds' in status_schema['properties'],status_schema
-        assert not status_schema.get('required'),status_schema
-        assert 'task_checkpoint' in server['tools']['desktop_action']['inputSchema']['properties']
+        assert not server['tools']['desktop_status']['inputSchema']['properties']
         assert 'target_id' in server['tools']['desktop_action']['inputSchema']['properties']
         observe=server['tools']['desktop_observe']['inputSchema']
         assert 'inspect_target' in observe['properties'] and not observe.get('required'),observe
-        print(json.dumps({'bounded_status_wait_schema':True,'task_checkpoint_schema':True,'passed':True,'server':server['name'],'version':server['serverInfo']['version'],'tools':sorted(server['tools'])},indent=2))
+        print(json.dumps({'passed':True,'server':server['name'],'version':server['serverInfo']['version'],'tools':sorted(server['tools'])},indent=2))
     finally:
         p.terminate()
         try:p.wait(timeout=1)

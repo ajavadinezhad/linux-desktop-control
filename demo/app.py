@@ -22,7 +22,7 @@ class Fixture(Gtk.Application):
         self.window.set_default_size(1280,720);self.window.maximize()
         box=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=12)
         box.set_margin_top(20);box.set_margin_bottom(20);box.set_margin_start(20);box.set_margin_end(20)
-        box.append(Gtk.Label(label='LIVE GNOME DEMO • Disposable text only • Human Pause / Continue / Stop'))
+        box.append(Gtk.Label(label='LIVE GNOME DEMO • Disposable text only'))
         self.view=Gtk.TextView();self.view.set_monospace(True);self.view.set_vexpand(True)
         scroll=Gtk.ScrolledWindow();scroll.set_child(self.view);scroll.set_vexpand(True);box.append(scroll)
         button=Gtk.Button(label='Open scratch Save dialog');button.connect('clicked',lambda *_:self.open_dialog());box.append(button)
