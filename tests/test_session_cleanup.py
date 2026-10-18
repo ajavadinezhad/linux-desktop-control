@@ -31,3 +31,9 @@ class SessionCleanupTests(unittest.TestCase):
   def fail(*args,**kw):raise RuntimeError('portal unavailable')
   d.call=fail;d.close();self.assertEqual(d.session,'/test');self.assertFalse(d.portal_closed)
   with self.assertRaisesRegex(RuntimeError,'unconfirmed'):d.start()
+
+ def test_error_invalidates_already_queued_session_requests(self):
+  s=m.Server(Fake);s.call('desktop_start',{});old=s.generation
+  s.handle({'id':1,'method':'tools/call','params':{'name':'desktop_action','arguments':{'action':{'type':'fail'}}}})
+  s.request_epoch=old
+  with self.assertRaisesRegex(RuntimeError,'invalidated'):s.call('desktop_start',{})

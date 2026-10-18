@@ -90,7 +90,7 @@ class TransportTests(unittest.TestCase):
         finally:h.finish()
         replies={r['id']:r for r in map(json.loads,h.output.getvalue().splitlines())}
         self.assertTrue(replies[44]['result']['isError'])
-        self.assertIn('cancelled',json.loads(replies[44]['result']['content'][0]['text'])['error'])
+        self.assertRegex(json.loads(replies[44]['result']['content'][0]['text'])['error'],'cancelled|invalidated')
     def test_malformed_calls_do_not_disconnect_backend(self):
         h=Harness()
         try:
