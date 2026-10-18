@@ -45,7 +45,7 @@ class WindowGuardTests(unittest.TestCase):
   d.cancelled.clear();b.value=context()
   with self.assertRaises(RuntimeError):d.window_guard.check()
  def test_deliberate_transition_cannot_hide_text_drag_scroll_or_batch(self):
-  for action in [{'type':'text','text':'x'},{'type':'drag','path':[[1,1],[2,2]]},{'type':'scroll','x':1,'y':1},{'type':'sequence','steps':[{'type':'click','x':1,'y':1}]},{'type':'keys','keys':['Alt','Tab']},{'type':'click','x':1,'y':1,'count':2}]:
+  for action in [{'type':'text','text':'x'},{'type':'drag','path':[[1,1],[2,2]]},{'type':'scroll','x':1,'y':1},{'type':'sequence','steps':[{'type':'click','x':1,'y':1}]},{'type':'keys','keys':['Alt','Tab']},{'type':'keys','keys':['Alt','F2']},{'type':'click','x':1,'y':1,'count':2}]:
    with self.assertRaises(ValueError):g.validate_transition(action)
   for action in [{'type':'click','x':1,'y':1},{'type':'keys','keys':['Super']},{'type':'keys','keys':['Return']}]:g.validate_transition(action)
 class WindowBackend(Fake):

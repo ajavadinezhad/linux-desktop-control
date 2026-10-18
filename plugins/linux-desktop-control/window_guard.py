@@ -33,5 +33,5 @@ class WindowGuard:
 def validate_transition(action):
  # A deliberate focus change is one gesture with no remaining batch or text.
  if action.get('type')=='click' and action.get('button','left')=='left' and action.get('count',1)==1 and 'focus' not in action:return
- if action.get('type')=='keys' and 'focus' not in action and action.get('keys') in (['Super'],['Super_L'],['Return'],['Enter'],['Alt','F2'],['Alt_L','F2']):return
+ if action.get('type')=='keys' and 'focus' not in action and action.get('keys') in (['Super'],['Super_L'],['Return'],['Enter']):return
  raise ValueError('A focus transition permits only one left click or launcher/Return chord; no text, drag, scroll or sequence')
