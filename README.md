@@ -1,16 +1,16 @@
 # Linux Desktop Control
 
-Version **0.7.0** is a private local MCP integration using GNOME Wayland's public desktop portal. It is an independent project, not an official OpenAI product.
+Version **0.7.1** is a private local MCP integration using GNOME Wayland's public desktop portal. It is an independent project, not an official OpenAI product.
 
 Five tools: `desktop_start`, `desktop_observe`, `desktop_action`, `desktop_status`, `desktop_close`. The final tool releases session resources. Each new session needs personal GNOME monitor/keyboard/pointer consent. GNOME's native sharing control remains available independently.
 
-An optional indicator-only GNOME extension displays **Mouse is being controlled by ChatGPT** below the pointer while the assistant session is active. It is passive, non-focusable and untracked by the Shell input-region/workarea manager. It disappears on closure, disconnection, lease expiry or disable. It never moves or hides the cursor, captures input or registers shortcuts. The real cursor remains unchanged: a safe public API for directly applying a glow to the hardware cursor has not been established. No surrounding ring or duplicate cursor is drawn.
+The read-only GNOME observer extension displays **Mouse is being controlled by ChatGPT** below the pointer while the assistant session is active. It is passive, non-focusable and untracked by the Shell input-region/workarea manager. It disappears on closure, disconnection, lease expiry or disable. It never moves or hides the cursor, captures input or registers shortcuts. The real cursor remains unchanged: a safe public API for directly applying a glow to the hardware cursor has not been established. No surrounding ring or duplicate cursor is drawn.
 
-Core control has no extension prerequisite. `indicator_warning` explicitly reports an unavailable label. Loading a newly installed GNOME extension can require a manual logout/login; the installer never restarts the session. No live input acceptance of 0.7.0 has been performed.
+Guarded input requires the updated read-only foreground observer (protocol 2); status/cleanup tools remain available without an active observer. `indicator_warning` explicitly reports an unavailable label. Loading a newly installed GNOME extension can require a manual logout/login; the installer never restarts the session. No live input acceptance of 0.7.1 has been performed.
 
 ## Install
 
-Run `./install.sh --check` for read-only environment checks, then `./install.sh` to prepare paths, copy the optional indicator and install the local plugin. Refresh the app's MCP connection after updating; already connected chats can retain an older catalog. The optional indicator installer is `python3 install-indicator.py`. Remove only that indicator with `python3 uninstall-indicator.py`.
+Run `./install.sh --check` for read-only environment checks, then `./install.sh` to prepare paths, copy the foreground observer and install the local plugin. Refresh the app's MCP connection after updating; already connected chats can retain an older catalog. The observer installer is `python3 install-indicator.py`. Remove only that indicator with `python3 uninstall-indicator.py`.
 
 ## Use
 
@@ -25,3 +25,7 @@ Call `desktop_close` on completion or error and check `portal_closed_confirmed` 
 `/usr/bin/python3 -m unittest discover -s tests` checks input validation, release/cancellation/disconnect behavior, fresh capture recovery, target identity and uncertain-input reconciliation without sharing. `python3 tests/check_loader.py` checks the real app loader and all five schemas in a temporary Codex home. The indicator bridge has isolated transport tests; the new extension has no live-host acceptance. Do not run a headless GNOME compositor on a live user manager: it can change activation display settings even with a private D-Bus bus. Use a separate test environment for graphical tests.
 
 Source remains private; reuse licensing is deferred. No compensation or distribution terms are assigned. See docs/LICENSING_REVIEW.md.
+
+## Consent and foreground target
+
+Do not launch/focus apps through command runners before consent. Start sharing, inspect its image, then use the observed GUI. Each action uses window_observation_id from that image. Focus/geometry/context changes interrupt ordinary batches and close the session; no automatic focus reclaim, retry or restart occurs. An intentional GUI launch is one explicit focus_transition gesture, with fresh inspection afterward. See docs/FOCUS_GUARD_0_7_1.md for exact guarantees and limitations.

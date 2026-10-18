@@ -46,15 +46,7 @@ class AtspiTarget:
         if focused and not self.states(self.node).contains(A.FOCUSED):
             raise TargetUnavailable('Expected control lost keyboard focus; no further input sent')
     def acquire(self):
-        self.live(active=True)
-        # GTK4 may expose a correctly focused editable control but reject the
-        # optional Component.GrabFocus operation. Do not invoke it redundantly.
-        if self.states(self.node).contains(self.api.StateType.FOCUSED):
-            self.live(active=True,focused=True)
-            return
-        self.deadline=time.monotonic()+.6
-        component=self.call(self.node.get_component_iface)
-        if not self.call(component.grab_focus):raise TargetUnavailable('Accessibility focus acquisition refused')
+        # Never reclaim a control after the human moved focus elsewhere.
         self.live(active=True,focused=True)
     def check(self):self.live(active=True,focused=True)
     def describe(self):
@@ -94,7 +86,6 @@ class DirectNode:
     def get_extents(self,coord):
         values=self.rpc(self.COMPONENT,'GetExtents','(u)',(int(coord),))[0]
         return SimpleNamespace(**dict(zip(('x','y','width','height'),values)))
-    def grab_focus(self):return self.rpc(self.COMPONENT,'GrabFocus')[0]
 
 class DirectClient:
     def __init__(self,roles):
@@ -106,7 +97,7 @@ class DirectClient:
         try:self.bus=Gio.DBusConnection.new_for_address_sync(address,Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT|Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION,None,cancelled)
         finally:timer.cancel()
     def call(self,dest,path,interface,method,signature,args):
-        allowed={(DirectNode.ACCESSIBLE,'GetChildAtIndex'),(DirectNode.ACCESSIBLE,'GetState'),(DirectNode.ACCESSIBLE,'GetRole'),(DirectNode.COMPONENT,'GetExtents'),(DirectNode.COMPONENT,'GrabFocus'),('org.freedesktop.DBus','GetConnectionUnixProcessID')}
+        allowed={(DirectNode.ACCESSIBLE,'GetChildAtIndex'),(DirectNode.ACCESSIBLE,'GetState'),(DirectNode.ACCESSIBLE,'GetRole'),(DirectNode.COMPONENT,'GetExtents'),('org.freedesktop.DBus','GetConnectionUnixProcessID')}
         if (interface,method)==('org.freedesktop.DBus.Properties','Get'):
             if args!=(DirectNode.ACCESSIBLE,'ChildCount'):raise TargetUnavailable('Accessibility property is outside identity inspection')
         elif (interface,method) not in allowed:raise TargetUnavailable('Accessibility method is outside identity inspection')

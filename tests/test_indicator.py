@@ -7,12 +7,14 @@ class Reply:
  def __init__(self,*values):self.values=values
  def unpack(self):return self.values
 class Bus:
+ def signal_subscribe(self,*args):return 1
+ def signal_unsubscribe(self,*args):pass
  def __init__(self):self.calls=[];self.reject=None
  def call_sync(self,dest,path,iface,method,args,*other):
   self.calls.append((dest,path,iface,method,args.unpack()))
   if self.reject==method:raise RuntimeError('disconnected')
   if method=='GetNameOwner':return Reply(':1.9')
-  if method=='GetDiagnostics':return Reply('{"protocol_version":1}')
+  if method=='GetDiagnostics':return Reply('{"protocol_version":2}')
   return Reply(True)
 class IndicatorBridgeTests(unittest.TestCase):
  def start(self):
@@ -38,9 +40,16 @@ class IndicatorActorTests(unittest.TestCase):
   class Extension{};
   class Label {constructor(props){Object.assign(this,props)}hide(){this.visible=false}show(){this.visible=true}set_position(x,y){this.position=[x,y]}get_preferred_width(){return [200,200]}get_preferred_height(){return [20,20]}destroy(){this.destroyed=true}}
   const St={Label};const Main={uiGroup:{add_child:a=>actors.push(a)},modalCount:0,overview:{visible:false},sessionMode:{isLocked:false,isGreeter:false},layoutManager:{monitors:[{x:0,y:0,width:1000,height:800}]}};
-  const global={get_pointer:()=>[300,200]};
+  class Signals {constructor(){this.handlers=new Map();this.seq=100}connect(name,fn){const id=this.seq++;this.handlers.set(id,[name,fn]);return id}disconnect(id){this.handlers.delete(id)}emit(name){for(const [n,fn] of [...this.handlers.values()])if(n===name)fn(this)}}
+  const win=Object.assign(new Signals(),{rect:[0,32,1000,768],get_frame_rect(){return {x:this.rect[0],y:this.rect[1],width:this.rect[2],height:this.rect[3]}},get_stable_sequence:()=>1});
+  Object.assign(Main.overview,new Signals());Main.overview.connect=Signals.prototype.connect;Main.overview.disconnect=Signals.prototype.disconnect;
+  Object.assign(Main.sessionMode,new Signals());Main.sessionMode.connect=Signals.prototype.connect;Main.sessionMode.disconnect=Signals.prototype.disconnect;
+  Main.layoutManager.primaryMonitor={x:0,y:0,width:1000,height:800};
+  const global={get_pointer:()=>[300,200],display:Object.assign(new Signals(),{focus_window:win})};
+  const contextSignals=[];
+
   const GLib={PRIORITY_DEFAULT:0,SOURCE_CONTINUE:true,SOURCE_REMOVE:false,get_monotonic_time:()=>now,timeout_add:(_p,_t,fn)=>{timers.set(next,fn);return next++},source_remove:id=>timers.delete(id),Variant:class{constructor(_sig,value){this.value=value}}};
-  const Gio={DBus:{session:{}},BusNameWatcherFlags:{NONE:0},bus_watch_name_on_connection:(_b,_n,_f,_a,fn)=>{watches.set(next,fn);return next++},bus_unwatch_name:id=>watches.delete(id),DBusExportedObject:{wrapJSObject:()=>({export(){},unexport(){}})}};
+  const Gio={DBus:{session:{emit_signal:(...args)=>contextSignals.push(args)}},BusNameWatcherFlags:{NONE:0},bus_watch_name_on_connection:(_b,_n,_f,_a,fn)=>{watches.set(next,fn);return next++},bus_unwatch_name:id=>watches.delete(id),DBusExportedObject:{wrapJSObject:()=>({export(){},unexport(){}})}};
   """
   script=fixture+source+"\nconst i=new DesktopIndicator();i.enable();let reply;const invocation={get_sender:()=>':1.9',return_value:v=>reply=v.value};const nonce='a'.repeat(32);\n"+body
   r=subprocess.run([node,'-e',script],text=True,capture_output=True,timeout=5);self.assertEqual(r.returncode,0,r.stderr)
@@ -50,3 +59,8 @@ class IndicatorActorTests(unittest.TestCase):
   self.run_js("const label=actors[0];i.BindAsync([nonce],invocation);i.UpdateAsync([nonce,true],invocation);Main.sessionMode.isLocked=true;i._render();assert.equal(label.visible,false);Main.sessionMode.isLocked=false;i._render();assert.equal(label.visible,true);now=4000000;timers.values().next().value();assert.equal(label.visible,false);assert.equal(i._owner,null);i.BindAsync([nonce],invocation);i.UpdateAsync([nonce,true],invocation);watches.values().next().value();assert.equal(label.visible,false);i.disable();assert.equal(label.destroyed,true);assert.equal(timers.size,0);")
  def test_render_error_removes_visible_label_without_cursor_mutation(self):
   self.run_js("const label=actors[0];i.BindAsync([nonce],invocation);i.UpdateAsync([nonce,true],invocation);global.get_pointer=()=>{throw Error('unavailable')};Gio.bus_unwatch_name=()=>{throw Error('watch failure')};assert.equal(timers.values().next().value(),false);assert.equal(label.visible,false);i.BindAsync([nonce],invocation);assert.deepEqual(reply,[false]);i.UpdateAsync([nonce,true],invocation);assert.deepEqual(reply,[false]);assert.equal(label.visible,false);assert.equal(i._owner,null);i.disable();assert.equal(label.destroyed,true);")
+
+ def test_focus_away_and_back_and_geometry_events_advance_context(self):
+  self.run_js("i.BindAsync([nonce],invocation);const first=i._focusEpoch;global.display.focus_window=null;global.display.emit('notify::focus-window');global.display.focus_window=win;global.display.emit('notify::focus-window');assert(i._focusEpoch>=first+2);const e=i._focusEpoch;win.rect[2]+=10;win.emit('size-changed');assert(i._focusEpoch>e);assert(contextSignals.length>=3);i.GetContextAsync([nonce],invocation);const data=JSON.parse(reply[0]);assert.equal(data.rect[2],1010);assert(!('title' in data));i.disable();assert.equal(win.handlers.size,0);assert.equal(global.display.handlers.size,0);")
+ def test_foreign_modal_overview_lock_and_unmanaged_are_fail_closed(self):
+  self.run_js("i.BindAsync([nonce],invocation);Main.modalCount=1;i.GetContextAsync([nonce],invocation);assert.equal(JSON.parse(reply[0]).available,false);Main.modalCount=1;Main.overview.visible=true;i.GetContextAsync([nonce],invocation);assert.equal(JSON.parse(reply[0]).kind,'overview');Main.modalCount=2;i.GetContextAsync([nonce],invocation);assert.equal(JSON.parse(reply[0]).available,false);Main.modalCount=0;Main.overview.visible=false;Main.sessionMode.isLocked=true;i.GetContextAsync([nonce],invocation);assert.equal(JSON.parse(reply[0]).available,false);Main.sessionMode.isLocked=false;win.emit('unmanaging');i.GetContextAsync([nonce],invocation);assert.equal(JSON.parse(reply[0]).available,false);i.disable();")

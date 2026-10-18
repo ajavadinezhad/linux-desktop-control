@@ -1,4 +1,5 @@
 #!/usr/bin/python3
+# Manual isolated fixture only. Never launch this before live desktop consent or use it as consent evidence.
 """Disposable GTK4 witness for real assistant target-identity regressions.
 
 This app does not inject OS input. A command file changes only its own widgets,
