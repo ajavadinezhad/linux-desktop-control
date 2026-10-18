@@ -1,5 +1,12 @@
 # Changes
 
+## 0.6.5 — source candidate, not installed
+
+- Add a passive blue pointer halo and session-scoped Super+Alt+P pause / Super+Alt+Escape stop shortcuts. No pointer warping, hiding, input-region capture or automatic physical-input classification.
+- Hide the halo immediately on takeover request and remove halo/timers/shortcut registrations on cleanup. Report shortcut conflicts explicitly.
+- Make the emergency signal perform full idle-session cleanup, and still close the portal if capture/descriptor cleanup fails.
+- Add interruption, release, idle cleanup and feedback lifecycle regression tests. See docs/POINTER_RECOVERY_0_6_5.md for evidence and live limitations.
+
 ## 0.6.4
 
 - Recover a stalled capture stream once under existing consent, without replaying input or substituting cached images. Retain cancellation and frame age checks; drop-only rate limiting avoids duplicated frames.

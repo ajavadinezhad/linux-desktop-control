@@ -9,7 +9,7 @@ tmp=tempfile.TemporaryDirectory(prefix='codex-shell-toolbar-');base=pathlib.Path
 extension=base/'data/gnome-shell/extensions/desktop-toolbar@local.codex'
 shutil.copytree(OUT/'gnome-extension/desktop-toolbar@local.codex',extension)
 # Test-only capabilities exist ONLY in this isolated temporary copy.
-javascript=(extension/'extension.js').read_text().replace("import Clutter", "import Shell from 'gi://Shell';\nimport Clutter",1)
+javascript=(extension/'extension.js').read_text()
 javascript=javascript.replace('</interface></node>`', '<method name="TestScreenshot"><arg type="s" direction="in"/><arg type="b" direction="out"/></method><method name="TestClick"><arg type="s" direction="in"/></method><method name="TestDock"/><method name="TestFocus"><arg type="s" direction="out"/></method></interface></node>`')
 marker='    _button(label, accessibleName, event) {'
 methods='''    async TestScreenshotAsync([path], invocation) {
@@ -65,6 +65,9 @@ try:
  events=[];bridge=mod.ToolbarBridge(lambda:state,lambda event,expected_epoch=None:events.append(event),bus)
  bridge.start();time.sleep(1)
  diag=bridge.diagnostics();result['active_diagnostics']=diag
+ result['checks']['nonreactive_active_halo']=diag['pointer_halo']['visible'] and diag['pointer_halo']['reactive'] is False
+ result['checks']['takeover_shortcuts_registered']=diag['takeover_shortcuts']['pause'] and diag['takeover_shortcuts']['stop']
+ result['checks']['no_automatic_takeover_claim']=diag['automatic_physical_takeover'] is False
  result['checks']['one_compact_bottom_actor']=diag['visible'] and diag['actors']==1 and 0<diag['rect'][2]<=480 and 0<diag['rect'][3]<=60 and abs(diag['rect'][1]+diag['rect'][3]-720)<2
  result['checks']['reserved_strip']=diag.get('reserves_bottom_strip') is True
  focus_after=call('org.codex.DesktopToolbar','TestFocus','()',(),path='/org/codex/DesktopToolbar')[0]
@@ -73,8 +76,12 @@ try:
  result['preview']=call('org.codex.DesktopToolbar','TestScreenshot','(s)',(str(OUT/'TOOLBAR_PREVIEW.png'),),path='/org/codex/DesktopToolbar')
  call('org.codex.DesktopToolbar','TestClick','(s)',('pause',),path='/org/codex/DesktopToolbar');time.sleep(.15)
  result['checks']['real_pause_button_signal']=events==['pause']
+ result['checks']['takeover_hides_halo_before_backend_ack']=not bridge.diagnostics()['pointer_halo']['visible']
+ bridge._update();time.sleep(.15)
+ result['checks']['stale_active_update_cannot_restore_halo']=not bridge.diagnostics()['pointer_halo']['visible']
  state.update(control_state='paused',control_epoch=1,portal_closed_confirmed=True);bridge._update();time.sleep(.3)
  diag=bridge.diagnostics();result['paused_diagnostics']=diag
+ result['checks']['paused_halo_hidden']=not diag['pointer_halo']['visible']
  result['checks']['continue_only_paused']=diag['can_continue'] is True and diag['state']=='paused'
  call('org.codex.DesktopToolbar','TestClick','(s)',('continue',),path='/org/codex/DesktopToolbar');time.sleep(.15)
  call('org.codex.DesktopToolbar','TestClick','(s)',('stop',),path='/org/codex/DesktopToolbar');time.sleep(.15)
@@ -86,8 +93,15 @@ try:
  dock_diag=bridge.diagnostics();result['dock_diagnostics']=dock_diag
  result['checks']['avoids_existing_dock']=dock_diag['rect'][1]+dock_diag['rect'][3]<=648 and dock_diag['workarea']['y']+dock_diag['workarea']['height']<=dock_diag['rect'][1]
  result['dock_preview']=call('org.codex.DesktopToolbar','TestScreenshot','(s)',(str(OUT/'TOOLBAR_DOCK_PREVIEW.png'),),path='/org/codex/DesktopToolbar')
- bridge.close()
+ bridge.close();time.sleep(.2)
+ cleanup_diag=json.loads(call('org.codex.DesktopToolbar','GetDiagnostics','()',(),path='/org/codex/DesktopToolbar')[0]);result['cleanup_diagnostics']=cleanup_diag
+ result['checks']['owner_loss_hides_halo_and_releases_shortcuts']=not cleanup_diag['pointer_halo']['visible'] and cleanup_diag['owner'] is None and not cleanup_diag['takeover_shortcuts']['pause'] and not cleanup_diag['takeover_shortcuts']['stop']
  fixture.terminate();fixture.wait(timeout=3)
+ call('org.gnome.Shell.Extensions','DisableExtension','(s)',('desktop-toolbar@local.codex',));time.sleep(.2)
+ try:
+  call('org.codex.DesktopToolbar','GetDiagnostics','()',(),path='/org/codex/DesktopToolbar')
+  result['checks']['disable_removes_export']=False
+ except Exception:result['checks']['disable_removes_export']=True
  result['errors']=call('org.gnome.Shell.Extensions','GetExtensionErrors','(s)',('desktop-toolbar@local.codex',))
  result['checks']['no_extension_errors']=not result['errors'][0]
  result['result']='passed' if all(result['checks'].values()) else 'failed'
@@ -102,3 +116,5 @@ finally:
  except subprocess.TimeoutExpired:proc.kill();proc.wait()
  loop.quit();log.close();tmp.cleanup()
  (OUT/'NESTED_TOOLBAR_RESULT.json').write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result,indent=2))
+
+if result["result"]!="passed":raise SystemExit(1)

@@ -6,3 +6,6 @@
 .codex-desktop-toolbar-button:insensitive { color: #9a9a9e; background-color: #303036; }
 .codex-desktop-toolbar-stop { background-color: #b51d2c; color: #ffffff; }
 .codex-desktop-toolbar-stop:hover { background-color: #d92c3b; }
+
+/* The ring is non-reactive and excluded from the input region. No cursor replacement. */
+.codex-pointer-halo { border: 3px solid rgba(80,210,255,0.95); border-radius: 32px; background-color: rgba(80,190,255,0.10); box-shadow: 0 0 12px 3px rgba(70,180,255,0.55); }

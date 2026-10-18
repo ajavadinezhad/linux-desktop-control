@@ -1,8 +1,10 @@
 # Linux Desktop Control
 
+**0.6.5 source candidate only.** Not installed or enabled after a reported jumpy pointer incident. Keep live control off until that issue is resolved and the user explicitly says ready. See [pointer incident and source changes](docs/POINTER_RECOVERY_0_6_5.md).
+
 Consent-based desktop tools for **GNOME 51 on Wayland**, with a small human-operated **Pause · Continue · Stop** toolbar.
 
-Version **0.6.4** is an independent local MCP integration for the Codex desktop app. It uses the public XDG Desktop Portal, PipeWire and a user-scoped GNOME extension. It is not an official OpenAI product, and it does not provide universal Linux desktop support.
+Version **0.6.5** is an independent local MCP integration for the Codex desktop app. It uses the public XDG Desktop Portal, PipeWire and a user-scoped GNOME extension. It is not an official OpenAI product, and it does not provide universal Linux desktop support.
 
 ## What it does
 
@@ -30,7 +32,7 @@ Keep this checkout in a stable folder, then run:
 
 Run `./install.sh --check` first for read-only environment checks. Normal installation also refuses missing requirements before any changes. The installer resolves the local server path, installs the user-scoped extension `desktop-toolbar@local.codex`, and registers the local plugin marketplace. It preserves other enabled extensions. Set `CODEX_BIN` if your Codex executable is not `/usr/lib/chatgpt/resources/codex`.
 
-First extension discovery may require you to save your work and log out/in. The installer never restarts your desktop. Refresh the app's MCP connection after installation. Check that `desktop_status` reports version 0.6.4 and that the optional `inspect_target` / `target_id` arguments are present.
+First extension discovery may require you to save your work and log out/in. The installer never restarts your desktop. Refresh the app's MCP connection after installation. Check that `desktop_status` reports version 0.6.5 and that the optional `inspect_target` / `target_id` arguments are present.
 
 Ask the assistant to perform a disposable task. Personally select one primary monitor and enable keyboard/pointer control in GNOME. The assistant must never approve that sharing dialog or click Pause/Continue/Stop for you.
 
@@ -67,7 +69,7 @@ The backend normally keeps images in memory and returns them to the MCP host. Th
 /usr/bin/python3 tests/check_loader.py
 ```
 
-The unit suite contains 159 tests. The loader test uses a temporary Codex home, loads the real installed client, checks all seven tool schemas, and never requests desktop sharing. Isolated toolbar rendering can be tested with `dbus-run-session -- /usr/bin/python3 tests/check_toolbar_shell.py`; this refuses an existing GNOME Shell bus. Live human acceptance is separate from unit and isolated rendering tests.
+The unit suite contains 171 tests. The loader test uses a temporary Codex home, loads the real installed client, checks all seven tool schemas, and never requests desktop sharing. Isolated toolbar rendering can be tested with `dbus-run-session -- /usr/bin/python3 tests/check_toolbar_shell.py`; this refuses an existing GNOME Shell bus. On a dbus-broker host without dbus-run-session, use `python3 tests/check_private_toolbar.py`. JavaScript feedback regressions use Node.js (`NODE_BIN` can select its path). Live human acceptance is separate from unit and isolated rendering tests.
 
 ## Remove
 

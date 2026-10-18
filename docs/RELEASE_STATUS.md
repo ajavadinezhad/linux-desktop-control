@@ -1,3 +1,7 @@
+# 0.6.5 source candidate — not installed
+
+Live control and the installed toolbar remain off following the reported pointer incident. The symptom is unresolved; do not reenable or start until the user explicitly says ready. See [diagnosis, source changes and isolated verification](POINTER_RECOVERY_0_6_5.md).
+
 # Private review status — 0.6.4
 
 Prepared 2026-10-17. Private technical review candidate.

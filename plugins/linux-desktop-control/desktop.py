@@ -24,7 +24,7 @@ import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import Gio, GLib, Gst
 
-VERSION = '0.6.4'
+VERSION = '0.6.5'
 DEST = 'org.freedesktop.portal.Desktop'
 PATH = '/org/freedesktop/portal/desktop'
 RD = 'org.freedesktop.portal.RemoteDesktop'
@@ -503,13 +503,18 @@ class Desktop:
 
     def close(self):
         with self.lock:
-            self.release()
+            self.stopped.set()
+            try:self.release()
+            except Exception:self.cleanup_warning='Input release failed; portal closure attempted. Check sharing.'
+            # Always attempt portal closure even when capture/fd cleanup fails.
             if self.pipeline:
-                self.pipeline.set_state(Gst.State.NULL)
-                self.pipeline = None
+                try:self.pipeline.set_state(Gst.State.NULL)
+                except Exception:self.cleanup_warning='Capture shutdown failed; portal closure attempted. Check sharing.'
+                finally:self.pipeline=None
             if self.fd is not None:
-                os.close(self.fd)
-                self.fd = None
+                try:os.close(self.fd)
+                except OSError:self.cleanup_warning='Capture descriptor cleanup failed; portal closure attempted. Check sharing.'
+                finally:self.fd=None
             if self.session:
                 if not getattr(self,'portal_closed',False):
                     try:
@@ -518,10 +523,12 @@ class Desktop:
                     except Exception:
                         if not getattr(self,'portal_closed',False):
                             self.cleanup_warning='Portal closure could not be confirmed. Use the GNOME sharing indicator to stop sharing.'
-                self.session = None
+                self.session=None
             if self.closed_sub:
-                self.bus.signal_unsubscribe(self.closed_sub)
-                self.closed_sub = None
+                try:self.bus.signal_unsubscribe(self.closed_sub)
+                except Exception:self.cleanup_warning='Portal signal cleanup failed. Check sharing.'
+                finally:self.closed_sub=None
+            self.pointer_position=None
 
     def shutdown(self):
         self.shutdown_requested = True
@@ -1024,7 +1031,19 @@ class StdioTransport:
         self.output_lock=threading.Lock()
         self.wait_lock=threading.Lock()
         self.wait_threads=[]
+        self.emergency_requested=threading.Event()
         self.server.panel_control=self.panel_control
+
+    def request_emergency_stop(self):
+        # Signal handlers only set cancellation flags; cleanup runs off-handler.
+        if self.server.backend:self.server.backend.stopped.set()
+        self.emergency_requested.set()
+
+    def watch_emergency(self):
+        while not self.disconnected.is_set():
+            if self.emergency_requested.wait(.05):
+                self.emergency_requested.clear()
+                self.panel_control('stop')
 
     def notify_state(self):
         with self.state_changed:self.state_changed.notify_all()
@@ -1154,6 +1173,8 @@ class StdioTransport:
     def run(self,input_stream,output_stream):
         reader=threading.Thread(target=self.read,args=(input_stream,),daemon=True)
         reader.start()
+        emergency=threading.Thread(target=self.watch_emergency,daemon=True)
+        emergency.start()
         try:
             while True:
                 item=self.pending.get()
@@ -1203,14 +1224,14 @@ class StdioTransport:
             self.server.shutdown()
             self.notify_state()
             for waiter in self.wait_threads:waiter.join(1)
+            emergency.join(1)
 
 
 def main():
     server=Server()
     transport=StdioTransport(server)
     def stop(signum,frame):
-        transport.interrupt(all_requests=True)
-        if server.backend:server.backend.stopped.set()
+        transport.request_emergency_stop()
         if signum!=signal.SIGUSR1:raise SystemExit(0)
     for s in (signal.SIGINT,signal.SIGTERM,signal.SIGUSR1):signal.signal(s,stop)
     transport.run(sys.stdin,sys.stdout)

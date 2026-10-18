@@ -1,3 +1,7 @@
+# 0.6.5 source-only verification
+
+171 unit tests pass. New halo/shortcut behavior is tested in isolation, with no live-host acceptance or deployment. The reported jumpy pointer remains unresolved. See [incident report](POINTER_RECOVERY_0_6_5.md).
+
 # Current acceptance
 
 See [0.6.4 desktop acceptance](ACCEPTANCE_0_6_4.md) for 49 real application/control assertions, physical toolbar acceptance and capture recovery. The current automated suite has 159 tests. Older sections below retain their original version scope.
