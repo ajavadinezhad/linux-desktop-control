@@ -5,7 +5,7 @@ the covered kernel input devices, including activity in the same window. It is
 off by default. Normal desktop control does not invoke it or request its
 administrator authorization.
 
-The implementation is installed and 234 Python tests pass. Live startup and browser input worked, but same-window typing interruption has not passed. The latest held-key attempt completed 960 characters without an activity signal; the user confirmed a one-second physical key hold while text grew. Drag interruption remains unverified. Automated tests do not establish live device coverage.
+The implementation is installed and 237 Python tests pass. Live startup and browser input worked, but same-window typing interruption has not passed. The latest held-key attempt completed 960 characters without an activity signal; the user confirmed a one-second physical key hold while text grew. Drag interruption remains unverified. Automated tests do not establish live device coverage.
 
 ## Consent and operation
 
@@ -78,3 +78,5 @@ The collector samples aggregate held-key/button state using a separately opened 
 Calibration timeout diagnostics contain only eight fixed booleans (keyboard/pointer category seen, stream/query/held presence, current held/quiet/stale flags). The helper closes input descriptors before returning them; diagnostics never authorize capture or input. The controller emits a fixed readiness marker after CALIBRATING so the challenge is not requested before its actual start. A physical coverage pass remains required.
 
 Before arming, a delayed clock-switch loss marker may trigger bounded resynchronization: clear all calibration credit, discard through SYN_REPORT, require released input and a clean boundary, then request the challenge again. At most two resets fit within the original30second calibration deadline; no capture/input is allowed. Clock setup now occurs immediately after opening each primary client. Bulk reads reduce per-record overhead. Once armed, SYN_DROPPED remains an immediate terminal fault. Live success remains unverified.
+
+Calibration accepts fresh absolute pointer-source samples because those same source records cause cancellation once armed. This proves source delivery, not actual changed position, button delivery, or human identity. The pre-arm quiet period is1.5seconds; afterARM there is no grace. Terminal activity category is only key/button, pointer, switch, metadata or held-state, with no raw codes or coordinates.

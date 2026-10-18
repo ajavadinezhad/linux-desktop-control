@@ -30,7 +30,7 @@ defaults to false. Missing installation is refused before requesting sharing.
    and GID to `nobody` (65534), disable dumpability, and set `NO_NEW_PRIVS`.
    Establish the separate unprivileged system-bus session watch, verify unlocked
    state, then apply the seccomp allowlist. READY follows successful confinement.
-7. Require ARM → successful ARMED before any task screenshot or automated input.
+7. Require CALIBRATE → CALIBRATING → CALIBRATED → ARM → successful ARMED before any task screenshot or automated input. Both source categories, release and1.5seconds quiet are required before calibration completes.
    ARM drains authorization-phase events, verifies released keys/buttons and
    rechecks queued activity, topology, and session health. There is no ignored
    activity grace after arming. Bind normal foreground protection and obtain a
@@ -41,8 +41,8 @@ or failed confinement closes sharing instead of claiming weaker protection.
 
 ## Data and event boundary
 
-The private protocol reports only READY, ARMED, ACTIVITY, FAULT, and ALIVE.
-Commands are fixed ARM, HB, CLOSE, and fault handling; there is no public filter,
+The private protocol reports fixed readiness/calibration/reset, ARMED, typed activity, FAULT and ALIVE tokens. Terminal REPORT returns eight fixed calibration booleans after raw descriptors close.
+Commands are fixed CALIBRATE, ARM, HB, CLOSE, REPORT and fault handling; there is no public filter,
 raw-event subscription, alternate-device request, command execution, or raw-FD
 transfer. Buffers, commands, and deadlines are bounded.
 

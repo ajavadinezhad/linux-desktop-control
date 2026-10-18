@@ -86,6 +86,7 @@ class Controller:
         self.calibration_report_kind = 'not-requested'
         self.calibration_late_result = False
         self.calibration_resets = 0
+        self.activity_kind = None
 
     def _send(self, token):
         payload = (token + '\n').encode('ascii')
@@ -304,7 +305,10 @@ class Controller:
             self.close()
 
     def _consume(self,message):
-        if message == 'ACTIVITY':
+        kinds={'ACTIVITY':'unspecified','ACTIVITY_KEY':'key','ACTIVITY_POINTER':'pointer',
+               'ACTIVITY_SWITCH':'switch','ACTIVITY_METADATA':'metadata','ACTIVITY_HELD':'held'}
+        if message in kinds:
+            self.activity_kind=kinds[message]
             self._notify(activity=True)
             return True
         if message == 'ALIVE':
@@ -367,7 +371,7 @@ class Controller:
                 'calibration_evidence':self.calibration_evidence,
                 'calibration_report_kind':self.calibration_report_kind,
                 'calibration_late_result':self.calibration_late_result,
-                'calibration_resets':self.calibration_resets,
+                'calibration_resets':self.calibration_resets,'activity_kind':self.activity_kind,
                 'lease_remaining_is_estimate':True}
 
     def close(self):

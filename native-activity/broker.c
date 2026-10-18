@@ -24,6 +24,7 @@
 #define MAX_DEVICES 64
 #define HEARTBEAT_MS 1000
 #define SESSION_BUDGET_MS 120000
+#define CALIBRATION_QUIET_MS 1500
 static int device_count;
 /* Exit status only: fixed stage identifiers, never device/input metadata. */
 static int collector_phase;
@@ -31,6 +32,7 @@ static int collector_phase;
 #include "confinement.h"
 #endif
 static bool armed;
+static const char *stream_activity_message;
 enum { CATEGORY_KEYBOARD = 1, CATEGORY_POINTER = 2 };
 /* Filled only by the verified opener, not accepted from the requester. */
 static unsigned device_categories[MAX_DEVICES];
@@ -95,6 +97,12 @@ static int classify(const struct input_event *event) {
         event->type == EV_SW || event->type == EV_MSC) return 1;
     return -1;
 }
+static const char *activity_message(const struct input_event *event) {
+    if (event->type == EV_KEY) return "ACTIVITY_KEY\n";
+    if (event->type == EV_REL || event->type == EV_ABS) return "ACTIVITY_POINTER\n";
+    if (event->type == EV_SW) return "ACTIVITY_SWITCH\n";
+    return "ACTIVITY_METADATA\n"; /* EV_MSC: retained fail-closed observation. */
+}
 static bool ordinary_key(unsigned code) {
     return code > KEY_RESERVED && code < BTN_MISC && code != KEY_POWER &&
            code != KEY_SLEEP && code != KEY_WAKEUP;
@@ -104,10 +112,11 @@ static unsigned event_category(int device, const struct input_event *event) {
     if (event->type == EV_KEY && event->value == 1 && ordinary_key(event->code))
         return categories & CATEGORY_KEYBOARD;
     if ((event->type == EV_KEY && event->value == 1 && event->code >= BTN_MISC) ||
-        (event->type == EV_REL && event->value != 0))
+        (event->type == EV_REL && event->value != 0) || event->type == EV_ABS)
         return categories & CATEGORY_POINTER;
-    /* An ABS sample alone does not prove movement. Touch/absolute devices
-     * need a fresh pointer-button down/held challenge; no coordinate history. */
+    /* A fresh ABS record establishes only this verified pointer source path.
+     * It does not attest motion, a button or human provenance. No ABS value
+     * or coordinate history is inspected for this classification. */
     return 0;
 }
 static void calibration_note(unsigned categories, long long current) {
@@ -160,6 +169,7 @@ static int drain(int fd) {
                 if (armed) {
                     long long stamp = (long long)event.time.tv_sec * 1000 + event.time.tv_usec / 1000;
                     if (stamp < arm_time || stamp > now_ms() + 1000) { collector_phase = 45; return -1; }
+                    stream_activity_message = activity_message(&event);
                     return 1;
                 }
                 if (calibrated) { collector_phase = 46; return -1; }
@@ -232,9 +242,9 @@ static int calibration_tick(long long current) {
     }
     calibration_diag.quiet_blocked = !held &&
         calibration_seen == (CATEGORY_KEYBOARD | CATEGORY_POINTER) &&
-        current - calibration_last_activity < 150;
+        current - calibration_last_activity < CALIBRATION_QUIET_MS;
     if (held || calibration_seen != (CATEGORY_KEYBOARD | CATEGORY_POINTER) ||
-        current - calibration_last_activity < 150) return 0;
+        current - calibration_last_activity < CALIBRATION_QUIET_MS) return 0;
     struct pollfd boundary[MAX_DEVICES + 2];
     for (int i = 0; i < device_count + 2; ++i)
         boundary[i] = (struct pollfd){4 + i, POLLIN, 0};
@@ -422,7 +432,7 @@ int main(int argc, char **argv) {
             collector_phase = 31;
             int held = held_state();
             if (held < 0) return fail();
-            if (held > 0) return report("ACTIVITY\n") ? 1 : 0;
+            if (held > 0) return report("ACTIVITY_HELD\n") ? 1 : 0;
         }
         collector_phase = 22;
         int ready = poll(fds, poll_count, 20);
@@ -439,7 +449,7 @@ int main(int argc, char **argv) {
             collector_phase = 31;
             int held = held_state();
             if (held < 0) return fail();
-            if (held > 0) return report("ACTIVITY\n") ? 1 : 0;
+            if (held > 0) return report("ACTIVITY_HELD\n") ? 1 : 0;
         }
         /* Source activity takes priority over new control commands. */
         for (int i = 1; i <= device_count; ++i) {
@@ -448,7 +458,7 @@ int main(int argc, char **argv) {
             if (fds[i].revents & POLLIN) {
                 int result = drain(fds[i].fd);
                 if (result < 0) return fail();
-                if (result > 0) return report("ACTIVITY\n") ? 1 : 0;
+                if (result > 0) return report(stream_activity_message) ? 1 : 0;
             }
         }
         collector_phase = 30;

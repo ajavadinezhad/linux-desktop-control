@@ -271,4 +271,18 @@ class NativeActivityTests(unittest.TestCase):
   self.assertEqual(output.getvalue(),'');self.assertEqual(c.calibration_resets,1);self.assertEqual(c.calibration_report_kind,'received');self.assertFalse(c.calibration_verified);self.assertTrue(c.calibration_evidence['keyboard_seen']);self.assertEqual(sent,['REPORT'])
   c=self.controller();c.calibration_state='waiting';c.calibration_resets=2;c._send=lambda token:None;c._read=lambda timeout:'CALIBRATION_RESET';c._request_calibration_report();self.assertEqual(c.calibration_resets,2);self.assertEqual(c.calibration_report_kind,'malformed');self.assertIsNone(c.calibration_evidence)
 
+ def test_fixed_activity_category_tokens_cancel_before_callback(self):
+  kinds={'ACTIVITY':'unspecified','ACTIVITY_KEY':'key','ACTIVITY_POINTER':'pointer','ACTIVITY_SWITCH':'switch','ACTIVITY_METADATA':'metadata','ACTIVITY_HELD':'held'}
+  for token,kind in kinds.items():
+   with self.subTest(token=token):
+    c=self.controller();seen=[];c.on_activity=lambda:seen.append(c.status()['activity_kind']);self.assertTrue(c._consume(token));self.assertEqual(seen,[kind]);self.assertEqual(c.terminal_reason,'activity');self.assertTrue(c.closed);self.assertEqual(c.status()['activity_kind'],kind)
+ def test_unknown_activity_suffix_faults_without_exporting_suffix(self):
+  c=self.controller()
+  for token in ('ACTIVITY_RAW_KEYCODE','ACTIVITY_KEY 30','ACTIVITY_POINTER_12','ACTIVITY_key'):
+   with self.subTest(token=token):
+    with self.assertRaises(m.NativeFailure):c._consume(token)
+    self.assertIsNone(c.status()['activity_kind']);self.assertNotIn(token,str(c.status()))
+ def test_categorized_final_activity_wins_over_helper_exit(self):
+  c=self.controller();c.ready=True;c.last_peer=time.monotonic();c.buffer.extend(b'ACTIVITY_HELD\n');c.process=SimpleNamespace(poll=lambda:0,wait=lambda timeout:0);c._monitor();self.assertTrue(self.activity.is_set());self.assertFalse(self.fault.is_set());self.assertEqual(c.status()['activity_kind'],'held');self.assertEqual(c.status()['terminal_reason'],'activity');self.assertEqual(c.status()['helper_exit_code'],0)
+
 if __name__=='__main__':unittest.main()
