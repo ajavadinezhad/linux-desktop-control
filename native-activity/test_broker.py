@@ -85,6 +85,16 @@ int main(void) {
     line(control[1],"CALIBRATING\n");usleep(5000);
     long long stamp=now_ms();struct input_event event={0};
     event.time.tv_sec=stamp/1000;event.time.tv_usec=(stamp%1000)*1000;
+    /* Clock-switch drop becomes visible with the next packet. Lost packet's
+     * key must not supply challenge credit. */
+    struct input_event lost[3] = {event,event,event};
+    lost[0].type=EV_SYN;lost[0].code=SYN_DROPPED;
+    lost[1].type=EV_KEY;lost[1].code=KEY_LEFTSHIFT;lost[1].value=1;
+    lost[2].type=EV_SYN;lost[2].code=SYN_REPORT;
+    assert(write(stream[1],lost,sizeof lost)==(ssize_t)sizeof lost);
+    assert(write(control[1],"HB\n",3)==3);
+    line(control[1],"CALIBRATION_RESET\n");line(control[1],"ALIVE\n");usleep(2000);
+    stamp=now_ms();event.time.tv_sec=stamp/1000;event.time.tv_usec=(stamp%1000)*1000;
     event.type=EV_LED;event.code=LED_NUML;event.value=1;
     assert(write(stream[1],&event,sizeof event)==(ssize_t)sizeof event);
     assert(write(control[1],"HB\n",3)==3);line(control[1],"ALIVE\n");
@@ -128,9 +138,10 @@ static int fixture_fill_budget;
 static char fixture_reply[32];
 static ssize_t fixture_read(int fd, void *data, size_t size) {
     if (fixture_fill_budget) {
-        assert(size == sizeof(struct input_event));
+        assert(size % sizeof(struct input_event) == 0);
         struct input_event event = {.type = EV_SYN, .code = SYN_REPORT};
-        memcpy(data, &event, sizeof event); return sizeof event;
+        for(size_t i=0;i<size;i+=sizeof event) memcpy((char*)data+i,&event,sizeof event);
+        return (ssize_t)size;
     }
     return read(fd, data, size);
 }
@@ -250,6 +261,41 @@ int main(void) {
     int write_copy = fcntl(p[1], F_DUPFD_CLOEXEC, 128);
     close(p[0]); close(p[1]); assert(dup2(read_copy, 4) == 4);
     close(read_copy); p[0] = 4; p[1] = write_copy;
+    device_count=1; armed=false; calibrated=false; calibrating=true;
+    calibration_seen=CATEGORY_KEYBOARD|CATEGORY_POINTER;
+    calibration_reset_pending=false;calibration_reset_rounds=0;
+    struct input_event lost[3] = {e,e,e};
+    lost[0].type=EV_SYN;lost[0].code=SYN_DROPPED;
+    lost[1].type=EV_KEY;lost[1].code=KEY_LEFTSHIFT;lost[1].value=1;
+    lost[2].type=EV_SYN;lost[2].code=SYN_REPORT;
+    assert(write(p[1],lost,sizeof lost)==(ssize_t)sizeof lost);
+    assert(drain(p[0])==0); assert(calibration_seen==0);
+    assert(calibration_reset_pending && !calibration_resync[0]);
+    assert(command("ARM")==-1);
+    fixture_quiet=fixture_capture=1;
+    assert(calibration_tick(now_ms())==0);
+    assert(strcmp(fixture_reply,"CALIBRATION_RESET\n")==0);
+    assert(!calibration_reset_pending && calibration_seen==0);
+    assert(command("ARM")==-1);usleep(2000);
+    stamp=now_ms();e.time.tv_sec=stamp/1000;e.time.tv_usec=(stamp%1000)*1000;
+    assert(write(p[1],&e,sizeof e)==(ssize_t)sizeof e);
+    assert(drain(p[0])==0);assert(calibration_seen==CATEGORY_KEYBOARD);
+    assert(command("ARM")==-1);
+    e.type=EV_REL;
+    assert(write(p[1],&e,sizeof e)==(ssize_t)sizeof e);
+    assert(drain(p[0])==0);
+    assert(calibration_tick(now_ms()+150)==0);assert(calibrated);
+    assert(command("ARM")==0);assert(armed);
+    assert(write(p[1],lost,sizeof lost)==(ssize_t)sizeof lost);
+    assert(drain(p[0])==-1);assert(collector_phase==42); /* armed drop never resyncs */
+    armed=false;calibrated=false;calibrating=true;calibration_reset_pending=false;
+    assert(write(p[1],lost,sizeof lost)==(ssize_t)sizeof lost);
+    assert(drain(p[0])==0);assert(calibration_tick(now_ms())==0); /* second reset */
+    assert(write(p[1],lost,sizeof lost)==(ssize_t)sizeof lost);
+    assert(drain(p[0])==-1);assert(collector_phase==42); /* third round refuses */
+    calibration_reset_pending=false;calibration_reset_rounds=0;
+    memset(calibration_resync,0,sizeof calibration_resync);
+    fixture_quiet=fixture_capture=0; device_count=0; e.type=EV_KEY;
     armed = false; calibrating = true; calibration_seen = 0;
     calibration_time = stamp + 1000;
     assert(write(p[1], &e, sizeof e) == (ssize_t)sizeof e);

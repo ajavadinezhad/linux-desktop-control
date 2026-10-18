@@ -238,4 +238,37 @@ class NativeActivityTests(unittest.TestCase):
    finally:right.close();done.set()
   worker=threading.Thread(target=helper,daemon=True);worker.start();started=time.monotonic();c._request_calibration_report();elapsed=time.monotonic()-started;self.assertGreaterEqual(elapsed,.45);self.assertLess(elapsed,2);self.assertEqual(c.status()['calibration_report_kind'],'received');self.assertTrue(c.calibration_evidence['keyboard_seen']);self.assertTrue(c.calibration_late_result);self.assertFalse(c.calibration_verified);self.assertEqual(commands,['REPORT']);c.close();worker.join(timeout=1);self.assertEqual(c.status()['helper_exit_code'],0)
 
+ def test_one_or_two_calibration_resets_require_fresh_result(self):
+  for resets in (1,2):
+   with self.subTest(resets=resets):
+    c=self.controller();c.calibration_state='waiting';c.process=SimpleNamespace(poll=lambda:None,wait=lambda timeout:0);messages=iter(['CALIBRATION_RESET']*resets+['CALIBRATED']);c._read=lambda timeout:next(messages);sent=[];c._send=sent.append;output=io.StringIO()
+    with contextlib.redirect_stderr(output):c._wait_calibrated()
+    self.assertEqual(c.calibration_resets,resets);self.assertEqual(output.getvalue(),'DESKTOP_CALIBRATION_READY_AGAIN\n'*resets);self.assertFalse(c.calibration_verified);self.assertNotIn('ARM',sent)
+ def test_excess_calibration_reset_faults_without_arm(self):
+  c=self.controller();c.calibration_state='waiting';c.process=SimpleNamespace(poll=lambda:None,wait=lambda timeout:0);c._read=lambda timeout:'CALIBRATION_RESET';c._send=lambda token:None
+  with contextlib.redirect_stderr(io.StringIO()):
+   with self.assertRaisesRegex(m.NativeFailure,'reset invalid'):c._wait_calibrated()
+  self.assertEqual(c.calibration_resets,2);self.assertFalse(c.calibration_verified)
+ def test_resets_do_not_extend_original_challenge_deadline(self):
+  c=self.controller();c.calibration_state='waiting';clock=[0.0];sent=[];c.process=SimpleNamespace(poll=lambda:None,wait=lambda timeout:0);reads=[0];c._send=sent.append
+  def read(timeout):
+   if 'REPORT' in sent:return 'CAL_DIAG_00000000'
+   clock[0]+=.25;reads[0]+=1
+   if reads[0] in (40,80):return 'CALIBRATION_RESET'
+   return 'ALIVE'
+  c._read=read
+  with patch.object(m.time,'monotonic',side_effect=lambda:clock[0]),contextlib.redirect_stderr(io.StringIO()):
+   with self.assertRaisesRegex(m.NativeFailure,'challenge timed out'):c._wait_calibrated()
+  self.assertEqual(clock[0],30);self.assertEqual(c.calibration_resets,2);self.assertEqual(c.calibration_report_kind,'received');self.assertNotIn('ARM',sent);self.assertFalse(c.calibration_verified)
+ def test_reset_token_invalid_outside_waiting_and_after_arm(self):
+  c=self.controller();c.calibration_state='challenge-seen';c._read=lambda timeout:'CALIBRATION_RESET';c.process=SimpleNamespace(poll=lambda:None,wait=lambda timeout:0)
+  with self.assertRaisesRegex(m.NativeFailure,'reset invalid'):c._wait_calibrated()
+  with self.assertRaisesRegex(m.NativeFailure,'invalid response'):c._consume('CALIBRATION_RESET')
+
+ def test_queued_reset_during_report_never_cues_or_authorizes(self):
+  c=self.controller();c.calibration_state='waiting';messages=iter(('CALIBRATION_RESET','CAL_DIAG_11011000'));sent=[];c._send=sent.append;c._read=lambda timeout:next(messages);output=io.StringIO()
+  with contextlib.redirect_stderr(output):c._request_calibration_report()
+  self.assertEqual(output.getvalue(),'');self.assertEqual(c.calibration_resets,1);self.assertEqual(c.calibration_report_kind,'received');self.assertFalse(c.calibration_verified);self.assertTrue(c.calibration_evidence['keyboard_seen']);self.assertEqual(sent,['REPORT'])
+  c=self.controller();c.calibration_state='waiting';c.calibration_resets=2;c._send=lambda token:None;c._read=lambda timeout:'CALIBRATION_RESET';c._request_calibration_report();self.assertEqual(c.calibration_resets,2);self.assertEqual(c.calibration_report_kind,'malformed');self.assertIsNone(c.calibration_evidence)
+
 if __name__=='__main__':unittest.main()

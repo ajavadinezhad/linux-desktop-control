@@ -37,6 +37,8 @@ static unsigned device_categories[MAX_DEVICES];
 static bool calibrating, calibrated;
 static unsigned calibration_seen;
 static long long calibration_time, calibration_last_activity;
+static bool calibration_resync[MAX_DEVICES], calibration_reset_pending;
+static unsigned calibration_reset_rounds;
 static struct {
     bool stream_record, query_success, held_seen, held_last, quiet_blocked, stale_timestamp;
 } calibration_diag;
@@ -109,46 +111,68 @@ static unsigned event_category(int device, const struct input_event *event) {
     return 0;
 }
 static void calibration_note(unsigned categories, long long current) {
-    if (!calibrating) return;
+    if (!calibrating || calibration_reset_pending) return;
     calibration_seen |= categories;
     calibration_last_activity = current;
 }
 /* Drain with a strict bound: an unbounded producer must not starve control. */
 static int drain(int fd) {
-    for (unsigned i = 0; i < 4096; ++i) {
-        struct input_event event;
-        ssize_t n = read(fd, &event, sizeof event);
+    unsigned consumed = 0, attempts = 0;
+    while (consumed < 4096 && attempts++ < 4096) {
+        struct input_event batch[64];
+        size_t capacity = 4096 - consumed < 64 ? 4096 - consumed : 64;
+        ssize_t n = read(fd, batch, capacity * sizeof *batch);
         if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return 0;
         if (n < 0 && errno == EINTR) continue;
         if (n < 0) { collector_phase = 40; return -1; }
-        if (n != (ssize_t)sizeof event) { collector_phase = 41; return -1; }
-        if (calibrating) {
-            calibration_diag.stream_record = true;
-            long long stamp = (long long)event.time.tv_sec * 1000 + event.time.tv_usec / 1000;
-            if (stamp <= calibration_time) calibration_diag.stale_timestamp = true;
-        }
-        int kind = classify(&event);
-        if (kind < 0) {
-            collector_phase = event.type == EV_SYN && event.code == SYN_DROPPED ? 42 : 44;
-            return -1;
-        }
-        if (kind == 2) continue; /* Known output feedback: no calibration credit. */
-        if (kind) {
-            if (armed) {
-                long long stamp = (long long)event.time.tv_sec * 1000 + event.time.tv_usec / 1000;
-                if (stamp < arm_time || stamp > now_ms() + 1000) { collector_phase = 45; return -1; }
-                return 1;
-            }
-            if (calibrated) { collector_phase = 46; return -1; }
+        if (!n || n % sizeof *batch) { collector_phase = 41; return -1; }
+        unsigned records = (unsigned)((size_t)n / sizeof *batch);
+        consumed += records;
+        for (unsigned record = 0; record < records; ++record) {
+            struct input_event event = batch[record];
             if (calibrating) {
+                calibration_diag.stream_record = true;
                 long long stamp = (long long)event.time.tv_sec * 1000 + event.time.tv_usec / 1000;
-                long long current = now_ms();
-                if (current < 0 || stamp > current + 1000) { collector_phase = 45; return -1; }
-                if (stamp > calibration_time)
-                    calibration_note(event_category(fd - 4, &event), current);
+                if (stamp <= calibration_time) calibration_diag.stale_timestamp = true;
             }
-            /* Consent/authentication activity before ARM grants no input and
-             * is discarded. ARM separately requires every key released. */
+            int kind = classify(&event);
+            if (calibrating && !armed && event.type == EV_SYN && event.code == SYN_DROPPED) {
+                int device = fd - 4;
+                if (device < 0 || device >= device_count) { collector_phase = 42; return -1; }
+                if (!calibration_reset_pending && ++calibration_reset_rounds > 2) {
+                    collector_phase = 42; return -1;
+                }
+                calibration_reset_pending = true;
+                calibration_resync[device] = true;
+                calibration_seen = 0;
+                continue;
+            }
+            if (calibrating && !armed && fd >= 4 && fd < 4 + device_count && calibration_resync[fd - 4]) {
+                if (event.type == EV_SYN && event.code == SYN_REPORT) calibration_resync[fd - 4] = false;
+                continue;
+            }
+            if (kind < 0) {
+                collector_phase = event.type == EV_SYN && event.code == SYN_DROPPED ? 42 : 44;
+                return -1;
+            }
+            if (kind == 2) continue; /* Known output feedback: no calibration credit. */
+            if (kind) {
+                if (armed) {
+                    long long stamp = (long long)event.time.tv_sec * 1000 + event.time.tv_usec / 1000;
+                    if (stamp < arm_time || stamp > now_ms() + 1000) { collector_phase = 45; return -1; }
+                    return 1;
+                }
+                if (calibrated) { collector_phase = 46; return -1; }
+                if (calibrating) {
+                    long long stamp = (long long)event.time.tv_sec * 1000 + event.time.tv_usec / 1000;
+                    long long current = now_ms();
+                    if (current < 0 || stamp > current + 1000) { collector_phase = 45; return -1; }
+                    if (stamp > calibration_time)
+                        calibration_note(event_category(fd - 4, &event), current);
+                }
+                /* Consent/authentication activity before ARM grants no input and
+                 * is discarded. ARM separately requires every key released. */
+            }
         }
     }
     collector_phase = 47;
@@ -187,6 +211,25 @@ static int calibration_tick(long long current) {
     if (!calibrating) return 0;
     int held = held_state();
     if (held < 0 || current < 0) return -1;
+    if (calibration_reset_pending) {
+        for (int i = 0; i < device_count; ++i) if (calibration_resync[i]) return 0;
+        if (held) return 0;
+        struct pollfd boundary[MAX_DEVICES + 2];
+        for (int i = 0; i < device_count + 2; ++i)
+            boundary[i] = (struct pollfd){4 + i, POLLIN, 0};
+        int pending = poll(boundary, device_count + 2, 0);
+        if (pending < 0) return -1;
+        if (pending) return 0;
+#ifdef LDC_NATIVE_WATCH
+        if (!session_watch_ok()) return -1;
+#endif
+        calibration_seen = 0;
+        calibration_time = calibration_last_activity = now_ms();
+        if (calibration_time < 0) return -1;
+        calibration_reset_pending = false;
+        calibration_diag.quiet_blocked = false;
+        return send(CONTROL, "CALIBRATION_RESET\n", 18, MSG_NOSIGNAL | MSG_DONTWAIT) == 18 ? 0 : -1;
+    }
     calibration_diag.quiet_blocked = !held &&
         calibration_seen == (CATEGORY_KEYBOARD | CATEGORY_POINTER) &&
         current - calibration_last_activity < 150;
@@ -234,6 +277,9 @@ static int command(const char *line) {
         for (int i = 0; i < device_count; ++i) if (drain(4 + i)) return -1;
         if (held_state() != 0) return -1;
         calibration_seen = 0;
+        calibration_reset_pending = false;
+        calibration_reset_rounds = 0;
+        memset(calibration_resync, 0, sizeof calibration_resync);
         memset(&calibration_diag, 0, sizeof calibration_diag);
         calibration_time = calibration_last_activity = now_ms();
         if (calibration_time < 0) return -1;
@@ -241,7 +287,8 @@ static int command(const char *line) {
         return send(CONTROL, "CALIBRATING\n", 12, MSG_NOSIGNAL | MSG_DONTWAIT) == 12 ? 0 : -1;
     }
     if (!strcmp(line, "ARM")) {
-        if (armed || calibrating || !calibrated) return -1;
+        if (armed || calibrating || calibration_reset_pending || !calibrated) return -1;
+        for (int i = 0; i < device_count; ++i) if (calibration_resync[i]) return -1;
 #ifdef LDC_NATIVE_WATCH
         if (!session_watch_ok()) return -1;
 #endif

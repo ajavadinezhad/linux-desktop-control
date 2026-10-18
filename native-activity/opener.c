@@ -99,6 +99,13 @@ int main(int argc,char **argv) {
         if(!node||strncmp(node,"/dev/input/event",16)||count==MAX_DEVICES){udev_device_unref(d);goto fault;}
         int fd=open(node,O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_NOFOLLOW);struct stat info;
         if(fd<0||fstat(fd,&info)||!S_ISCHR(info.st_mode)||info.st_rdev!=expected||major(info.st_rdev)!=13){if(fd>=0)close(fd);udev_device_unref(d);goto fault;}
+        /* Set the stream clock before capability queries, snapshot opens and
+         * the rest of enumeration. A clock change can queue SYN_DROPPED for
+         * pending events; keep that startup window as small as possible.
+         * Collector verify may repeat the same clock without changing it.
+         * This does not replace explicit unarmed resynchronization. */
+        int stream_clock=CLOCK_MONOTONIC;
+        if(ioctl(fd,EVIOCSCLOCKID,&stream_clock)<0){close(fd);udev_device_unref(d);goto fault;}
         unsigned long capabilities[(EV_MAX+8*sizeof(long))/(8*sizeof(long))]={0};
         if(ioctl(fd,EVIOCGBIT(0,sizeof capabilities),capabilities)<0){close(fd);udev_device_unref(d);goto fault;}
         bool has_key=(capabilities[EV_KEY/(8*sizeof(long))]>>(EV_KEY%(8*sizeof(long))))&1;
