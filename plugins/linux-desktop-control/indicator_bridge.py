@@ -3,14 +3,14 @@ import json,threading,uuid
 from gi.repository import Gio,GLib
 NAME='org.gnome.Shell';PATH='/org/codex/DesktopIndicator';IFACE='org.codex.DesktopIndicator'
 class IndicatorBridge:
- def __init__(self,status,bus=None):
-  self.status=status;self.bus=bus;self.nonce=uuid.uuid4().hex;self.owner=None;self.bound=False;self.closed=threading.Event();self.subscription=None;self.armed=None
+ def __init__(self,status,bus=None,on_failure=None):
+  self.on_failure=on_failure;self.status=status;self.bus=bus;self.nonce=uuid.uuid4().hex;self.owner=None;self.bound=False;self.closed=threading.Event();self.subscription=None;self.armed=None
  def call(self,method,signature,args):return self.bus.call_sync(self.owner,PATH,IFACE,method,GLib.Variant(signature,args),None,Gio.DBusCallFlags.NONE,1000,None).unpack()
  def preflight(self):
   if self.bus is None:self.bus=Gio.bus_get_sync(Gio.BusType.SESSION,None)
   self.owner=self.bus.call_sync('org.freedesktop.DBus','/org/freedesktop/DBus','org.freedesktop.DBus','GetNameOwner',GLib.Variant('(s)',(NAME,)),None,Gio.DBusCallFlags.NONE,1000,None).unpack()[0]
   diagnostics=json.loads(self.call('GetDiagnostics','()',())[0])
-  if diagnostics.get('protocol_version')!=2:raise RuntimeError('Foreground observer protocol 2 is not loaded. Save work and log out/in manually before a new session. No sharing requested.')
+  if diagnostics.get('protocol_version')!=2 or diagnostics.get('pointer_snapshot') is not True:raise RuntimeError('Foreground observer protocol 2 with fresh pointer snapshots is not loaded. Save work and log out/in manually before a new session. No sharing requested.')
  def start(self):
   self.preflight()
   if self.call('Bind','(s)',(self.nonce,))!=(True,):raise RuntimeError('Indicator already owned')
@@ -31,7 +31,11 @@ class IndicatorBridge:
  def publish(self):
   while not self.closed.wait(.2):
    try:self.update()
-   except Exception:self.close();return
+   except Exception:
+    if self.closed.is_set():return
+    self.close()
+    if self.on_failure is not None:self.on_failure()
+    return
  def close(self):
   if self.closed.is_set():return
   self.closed.set();self.armed=None

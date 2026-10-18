@@ -1,5 +1,9 @@
 # Changes
 
+## 0.7.2
+
+The first live 0.7.1 GUI-launch trial closed safely during transient foreground unavailability, before the human Alt+Tab test. Add a bounded read-only settling wait after an explicit single transition gesture only. No input replay or focus reclamation; ordinary batch fences remain immediate. The backend settling correction keeps protocol 2. Fresh pointer capability from helper revision 3 is now required before consent. First movement uses the current authorized pointer snapshot, validated monitor mapping and elapsed-time interpolation instead of a warp or stale cached position. Historical context signals do not cancel newer observations; newer epochs still cancel. Helper revision 3 additionally keeps the passive label visible in the normal app overview; loading that separate helper change requires a manual GNOME extension reload/login. A lost heartbeat now invalidates work and closes sharing instead of silently losing the helper. Live Alt+Tab acceptance remains pending.
+
 ## 0.7.1
 
 - Require consent and fresh visual inspection before any app launch/focus; GUI-only live orchestration example.

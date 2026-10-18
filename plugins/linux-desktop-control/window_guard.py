@@ -18,7 +18,7 @@ class WindowGuard:
   if current!=self.baseline:self.fail()
  def changed(self,epoch):
   # No D-Bus cleanup on this signal thread; cancellation wakes the input worker.
-  if epoch!=self.baseline[1]:self.failed=True;self.cancel()
+  if epoch>self.baseline[1]:self.failed=True;self.cancel()
  def validate_points(self,action,offset=(0,0)):
   x,y,w,h=self.baseline[2]
   def inside(px,py):
@@ -35,3 +35,11 @@ def validate_transition(action):
  if action.get('type')=='click' and action.get('button','left')=='left' and action.get('count',1)==1 and 'focus' not in action:return
  if action.get('type')=='keys' and 'focus' not in action and action.get('keys') in (['Super'],['Super_L'],['Return'],['Enter']):return
  raise ValueError('A focus transition permits only one left click or launcher/Return chord; no text, drag, scroll or sequence')
+
+def pointer_local(context,geometry):
+ pointer=context.get('pointer')
+ if not isinstance(geometry,dict) or not all(isinstance(geometry.get(k),(int,float)) and not isinstance(geometry.get(k),bool) and math.isfinite(geometry[k]) for k in ('x','y','width','height')) or geometry['width']<=0 or geometry['height']<=0:raise RuntimeError('Selected monitor mapping unavailable; pointer input refused')
+ if not isinstance(pointer,(list,tuple)) or len(pointer)!=2 or not all(isinstance(v,(int,float)) and not isinstance(v,bool) and math.isfinite(v) for v in pointer):raise RuntimeError('Fresh system pointer position unavailable; pointer input refused')
+ x,y=pointer[0]-geometry['x'],pointer[1]-geometry['y']
+ if not (0<=x<geometry['width'] and 0<=y<geometry['height']):raise RuntimeError('System pointer is outside the shared monitor; pointer input refused')
+ return (x,y)

@@ -14,7 +14,7 @@ class Bus:
   self.calls.append((dest,path,iface,method,args.unpack()))
   if self.reject==method:raise RuntimeError('disconnected')
   if method=='GetNameOwner':return Reply(':1.9')
-  if method=='GetDiagnostics':return Reply('{"protocol_version":2}')
+  if method=='GetDiagnostics':return Reply('{"protocol_version":2,"pointer_snapshot":true}')
   return Reply(True)
 class IndicatorBridgeTests(unittest.TestCase):
  def start(self):
@@ -64,3 +64,22 @@ class IndicatorActorTests(unittest.TestCase):
   self.run_js("i.BindAsync([nonce],invocation);const first=i._focusEpoch;global.display.focus_window=null;global.display.emit('notify::focus-window');global.display.focus_window=win;global.display.emit('notify::focus-window');assert(i._focusEpoch>=first+2);const e=i._focusEpoch;win.rect[2]+=10;win.emit('size-changed');assert(i._focusEpoch>e);assert(contextSignals.length>=3);i.GetContextAsync([nonce],invocation);const data=JSON.parse(reply[0]);assert.equal(data.rect[2],1010);assert(!('title' in data));i.disable();assert.equal(win.handlers.size,0);assert.equal(global.display.handlers.size,0);")
  def test_foreign_modal_overview_lock_and_unmanaged_are_fail_closed(self):
   self.run_js("i.BindAsync([nonce],invocation);Main.modalCount=1;i.GetContextAsync([nonce],invocation);assert.equal(JSON.parse(reply[0]).available,false);Main.modalCount=1;Main.overview.visible=true;i.GetContextAsync([nonce],invocation);assert.equal(JSON.parse(reply[0]).kind,'overview');Main.modalCount=2;i.GetContextAsync([nonce],invocation);assert.equal(JSON.parse(reply[0]).available,false);Main.modalCount=0;Main.overview.visible=false;Main.sessionMode.isLocked=true;i.GetContextAsync([nonce],invocation);assert.equal(JSON.parse(reply[0]).available,false);Main.sessionMode.isLocked=false;win.emit('unmanaging');i.GetContextAsync([nonce],invocation);assert.equal(JSON.parse(reply[0]).available,false);i.disable();")
+
+class IndicatorFailureTests(unittest.TestCase):
+ def test_heartbeat_failure_closes_bridge_before_notifying_owner_once(self):
+  i,b,_=IndicatorBridgeTests().start();failures=[]
+  i.on_failure=lambda:failures.append((i.closed.is_set(),i.bound))
+  b.reject='Update'
+  from unittest.mock import patch
+  with patch.object(i.closed,'wait',return_value=False):i.publish()
+  self.assertEqual(failures,[(True,False)]);self.assertEqual(b.calls[-1][3],'Unbind')
+ def test_overview_keeps_label_visible_but_foreign_modal_hides_it(self):
+  IndicatorActorTests().run_js("i.BindAsync([nonce],invocation);i.UpdateAsync([nonce,true],invocation);Main.overview.visible=true;Main.modalCount=1;Main.overview.emit=Signals.prototype.emit;Main.overview.emit('showing');i._render();assert.equal(actors[0].visible,true);Main.modalCount=2;i._render();assert.equal(actors[0].visible,false);Main.modalCount=0;Main.overview.visible=false;i._render();assert.equal(actors[0].visible,true);i.disable();")
+
+ def test_manually_closed_heartbeat_does_not_report_new_failure(self):
+  i,b,_=IndicatorBridgeTests().start();failures=[];i.on_failure=lambda:failures.append(True)
+  def update():i.close();raise RuntimeError('retired connection')
+  i.update=update
+  from unittest.mock import patch
+  with patch.object(i.closed,'wait',return_value=False):i.publish()
+  self.assertEqual(failures,[])

@@ -17,7 +17,7 @@ import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import Gio, GLib, Gst
 
-VERSION = '0.7.1'
+VERSION = '0.7.2'
 DEST = 'org.freedesktop.portal.Desktop'
 PATH = '/org/freedesktop/portal/desktop'
 RD = 'org.freedesktop.portal.RemoteDesktop'
@@ -254,12 +254,14 @@ class Desktop:
         if start is None or seconds==0:
             self.position(x,y)
             return
-        count=max(1,int(seconds/.016))
-        for i in range(1,count+1):
-            t=i/count
+        deadline=time.monotonic()+seconds
+        while True:
+            remaining=deadline-time.monotonic()
+            t=max(0,min(1,1-remaining/seconds))
             blend=t*t*(3-2*t)
             self.position(start[0]+(x-start[0])*blend,start[1]+(y-start[1])*blend)
-            self.wait_interruptibly(seconds/count)
+            if t>=1:break
+            self.wait_interruptibly(min(.016,max(0,deadline-time.monotonic())))
 
     def state(self, kind, code, down):
         method = 'NotifyKeyboardKeysym' if kind == 'key' else 'NotifyPointerButton'
@@ -410,6 +412,8 @@ class Desktop:
             # Approval/user activity may have moved the physical pointer. Never
             # interpolate from a cached position belonging to a previous call.
             self.pointer_position=None
+            reader=getattr(self,'pointer_reader',None)
+            if reader is not None and any(step['type'] in ('move','click','drag','scroll') or 'focus' in step for step in steps):self.pointer_position=reader()
             self.action_deadline=time.monotonic()+15
             try:
                 for index,step in enumerate(steps):
@@ -652,10 +656,18 @@ class Server:
             spec=importlib.util.spec_from_file_location('desktop_indicator',path)
             module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
             self.indicator=module.IndicatorBridge(self.status)
+            bridge=self.indicator
+            bridge.on_failure=lambda:self.indicator_failed(bridge)
             self.indicator.start();self.indicator_warning=None
         except Exception:
             if self.indicator:self.indicator.close()
-            self.indicator=None;self.indicator_warning='Passive pointer label unavailable in this session; core desktop control has no extension prerequisite.'
+            self.indicator=None;self.indicator_warning='Foreground observer or pointer label unavailable; guarded desktop control is refused.'
+
+    def indicator_failed(self,expected=None):
+        if expected is not None and self.indicator is not expected:return
+        self.indicator_warning='Foreground observer heartbeat failed; session closed without retry.'
+        self.invalidate()
+        self.close_backend()
 
     def close_backend(self):
         if self.indicator:self.indicator.close();self.indicator=None
@@ -692,20 +704,27 @@ class Server:
         if callable(getattr(self.backend,'check',None)):self.backend.check()
 
 
-    def read_window_context(self):
+    def read_window_context(self,settle_seconds=0):
         if self.indicator is None:raise RuntimeError('Updated foreground observer unavailable; input is refused. Reload the indicator extension before a new session.')
-        context=self.indicator.context()
-        if context.get('available') is not True:raise RuntimeError('Foreground context unavailable or system UI active; session must close')
-        return context
+        deadline=time.monotonic()+settle_seconds
+        while True:
+            self.guard()
+            if callable(getattr(self.backend,'check',None)):self.backend.check()
+            context=self.indicator.context()
+            if context.get('available') is True:return context
+            if settle_seconds<=0 or time.monotonic()>=deadline:raise RuntimeError('Foreground context unavailable or system UI active; session must close')
+            # This is read-only app-launch settling, never readiness or a retry.
+            if callable(getattr(self.backend,'wait_interruptibly',None)):self.backend.wait_interruptibly(.05)
+            else:time.sleep(.05)
 
     def window_guard_module(self):
         path=os.path.join(os.path.dirname(__file__),'window_guard.py')
         spec=importlib.util.spec_from_file_location('desktop_window_guard',path)
         module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
 
-    def capture_result(self,allowed,expected_window=None):
+    def capture_result(self,allowed,expected_window=None,transition_settle=False):
         required=getattr(self.backend,'requires_window_guard',False)
-        before=self.read_window_context() if required else None
+        before=self.read_window_context(2 if transition_settle else 0) if required else None
         if expected_window is not None and self.window_guard_module().WindowGuard.signature(before)!=expected_window:raise RuntimeError('Foreground changed after input; session must close')
         self.guard(allowed);png=self.backend.capture();self.guard(allowed)
         after=self.read_window_context() if required else None
@@ -755,6 +774,11 @@ class Server:
                         self.backend.cancelled.set()
                         if self.cancel_token:self.cancel_token.set()
                     module=self.window_guard_module();window=module.WindowGuard(self.indicator,window_record['context'],cancel_window);window.check()
+                    geometry=self.backend.monitor_geometry() if callable(getattr(self.backend,'monitor_geometry',None)) else None
+                    def pointer_reader():
+                        window.check()
+                        return module.pointer_local(self.read_window_context(),geometry)
+                    self.backend.pointer_reader=pointer_reader
                     if transition:module.validate_transition(args['action'])
                     else:
                         geometry=self.backend.monitor_geometry() if callable(getattr(self.backend,'monitor_geometry',None)) else None
@@ -770,11 +794,12 @@ class Server:
                     self.backend.action(args['action'])
                     if window is not None and not transition:window.check()
                 finally:
-                    self.backend.target_guard=None
+                    self.backend.target_guard=None;self.backend.pointer_reader=None
                     self.backend.window_guard=None;self.backend.window_transition=False
                     if self.indicator:self.indicator.armed=None
-                content=self.capture_result(('active',),window.baseline if window is not None and not transition else None)
+                content=self.capture_result(('active',),window.baseline if window is not None and not transition else None,transition_settle=transition)
             except BaseException:
+                self.backend.pointer_reader=None
                 self.backend.window_guard=None;self.backend.window_transition=False
                 if self.indicator:self.indicator.armed=None
                 self.recovery.finish(getattr(self.backend,'transaction_info',{}),failed=True)

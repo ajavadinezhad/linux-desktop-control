@@ -10,7 +10,7 @@ export default class DesktopIndicator extends Extension {
         this._owner=null;this._nonce=null;this._active=false;this._watch=0;this._failed=false;
         this._focusEpoch=0;this._windowSignals=[];this._contextStamp='';
         this._focusSignal=global.display.connect('notify::focus-window',()=>this._contextChanged(true));
-        this._overviewSignals=['showing','hiding'].map(name=>Main.overview.connect(name,()=>{if(name==='unmanaged'||name==='unmanaging')this._invalidWindow=w;this._contextChanged(false,true);}));
+        this._overviewSignals=['showing','hiding'].map(name=>Main.overview.connect(name,()=>this._contextChanged(false,true)));
         this._modeSignal=Main.sessionMode.connect('updated',()=>this._contextChanged(false,true));
         this._contextChanged(true);
         this._label=new St.Label({text:'Mouse is being controlled by ChatGPT',style_class:'codex-control-indicator',reactive:false,can_focus:false,visible:false});
@@ -34,7 +34,7 @@ export default class DesktopIndicator extends Extension {
     UnbindAsync([nonce],invocation){const ok=this._authorized(nonce,invocation);if(ok)this._clear();invocation.return_value(new GLib.Variant('(b)',[ok]));}
     _render(){
         if(!this._label)return;
-        if(!this._owner||!this._active||Main.modalCount>0||Main.overview.visible||Main.sessionMode.isLocked||Main.sessionMode.isGreeter){this._label.hide();return;}
+        if(!this._owner||!this._active||(Main.modalCount>1||(Main.modalCount>0&&!Main.overview.visible))||Main.sessionMode.isLocked||Main.sessionMode.isGreeter){this._label.hide();return;}
         // Read position only. Never capture input, alter the sprite or hide/warp the real cursor.
         const [x,y]=global.get_pointer();const m=Main.layoutManager.monitors.find(m=>x>=m.x&&x<m.x+m.width&&y>=m.y&&y<m.y+m.height);
         if(!m){this._label.hide();return;}
@@ -61,9 +61,9 @@ export default class DesktopIndicator extends Extension {
     }
     GetContextAsync([nonce],invocation){
         if(!this._authorized(nonce,invocation)||this._failed){invocation.return_value(new GLib.Variant('(s)',[JSON.stringify({available:false,reason:'unavailable'})]));return;}
-        this._contextChanged(false);invocation.return_value(new GLib.Variant('(s)',[JSON.stringify(this._contextData())]));
+        this._contextChanged(false);const data=this._contextData();if(data.available)data.pointer=global.get_pointer().slice(0,2);invocation.return_value(new GLib.Variant('(s)',[JSON.stringify(data)]));
     }
-    GetDiagnostics(){return JSON.stringify({protocol_version:2,failed:this._failed,active:this._active,visible:this._label.visible,reactive:false,can_focus:false,owner:this._owner,cursor_style:'system_unchanged',text:'Mouse is being controlled by ChatGPT'});}
+    GetDiagnostics(){return JSON.stringify({protocol_version:2,pointer_snapshot:true,failed:this._failed,active:this._active,visible:this._label.visible,reactive:false,can_focus:false,owner:this._owner,cursor_style:'system_unchanged',text:'Mouse is being controlled by ChatGPT'});}
     _clear(){const watch=this._watch;this._watch=0;this._owner=null;this._nonce=null;this._active=false;this._label?.hide();if(watch){try{Gio.bus_unwatch_name(watch);}catch(_){/* Visibility and ownership are already cleared. */}}}
     disable(){
         const clean=fn=>{try{fn();}catch(_){}};

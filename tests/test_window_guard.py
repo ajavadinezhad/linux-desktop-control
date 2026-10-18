@@ -91,9 +91,9 @@ class ObservationRaceTests(unittest.TestCase):
   helper=WindowServerTests();s,b=helper.make();token=s.window_record['id'];executed=[]
   s.backend.action=lambda action:executed.append(True)
   original=s.capture_result
-  def capture(allowed,expected_window=None):
+  def capture(allowed,expected_window=None,**kwargs):
    if expected_window is not None:b.value['epoch']+=1
-   return original(allowed,expected_window)
+   return original(allowed,expected_window,**kwargs)
   s.capture_result=capture
   result=s.handle({'id':1,'method':'tools/call','params':{'name':'desktop_action','arguments':{'window_observation_id':token,'action':{'type':'click','x':2,'y':2}}}})
   self.assertEqual(executed,[True]);self.assertTrue(result['result']['isError']);self.assertFalse(any(c['type']=='image' for c in result['result']['content']));self.assertFalse(s.status()['active'])
@@ -121,3 +121,46 @@ class PublicationWindowTests(unittest.TestCase):
   b.value['epoch']+=1
   result=s.fence_response({'id':1,'params':{'name':'desktop_action'}},{'id':1,'result':{'content':content}})
   self.assertTrue(result['result']['isError']);self.assertTrue(s.recovery.inspection_required);self.assertIsNone(s.recovery.observation_id);self.assertEqual(s.recovery.last['outcome'],'effects_uncertain');self.assertFalse(s.status()['active'])
+
+class TransitionSettlingTests(unittest.TestCase):
+ def test_explicit_transition_waits_read_only_for_foreground_without_replaying_gesture(self):
+  s,b=WindowServerTests().make();b.value={'available':False,'reason':'system-ui'};waits=[]
+  def settle(seconds):waits.append(seconds);b.value=context()
+  s.backend.wait_interruptibly=settle
+  value=s.read_window_context(.1)
+  self.assertTrue(value['available']);self.assertEqual(waits,[.05]);self.assertEqual(s.backend.actions,0)
+ def test_ordinary_action_never_waits_through_unavailable_context(self):
+  s,b=WindowServerTests().make();b.value={'available':False};waits=[];s.backend.wait_interruptibly=waits.append
+  with self.assertRaises(RuntimeError):s.read_window_context()
+  self.assertEqual(waits,[]);self.assertEqual(s.backend.actions,0)
+ def test_transition_deadline_and_revocation_never_send_additional_input(self):
+  s,b=WindowServerTests().make();b.value={'available':False};s.backend.wait_interruptibly=lambda seconds:None
+  with self.assertRaises(RuntimeError):s.read_window_context(.01)
+  self.assertEqual(s.backend.actions,0)
+  def revoked(seconds):s.backend.cancelled.set();raise RuntimeError('portal revoked')
+  s.backend.wait_interruptibly=revoked
+  with self.assertRaisesRegex(RuntimeError,'revoked'):s.read_window_context(.1)
+  self.assertEqual(s.backend.actions,0)
+
+class IndicatorSessionFailureTests(unittest.TestCase):
+ def test_helper_failure_invalidates_tokens_and_closes_session(self):
+  s,b=WindowServerTests().make();epoch=s.generation;s.indicator_failed()
+  self.assertFalse(s.status()['active']);self.assertTrue(s.backend.cancelled.is_set())
+  self.assertGreater(s.generation,epoch);self.assertIsNone(s.window_record)
+  self.assertIn('heartbeat failed',s.status()['indicator_warning'])
+
+ def test_retired_helper_failure_cannot_close_replacement(self):
+  s,b=WindowServerTests().make();epoch=s.generation;s.indicator_failed(object())
+  self.assertTrue(s.status()['active']);self.assertEqual(s.generation,epoch)
+
+class PointerMappingTests(unittest.TestCase):
+ def test_fresh_pointer_maps_secondary_monitor_without_affecting_signature(self):
+  c=context();signature=g.WindowGuard.signature(c);c['pointer']=[-1200,100]
+  self.assertEqual(g.pointer_local(c,{'x':-1280,'y':0,'width':1280,'height':800}),(80,100))
+  self.assertEqual(signature,g.WindowGuard.signature(c))
+  for pointer,geometry in [(None,None),([1,2],None),([float('nan'),1],{'x':0,'y':0,'width':100,'height':100}),([200,1],{'x':0,'y':0,'width':100,'height':100})]:
+   c['pointer']=pointer
+   with self.assertRaises(RuntimeError):g.pointer_local(c,geometry)
+ def test_historical_signal_does_not_cancel_fresh_observation(self):
+  b=Bridge();cancelled=threading.Event();w=g.WindowGuard(b,b.context(),cancelled.set)
+  w.changed(9);w.changed(10);self.assertFalse(cancelled.is_set());w.changed(11);self.assertTrue(cancelled.is_set())
