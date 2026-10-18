@@ -1,5 +1,12 @@
 # Changes
 
+## 0.7.4
+
+- Keep approach/modifiers guarded until the activating press of one explicit transition; allow Save/Open chords with releases only afterward.
+- Settle only no-foreground-window, require a stable read-only context, retain publication fences and never replay input. Keep a signal guard armed between published observations.
+- Add disabled-by-default actual Xcursor glow with validated Yaru-derived assets, explicit desktop-wide scope, separate watchdog, durable original/unset journal, compare-and-restore and startup recovery. Preserve later user preferences.
+- New helper reload is not required. Live acceptance is documented separately.
+
 ## 0.7.3
 
 The live Save Page As click exposed an available-to-available foreground change during capture. For explicit single transitions only, discard that image and allow one capture-only retry within the existing two-second deadline. Never repeat the gesture. Unavailable/protected context and the final publication fence still close immediately. No helper change or GNOME logout is required. Live save/reopen remains pending.

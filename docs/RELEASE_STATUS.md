@@ -1,8 +1,8 @@
-# Private review status — 0.7.2
+# Private review status — 0.7.4
 
-Core desktop tools and a passive text indicator are prepared. No custom interactive controls or keyboard shortcuts are included. The real system cursor is unchanged, and a direct cursor glow is not claimed. The prior pointer jitter symptom is not established as fixed. No live mouse test or sharing request was performed for this version. Refresh old connected tool catalogs. Source remains private and licensing is deferred.
+Current changes add guarded activating-press transitions, Save/Open chords, stable read-only context settling, idle context-loss cleanup and opt-in actual themed cursor glow with an independent restoration watchdog. No removed toolbar or shortcuts return. The human reported pointer movement good in the preceding live test. Normal native dialog, physical Alt+Tab and themed-glow acceptance for 0.7.4 remain pending until recorded below. Source remains private; project reuse licensing is deferred. Third-party cursor assets retain their separate CC BY-SA attribution/terms.
 
-Current 0.7.1 input requires loaded foreground-observer protocol 2 and a fresh window_observation_id. No live guard acceptance yet. See FOCUS_GUARD_0_7_1.md.
+The same loaded protocol-2 helper with fresh-pointer snapshots is compatible; no additional GNOME logout is needed. See CURSOR_GLOW.md for temporary desktop-wide theme scope and crash-restoration limits.
 
 ## 0.7.2 correction, awaiting live acceptance
 

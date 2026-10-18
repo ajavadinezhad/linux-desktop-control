@@ -33,8 +33,10 @@ class WindowGuard:
 def validate_transition(action):
  # A deliberate focus change is one gesture with no remaining batch or text.
  if action.get('type')=='click' and action.get('button','left')=='left' and action.get('count',1)==1 and 'focus' not in action:return
- if action.get('type')=='keys' and 'focus' not in action and action.get('keys') in (['Super'],['Super_L'],['Return'],['Enter']):return
- raise ValueError('A focus transition permits only one left click or launcher/Return chord; no text, drag, scroll or sequence')
+ if action.get('type')=='keys' and 'focus' not in action:
+  keys=action.get('keys')
+  if keys in (['Super'],['Super_L'],['Return'],['Enter'],['Ctrl','s'],['Ctrl','Shift','s'],['Ctrl','o']):return
+ raise ValueError('A focus transition permits only one left click or launcher/Return or Ctrl+s/Ctrl+Shift+s/Ctrl+o chord; no text, drag, scroll or sequence')
 
 def pointer_local(context,geometry):
  pointer=context.get('pointer')

@@ -22,6 +22,7 @@ server['cwd']=str(root)
 p.write_text(json.dumps(config,indent=2)+'\n')
 PYCONFIG
 /usr/bin/python3 "$root/install-indicator.py"
+/usr/bin/python3 "$root/install-cursor-theme.py"
 "$codex_bin" plugin marketplace add "$root" --json
 "$codex_bin" plugin add linux-desktop-control@local-linux-desktop --json
 printf '%s\n' 'Installed Linux Desktop Control. The app must refresh its MCP tool catalog before use.'

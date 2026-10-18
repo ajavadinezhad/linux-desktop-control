@@ -124,7 +124,7 @@ class PublicationWindowTests(unittest.TestCase):
 
 class TransitionSettlingTests(unittest.TestCase):
  def test_explicit_transition_waits_read_only_for_foreground_without_replaying_gesture(self):
-  s,b=WindowServerTests().make();b.value={'available':False,'reason':'system-ui'};waits=[]
+  s,b=WindowServerTests().make();b.value={'available':False,'reason':'no-foreground-window'};waits=[]
   def settle(seconds):waits.append(seconds);b.value=context()
   s.backend.wait_interruptibly=settle
   value=s.read_window_context(.1)
@@ -134,7 +134,7 @@ class TransitionSettlingTests(unittest.TestCase):
   with self.assertRaises(RuntimeError):s.read_window_context()
   self.assertEqual(waits,[]);self.assertEqual(s.backend.actions,0)
  def test_transition_deadline_and_revocation_never_send_additional_input(self):
-  s,b=WindowServerTests().make();b.value={'available':False};s.backend.wait_interruptibly=lambda seconds:None
+  s,b=WindowServerTests().make();b.value={'available':False,'reason':'no-foreground-window'};s.backend.wait_interruptibly=lambda seconds:None
   with self.assertRaises(RuntimeError):s.read_window_context(.01)
   self.assertEqual(s.backend.actions,0)
   def revoked(seconds):s.backend.cancelled.set();raise RuntimeError('portal revoked')
@@ -186,3 +186,87 @@ class TransitionCaptureRaceTests(unittest.TestCase):
    s.backend.capture=capture
    with self.assertRaises(RuntimeError):s.capture_result(('active',),transition_settle=True)
    self.assertEqual(len(calls),1 if unavailable else 2);self.assertEqual(s.backend.actions,0)
+
+class FullTransitionTests(unittest.TestCase):
+ def make(self):
+  s,b=WindowServerTests().make();d=test_control.Tests.backend(self)
+  d.requires_window_guard=True;d.props={'position':(0,0)};d.pipeline=None;d.fd=None;d.closed_sub=None;d.capture=lambda:Fake.capture(d)
+  d.status=lambda:{'active':not d.cancelled.is_set() and d.session is not None,'portal_closed_confirmed':getattr(d,'portal_closed',False)}
+  d.keysym=lambda key:{'Ctrl':0xffe3,'Shift':0xffe1,'Super':0xffeb,'Return':0xff0d}.get(key,ord(key[0]))
+  b.value['pointer']=[10,10];s.backend=d;return s,b,d
+ def action(self,s,action):
+  q={'id':1,'method':'tools/call','params':{'name':'desktop_action','arguments':{'window_observation_id':s.window_record['id'],'focus_transition':True,'action':action}}}
+  return s.fence_response(q,s.handle(q))
+ def test_human_switch_during_approach_sends_no_activating_press_and_closes(self):
+  s,b,d=self.make();original=d.call
+  def call(iface,method,sig,args,**kw):
+   original(iface,method,sig,args,**kw)
+   if method=='NotifyPointerMotionAbsolute':b.value.update(epoch=11,window_id='human-app')
+  d.call=call;old=s.generation;r=self.action(s,{'type':'click','x':100,'y':100})
+  self.assertTrue(r['result']['isError']);self.assertFalse(s.status()['active'])
+  self.assertFalse(any(e[1]=='NotifyPointerButton' and e[-1][-1]==1 for e in d.events))
+  s.request_epoch=old
+  with self.assertRaises(RuntimeError):s.call('desktop_start',{})
+ def test_dialog_change_after_down_only_releases_and_returns_fresh_stable_image(self):
+  s,b,d=self.make();original=d.call
+  def call(iface,method,sig,args,**kw):
+   original(iface,method,sig,args,**kw)
+   if method=='NotifyPointerButton' and args[-1]==1:b.value.update(epoch=11,window_id='native-save-dialog')
+  d.call=call;r=self.action(s,{'type':'click','x':100,'y':100})
+  self.assertFalse(r['result'].get('isError',False));self.assertEqual(d.held,[])
+  buttons=[e[-1][-1] for e in d.events if e[1]=='NotifyPointerButton'];self.assertEqual(buttons,[1,0])
+  self.assertEqual(s.window_record['context']['window_id'],'native-save-dialog')
+  self.assertTrue(any(c['type']=='image' for c in r['result']['content']))
+ def test_ctrl_s_modifiers_stay_guarded_and_are_released_after_transition(self):
+  for switch_on_ctrl in (False,True):
+   s,b,d=self.make();original=d.call
+   def call(iface,method,sig,args,**kw):
+    original(iface,method,sig,args,**kw)
+    if method=='NotifyKeyboardKeysym' and args[-1]==1 and args[-2]==(0xffe3 if switch_on_ctrl else ord('s')):b.value.update(epoch=11,window_id='save-dialog')
+   d.call=call;r=self.action(s,{'type':'keys','keys':['Ctrl','s']})
+   self.assertEqual(bool(r['result'].get('isError')),switch_on_ctrl);self.assertEqual(d.held,[])
+   presses=[e[-1][-2] for e in d.events if e[1]=='NotifyKeyboardKeysym' and e[-1][-1]==1]
+   self.assertEqual(presses,[0xffe3] if switch_on_ctrl else [0xffe3,ord('s')])
+ def test_protected_context_after_gesture_never_waits_or_captures(self):
+  s,b,d=self.make();original=d.call;captures=[]
+  d.capture=lambda:captures.append(True)
+  def call(iface,method,sig,args,**kw):
+   original(iface,method,sig,args,**kw)
+   if method=='NotifyPointerButton' and args[-1]==1:b.value={'available':False,'reason':'system-ui','epoch':11}
+  d.call=call;r=self.action(s,{'type':'click','x':100,'y':100})
+  self.assertTrue(r['result']['isError']);self.assertEqual(captures,[]);self.assertFalse(s.status()['active']);self.assertEqual(d.held,[])
+ def test_no_foreground_after_capture_settles_read_only_without_repeating_gesture(self):
+  s,b,d=self.make();original=d.call;capture_calls=[];wait=d.wait_interruptibly
+  def call(iface,method,sig,args,**kw):
+   original(iface,method,sig,args,**kw)
+   if method=='NotifyPointerButton' and args[-1]==1:b.value.update(epoch=11,window_id='save-dialog')
+  def capture():
+   capture_calls.append(True)
+   if len(capture_calls)==1:b.value.update(available=False,reason='no-foreground-window',epoch=12)
+   return Fake.capture(d)
+  def waits(seconds):
+   wait(seconds)
+   if b.value.get('available') is False:b.value.update(available=True,epoch=13)
+  d.call=call;d.capture=capture;d.wait_interruptibly=waits
+  r=self.action(s,{'type':'click','x':100,'y':100})
+  self.assertFalse(r['result'].get('isError',False));self.assertEqual(len(capture_calls),2)
+  self.assertEqual(sum(e[1]=='NotifyPointerButton' and e[-1][-1]==1 for e in d.events),1)
+ def test_context_churn_suppresses_image_without_replay(self):
+  s,b,d=self.make();captures=[]
+  def capture():captures.append(True);b.value['epoch']+=1;return Fake.capture(d)
+  d.capture=capture;r=self.action(s,{'type':'click','x':100,'y':100})
+  self.assertTrue(r['result']['isError']);self.assertFalse(any(c['type']=='image' for c in r['result']['content']))
+  self.assertEqual(len(captures),2);self.assertEqual(sum(e[1]=='NotifyPointerButton' and e[-1][-1]==1 for e in d.events),1)
+
+class IdleObservationGuardTests(unittest.TestCase):
+ def test_published_observation_keeps_signal_guard_armed_between_calls(self):
+  s,b=WindowServerTests().make();content=s.capture_result(('active',))
+  s.fence_response({'id':1,'params':{'name':'desktop_observe'}},{'id':1,'result':{'content':content}})
+  self.assertIsNotNone(b.armed);old=s.generation;b.armed.changed(11)
+  deadline=time.monotonic()+1
+  while s.state!='closed' and time.monotonic()<deadline:time.sleep(.005)
+  self.assertFalse(s.status()['active']);self.assertGreater(s.generation,old);self.assertTrue(b.closed)
+ def test_observe_cannot_refresh_past_unexpected_context_change(self):
+  s,b=WindowServerTests().make();b.value.update(epoch=11,window_id='human-app')
+  r=s.handle({'id':1,'method':'tools/call','params':{'name':'desktop_observe','arguments':{}}})
+  self.assertTrue(r['result']['isError']);self.assertFalse(any(c['type']=='image' for c in r['result']['content']));self.assertFalse(s.status()['active'])
