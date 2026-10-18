@@ -696,13 +696,21 @@ class Server:
         # No portal, backend construction or administrator prompt before validation.
         self.native_activity_module().validate_helper()
 
+    def calibration_notice_module(self):
+        path=os.path.join(os.path.dirname(__file__),'calibration_notice.py')
+        spec=importlib.util.spec_from_file_location('desktop_calibration_notice',path)
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
+
     def enable_physical_guard(self):
         if self.native_activity is not None:raise RuntimeError('Native activity observer already owned')
+        self.guard(('opening','active'))
+        if self.backend is None or self.backend.status().get('active') is not True:raise RuntimeError('Personal portal consent is required before calibration notification')
         module=self.native_activity_module()
+        notice=self.calibration_notice_module().CalibrationNotice()
         controller=module.Controller(
             active=lambda:self.state in ('opening','active') and self.backend is not None and self.backend.status().get('active') is True,
             on_activity=lambda:self.native_activity_lost(controller),
-            on_fault=lambda error:self.native_activity_lost(controller,error))
+            on_fault=lambda error:self.native_activity_lost(controller,error),notice=notice)
         self.native_activity=controller # Own before start, including lost arm replies.
         controller.start()
         if controller.status().get('active') is not True:raise RuntimeError('Native activity observer did not arm')

@@ -80,11 +80,11 @@ class FakeBroker:
 class NativeActivityTests(unittest.TestCase):
  def setUp(self):
   self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);os.chmod(self.temp.name,0o700);self.activity=threading.Event();self.fault=threading.Event();self.errors=[];self.brokers=[]
- def controller(self,mode='normal',uid=0,validator=lambda:None):
+ def controller(self,mode='normal',uid=0,validator=lambda:None,notice=None):
   def launch(args,**kwargs):
    b=FakeBroker(args,mode,**kwargs);self.brokers.append(b);return b
   def fail(error):self.errors.append(error);self.fault.set()
-  c=m.Controller(lambda:True,self.activity.set,fail,runtime_dir=self.temp.name,launcher=launch,validator=validator,credentials=lambda s:(123,uid,0),startup_timeout=1)
+  c=m.Controller(lambda:True,self.activity.set,fail,runtime_dir=self.temp.name,launcher=launch,validator=validator,credentials=lambda s:(123,uid,0),startup_timeout=1,notice=notice)
   self.addCleanup(c.close);return c
  def test_authenticated_handshake_heartbeat_and_private_cleanup(self):
   c=self.controller().start();path=c.directory;time.sleep(.45);self.assertTrue(c.status()['active']);self.assertFalse(self.fault.is_set());c.close();c.close();self.assertFalse(path.exists());self.assertFalse(c.status()['raw_device_fds']);self.assertTrue('HB' in self.brokers[0].commands);self.assertIn('CLOSE',self.brokers[0].commands);self.assertEqual(c.status()['terminal_reason'],'closed');self.assertEqual(c.status()['helper_exit_code'],0)
@@ -284,5 +284,81 @@ class NativeActivityTests(unittest.TestCase):
     self.assertIsNone(c.status()['activity_kind']);self.assertNotIn(token,str(c.status()))
  def test_categorized_final_activity_wins_over_helper_exit(self):
   c=self.controller();c.ready=True;c.last_peer=time.monotonic();c.buffer.extend(b'ACTIVITY_HELD\n');c.process=SimpleNamespace(poll=lambda:0,wait=lambda timeout:0);c._monitor();self.assertTrue(self.activity.is_set());self.assertFalse(self.fault.is_set());self.assertEqual(c.status()['activity_kind'],'held');self.assertEqual(c.status()['terminal_reason'],'activity');self.assertEqual(c.status()['helper_exit_code'],0)
+
+ def test_notice_is_shown_only_after_calibrating_and_closed_before_arm(self):
+  events=[]
+  class Notice:
+   def __init__(self):self.shown=False
+   def show(self,reset=False):self.shown=True;events.append(('show',reset))
+   def close(self):self.shown=False;events.append(('notice-close',))
+   def status(self):return {'request_acknowledged':True,'request_active':self.shown,'visible_verified':False,'warning':None}
+  c=self.controller(notice=Notice());send=c._send
+  def traced(token):events.append((token,));send(token)
+  c._send=traced;c.start();self.assertLess(events.index(('CALIBRATE',)),events.index(('show',False)));self.assertLess(events.index(('notice-close',)),events.index(('ARM',)));status=c.status()['calibration_notice'];self.assertTrue(status['requested']);self.assertTrue(status['request_acknowledged']);self.assertFalse(status['request_active']);self.assertFalse(status['visibility_verified']);c.close()
+ def test_notice_reset_updates_and_failure_cleanup_are_bounded_by_lifecycle(self):
+  events=[]
+  class Notice:
+   def show(self,reset=False):events.append(('show',reset))
+   def close(self):events.append(('close',))
+   def status(self):return {'warning':None}
+  c=self.controller(notice=Notice());c.calibration_state='waiting';c.process=SimpleNamespace(poll=lambda:None,wait=lambda timeout:0);messages=iter(('CALIBRATION_RESET','FAULT'));c._read=lambda timeout:next(messages);c._send=lambda token:None
+  with contextlib.redirect_stderr(io.StringIO()):
+   with self.assertRaises(m.NativeFailure):c._wait_calibrated()
+  c.close();self.assertEqual(events,[('show',True),('close',)])
+ def test_notification_failure_exports_only_fixed_warning_and_no_visibility_claim(self):
+  class Notice:
+   def show(self,reset=False):raise RuntimeError('private diagnostic text')
+   def close(self):raise RuntimeError('private diagnostic text')
+  c=self.controller(notice=Notice());c._show_notice();c.close();status=c.status()['calibration_notice'];self.assertTrue(status['requested']);self.assertFalse(status['visibility_verified']);self.assertIn('unconfirmed',status['warning']);self.assertNotIn('private diagnostic text',str(status))
+ def test_default_fake_controller_has_no_notice_or_ui(self):
+  c=self.controller();self.assertIsNone(c.notice);self.assertEqual(c.status()['calibration_notice'],{'requested':False,'request_acknowledged':False,'request_active':False,'delivery_unknown':False,'visibility_verified':False,'warning':None})
+
+ def test_failed_notice_close_with_active_request_refuses_arm(self):
+  class Notice:
+   def __init__(self):self.calls=0
+   def show(self,reset=False):return True
+   def close(self):self.calls+=1;return False
+   def status(self):return {'request_acknowledged':True,'request_active':True,'warning':'fixed test warning'}
+  notice=Notice();c=self.controller(notice=notice)
+  with self.assertRaisesRegex(m.NativeFailure,'notification closure unconfirmed'):c.start()
+  self.assertNotIn('ARM',self.brokers[-1].commands);self.assertFalse(c.calibration_verified);self.assertFalse(c.ready);self.assertTrue(c.status()['calibration_notice']['request_active']);self.assertLessEqual(notice.calls,2);self.assertGreaterEqual(notice.calls,1)
+ def test_unavailable_notice_without_active_id_does_not_bypass_challenge(self):
+  class Notice:
+   def show(self,reset=False):return False
+   def close(self):return True
+   def status(self):return {'request_acknowledged':False,'request_active':False,'warning':'unavailable'}
+  c=self.controller(notice=Notice()).start();self.assertTrue(c.calibration_verified);self.assertIn('CALIBRATE',self.brokers[-1].commands);self.assertIn('ARM',self.brokers[-1].commands);self.assertFalse(c.status()['calibration_notice']['visibility_verified']);self.assertIsNotNone(c.status()['calibration_notice']['warning']);c.close()
+
+ def test_notice_not_shown_after_revocation_or_stop_and_revocation_during_show_closes(self):
+  calls=[];authorized=[True]
+  class Notice:
+   def show(self,reset=False):calls.append('show');authorized[0]=False
+   def close(self):calls.append('close');return True
+   def status(self):return {'request_active':False,'warning':None}
+  c=self.controller(notice=Notice());c.active=lambda:False
+  with self.assertRaisesRegex(m.NativeFailure,'authorization ended'):c._show_notice()
+  self.assertEqual(calls,[])
+  c=self.controller(notice=Notice());c.stop.set()
+  with self.assertRaisesRegex(m.NativeFailure,'authorization ended'):c._show_notice()
+  self.assertEqual(calls,[])
+  c=self.controller(notice=Notice());c.active=lambda:authorized[0]
+  with self.assertRaisesRegex(m.NativeFailure,'authorization ended'):c._show_notice()
+  self.assertEqual(calls,['show','close']);self.assertFalse(c.notice_open)
+ def test_failed_notice_close_retains_cleanup_ownership_until_confirmed(self):
+  class Notice:
+   def __init__(self):self.calls=0
+   def close(self):self.calls+=1;return self.calls>1
+   def status(self):return {'request_active':self.calls<2,'request_acknowledged':True,'warning':None}
+  notice=Notice();c=self.controller(notice=notice);c.notice_open=True;c.notice_active=True;c._close_notice();self.assertTrue(c.notice_open);self.assertTrue(c.notice_active);c._close_notice();self.assertFalse(c.notice_open);self.assertFalse(c.notice_active);self.assertEqual(notice.calls,2)
+
+ def test_unknown_notice_delivery_without_id_refuses_arm(self):
+  class Notice:
+   def __init__(self):self.calls=0
+   def show(self,reset=False):return False
+   def close(self):self.calls+=1;return False
+   def status(self):return {'request_acknowledged':False,'request_active':False,'delivery_unknown':True,'warning':'fixed unknown delivery warning'}
+  notice=Notice();c=self.controller(notice=notice)
+  with self.assertRaisesRegex(m.NativeFailure,'notification closure unconfirmed'):c.start()
+  self.assertNotIn('ARM',self.brokers[-1].commands);self.assertFalse(c.calibration_verified);self.assertFalse(c.ready);status=c.status()['calibration_notice'];self.assertTrue(status['delivery_unknown']);self.assertFalse(status['request_active']);self.assertFalse(status['visibility_verified']);self.assertIsNotNone(status['warning']);self.assertTrue(c.notice_open);self.assertLessEqual(notice.calls,2)
 
 if __name__=='__main__':unittest.main()

@@ -19,7 +19,7 @@ class PhysicalGuardTests(unittest.TestCase):
    def close(self):events.append('portal-close');self.held=[];super().close()
   s=m.Server(Backend);bridge=Bridge(events)
   class Native:
-   def __init__(self,active,on_activity,on_fault):self.active=active;self.on_activity=on_activity;self.on_fault=on_fault;self.ready=False;self.closed=False
+   def __init__(self,active,on_activity,on_fault,notice=None):self.notice=notice;self.active=active;self.on_activity=on_activity;self.on_fault=on_fault;self.ready=False;self.closed=False
    def start(self):
     self.assert_owned=s.native_activity is self;events.append('native-arm');assert self.active() and self.assert_owned
     if reject:raise RuntimeError('administrator authorization denied')
@@ -31,6 +31,12 @@ class PhysicalGuardTests(unittest.TestCase):
    events.append('validate-helper')
    if not installed:raise RuntimeError('trusted native helper missing')
   s.native_activity_module=lambda:SimpleNamespace(validate_helper=validate,Controller=Native)
+  class Notice:
+   def __init__(self):events.append('notice-created')
+   def show(self,reset=False):events.append(('notice-show',reset))
+   def close(self):events.append('notice-close')
+   def status(self):return {'warning':None}
+  s.calibration_notice_module=lambda:SimpleNamespace(CalibrationNotice=Notice)
   def show():events.append('indicator-bind');s.indicator=bridge
   s.show_indicator=show
   self.addCleanup(s.close_backend)
@@ -46,7 +52,7 @@ class PhysicalGuardTests(unittest.TestCase):
 
  def test_consent_then_arm_then_capture_no_legacy_filter_call(self):
   s,b,e,_=self.make();content=s.call('desktop_start',{'physical_takeover':True});meta=json.loads(content[0]['text']);self.assertTrue(meta['physical_takeover']['enabled']);self.assertFalse(meta['native_activity']['raw_device_fds'])
-  self.assertLess(e.index('validate-helper'),e.index(('portal-start',True)));self.assertLess(e.index(('portal-start',True)),e.index('native-arm'));self.assertLess(e.index('native-arm'),e.index('indicator-bind'));self.assertLess(e.index('native-arm'),e.index('capture-start'));self.assertLess(e.index('capture-start'),e.index('capture'))
+  self.assertLess(e.index('validate-helper'),e.index(('portal-start',True)));self.assertLess(e.index(('portal-start',True)),e.index('native-arm'));self.assertLess(e.index(('portal-start',True)),e.index('notice-created'));self.assertLess(e.index('notice-created'),e.index('native-arm'));self.assertIsNotNone(s.native_activity.notice);self.assertLess(e.index('native-arm'),e.index('indicator-bind'));self.assertLess(e.index('native-arm'),e.index('capture-start'));self.assertLess(e.index('capture-start'),e.index('capture'))
 
  def test_denied_or_lost_arm_closes_portal_before_observer_wait_no_capture(self):
   s,b,e,_=self.make(reject=True)
@@ -87,5 +93,10 @@ class PhysicalGuardTests(unittest.TestCase):
    return {}
   d.request=request;d.finish_start=lambda:events.append('capture-start')
   d.start(defer_capture=True);self.assertNotIn('pipewire',events);self.assertNotIn('capture-start',events);self.assertIn('Start',events)
+
+ def test_notice_never_constructed_before_personal_portal_consent(self):
+  s,b,e,_=self.make();s.state='opening';s.ensure_backend()
+  with self.assertRaisesRegex(RuntimeError,'Personal portal consent'):s.enable_physical_guard()
+  self.assertNotIn('notice-created',e)
 
 if __name__=='__main__':unittest.main()
