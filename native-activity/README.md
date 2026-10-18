@@ -5,7 +5,7 @@ the covered kernel input devices, including activity in the same window. It is
 off by default. Normal desktop control does not invoke it or request its
 administrator authorization.
 
-The implementation is installed and 237 Python tests pass. Live startup and browser input worked, but same-window typing interruption has not passed. The latest held-key attempt completed 960 characters without an activity signal; the user confirmed a one-second physical key hold while text grew. Drag interruption remains unverified. Automated tests do not establish live device coverage.
+The implementation is installed and 255 Python tests pass. Live startup and browser input worked, but same-window typing interruption has not passed. The latest held-key attempt completed 960 characters without an activity signal; the user confirmed a one-second physical key hold while text grew. Drag interruption remains unverified. Automated tests do not establish live device coverage.
 
 ## Consent and operation
 
@@ -80,3 +80,5 @@ Calibration timeout diagnostics contain only eight fixed booleans (keyboard/poin
 Before arming, a delayed clock-switch loss marker may trigger bounded resynchronization: clear all calibration credit, discard through SYN_REPORT, require released input and a clean boundary, then request the challenge again. At most two resets fit within the original30second calibration deadline; no capture/input is allowed. Clock setup now occurs immediately after opening each primary client. Bulk reads reduce per-record overhead. Once armed, SYN_DROPPED remains an immediate terminal fault. Live success remains unverified.
 
 Calibration accepts fresh absolute pointer-source samples because those same source records cause cancellation once armed. This proves source delivery, not actual changed position, button delivery, or human identity. The pre-arm quiet period is1.5seconds; afterARM there is no grace. Terminal activity category is only key/button, pointer, switch, metadata or held-state, with no raw codes or coordinates.
+
+The backend can request a passive readiness notice from the existing GNOME notification service after portal consent and CALIBRATING. It uses fixed text, no actions or service activation, and bounded local calls. Requested visibility is not proof of display. An acknowledged or uncertain notice must be resolved before ARM; failed or unknown closure refuses control. This status UI does not capture the desktop or launch/focus a task application.

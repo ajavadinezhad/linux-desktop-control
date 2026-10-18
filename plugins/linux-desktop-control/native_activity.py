@@ -50,7 +50,7 @@ def peer_credentials(connection):
 class Controller:
     def __init__(self, active, on_activity, on_fault, runtime_dir=None,
                  launcher=subprocess.Popen, validator=validate_helper,
-                 credentials=peer_credentials, startup_timeout=60):
+                 credentials=peer_credentials, startup_timeout=60, notice=None):
         # Dependency injections are for isolated tests, never model tool arguments.
         self.active = active
         self.on_activity = on_activity
@@ -60,6 +60,14 @@ class Controller:
         self.validator = validator
         self.credentials = credentials
         self.startup_timeout = startup_timeout
+        self.notice = notice
+        self.notice_open = False
+        self.notice_requested = False
+        self.notice_warning = None
+        self.notice_acknowledged = False
+        self.notice_active = False
+        self.notice_close_attempts = 0
+        self.notice_delivery_unknown = False
         self.listener = None
         self.connection = None
         self.process = None
@@ -186,9 +194,12 @@ class Controller:
             if calibrating != 'CALIBRATING':
                 raise NativeFailure('helper-fault' if calibrating in (None,'FAULT') else 'protocol-invalid','Native observer did not begin calibration')
             self.calibration_state='waiting'
+            self._show_notice()
             print('DESKTOP_CALIBRATION_READY',file=sys.stderr,flush=True)
             self._wait_calibrated()
             self.calibration_state='challenge-seen'
+            self._close_notice()
+            if self.notice_active or self.notice_delivery_unknown:raise NativeFailure('helper-fault','Calibration notification closure unconfirmed')
             self._send('ARM')
             arm_deadline=time.monotonic()+1
             while True:
@@ -215,6 +226,39 @@ class Controller:
             self.close()
             raise
 
+    def _show_notice(self,reset=False):
+        if self.notice is None:return
+        if self.stop.is_set() or not self.active():raise NativeFailure('session-ended','Calibration notification authorization ended')
+        self.notice_requested=True;self.notice_open=True;self.notice_delivery_unknown=True
+        try:
+            self.notice.show(reset=reset)
+            status=self.notice.status()
+            self.notice_acknowledged=status.get('request_acknowledged') is True
+            self.notice_active=status.get('request_active') is True
+            self.notice_delivery_unknown=status.get('delivery_unknown') is True
+            if status.get('warning'):
+                self.notice_warning='Calibration notification unavailable; visibility is unverified.'
+        except Exception:
+            self.notice_warning='Calibration notification unavailable; visibility is unverified.'
+        if self.stop.is_set() or not self.active():
+            self._close_notice()
+            raise NativeFailure('session-ended','Calibration notification authorization ended')
+
+    def _close_notice(self):
+        if self.notice is None or not self.notice_open or self.notice_close_attempts>=2:return
+        self.notice_close_attempts+=1
+        try:
+            closed=self.notice.close()
+            status=self.notice.status()
+            self.notice_acknowledged=status.get('request_acknowledged') is True
+            self.notice_active=status.get('request_active') is True
+            self.notice_delivery_unknown=status.get('delivery_unknown') is True
+            if not self.notice_active and not self.notice_delivery_unknown and closed is not False:self.notice_open=False
+            if status.get('warning'):
+                self.notice_warning='Calibration notification unavailable or closure unconfirmed; visibility is unverified.'
+        except Exception:
+            self.notice_warning='Calibration notification closure unconfirmed; visibility is unverified.'
+
     def _wait_calibrated(self):
         # No synthetic challenge: only the authenticated broker can attest that
         # its current calibration phase observed the human's physical challenge.
@@ -229,6 +273,7 @@ class Controller:
                 if self.calibration_state!='waiting' or self.calibration_resets>=2:
                     raise NativeFailure('protocol-invalid','Native calibration reset invalid')
                 self.calibration_resets+=1
+                self._show_notice(reset=True)
                 print('DESKTOP_CALIBRATION_READY_AGAIN',file=sys.stderr,flush=True)
             elif message=='ALIVE':peer_seen=time.monotonic()
             elif message=='FAULT':raise NativeFailure('helper-fault','Native calibration failed')
@@ -372,6 +417,7 @@ class Controller:
                 'calibration_report_kind':self.calibration_report_kind,
                 'calibration_late_result':self.calibration_late_result,
                 'calibration_resets':self.calibration_resets,'activity_kind':self.activity_kind,
+                'calibration_notice':{'requested':self.notice_requested,'request_acknowledged':self.notice_acknowledged,'request_active':self.notice_active,'delivery_unknown':self.notice_delivery_unknown,'visibility_verified':False,'warning':self.notice_warning},
                 'lease_remaining_is_estimate':True}
 
     def close(self):
@@ -379,6 +425,7 @@ class Controller:
         if (self.armed_at_monotonic is not None or self.helper_ready_at_monotonic is not None) and self.ended_at_monotonic is None:self.ended_at_monotonic=time.monotonic()
         self.stop.set()
         self.ready = False
+        self._close_notice()
         # Socket shutdown wakes an independent reader before any join.
         connection = self.connection
         if connection is not None:
