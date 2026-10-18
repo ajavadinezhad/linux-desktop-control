@@ -757,7 +757,7 @@ class Server:
 
     def error_result(self,error,name=None):
         if name in ('desktop_start','desktop_observe','desktop_action'):
-            try:self.close_backend()
+            try:self.invalidate();self.close_backend()
             except Exception:pass
         progress=getattr(self.backend,'transaction_info',{}) if name=='desktop_action' else {}
         return {'isError':True,'content':[text({'error':str(error),'transaction':progress,
