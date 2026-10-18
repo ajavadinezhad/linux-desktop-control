@@ -213,7 +213,10 @@ int main(void) {
     category.code = BTN_LEFT; assert(event_category(0, &category) == CATEGORY_POINTER);
     category.type = EV_REL; assert(event_category(0, &category) == CATEGORY_POINTER);
     category.value = 0; assert(event_category(0, &category) == 0);
-    category.type = EV_ABS; category.value = 50; assert(event_category(0, &category) == 0);
+    category.type = EV_ABS; category.value = 0; assert(event_category(0, &category) == CATEGORY_POINTER);
+    category.value = 50; assert(event_category(0, &category) == CATEGORY_POINTER);
+    device_categories[0] = CATEGORY_KEYBOARD; assert(event_category(0, &category) == 0);
+    device_categories[0] = CATEGORY_KEYBOARD | CATEGORY_POINTER;
     category.type = EV_REL; category.value = 1;
     device_categories[0] = 0; assert(event_category(0, &category) == 0);
     device_categories[0] = CATEGORY_KEYBOARD | CATEGORY_POINTER;
@@ -229,8 +232,8 @@ int main(void) {
     fixture_code = BTN_LEFT; assert(held_state() == 1);
     assert(calibration_seen == (CATEGORY_KEYBOARD | CATEGORY_POINTER));
     fixture_held_fd = -1; calibration_last_activity = 1000;
-    assert(calibration_tick(1149) == 0); assert(!calibrated);
-    assert(calibration_tick(1150) == 0); assert(calibrated && !calibrating);
+    assert(calibration_tick(2499) == 0); assert(!calibrated);
+    assert(calibration_tick(2500) == 0); assert(calibrated && !calibrating);
     assert(strcmp(fixture_reply, "CALIBRATED\n") == 0);
     calibrating = true; calibrated = false; fixture_query_error = 1;
     assert(calibration_tick(2000) == -1);
@@ -246,6 +249,11 @@ int main(void) {
     e.value = 0; assert(classify(&e) == 1);
     e.type = EV_REL; assert(classify(&e) == 1);
     e.type = EV_ABS; assert(classify(&e) == 1);
+    assert(strcmp(activity_message(&e), "ACTIVITY_POINTER\n") == 0);
+    e.type = EV_REL; assert(strcmp(activity_message(&e), "ACTIVITY_POINTER\n") == 0);
+    e.type = EV_KEY; assert(strcmp(activity_message(&e), "ACTIVITY_KEY\n") == 0);
+    e.type = EV_SW; assert(strcmp(activity_message(&e), "ACTIVITY_SWITCH\n") == 0);
+    e.type = EV_MSC; assert(strcmp(activity_message(&e), "ACTIVITY_METADATA\n") == 0);
     e.type = EV_SYN; e.code = SYN_REPORT; assert(classify(&e) == 0);
     e.code = SYN_DROPPED; assert(classify(&e) == -1);
     e.type = EV_MAX + 1; assert(classify(&e) == -1);
@@ -262,7 +270,15 @@ int main(void) {
     close(p[0]); close(p[1]); assert(dup2(read_copy, 4) == 4);
     close(read_copy); p[0] = 4; p[1] = write_copy;
     device_count=1; armed=false; calibrated=false; calibrating=true;
-    calibration_seen=CATEGORY_KEYBOARD|CATEGORY_POINTER;
+    calibration_seen=0; calibration_time=stamp;
+    e.type=EV_ABS;e.value=0;
+    assert(write(p[1],&e,sizeof e)==(ssize_t)sizeof e);
+    assert(drain(p[0])==0);assert(calibration_seen==0); /* stale ABS cannot credit */
+    calibration_time=stamp-1;
+    assert(write(p[1],&e,sizeof e)==(ssize_t)sizeof e);
+    assert(drain(p[0])==0);assert(calibration_seen==CATEGORY_POINTER);
+    assert(calibration_tick(now_ms()+150)==0);assert(!calibrated);
+    assert(command("ARM")==-1); /* ABS source alone lacks keyboard coverage */
     calibration_reset_pending=false;calibration_reset_rounds=0;
     struct input_event lost[3] = {e,e,e};
     lost[0].type=EV_SYN;lost[0].code=SYN_DROPPED;
@@ -278,14 +294,23 @@ int main(void) {
     assert(!calibration_reset_pending && calibration_seen==0);
     assert(command("ARM")==-1);usleep(2000);
     stamp=now_ms();e.time.tv_sec=stamp/1000;e.time.tv_usec=(stamp%1000)*1000;
+    e.type=EV_KEY;e.code=KEY_B;e.value=1;
     assert(write(p[1],&e,sizeof e)==(ssize_t)sizeof e);
     assert(drain(p[0])==0);assert(calibration_seen==CATEGORY_KEYBOARD);
     assert(command("ARM")==-1);
-    e.type=EV_REL;
+    e.type=EV_ABS;e.value=0;
     assert(write(p[1],&e,sizeof e)==(ssize_t)sizeof e);
     assert(drain(p[0])==0);
-    assert(calibration_tick(now_ms()+150)==0);assert(calibrated);
+    fixture_held_fd=7;fixture_code=KEY_A;
+    assert(calibration_tick(now_ms()+150)==0);assert(!calibrated); /* held still refuses */
+    fixture_held_fd=-1;calibration_last_activity=now_ms();
+    assert(calibration_tick(calibration_last_activity+1499)==0);assert(!calibrated);
+    assert(calibration_tick(calibration_last_activity+1500)==0);assert(calibrated);
     assert(command("ARM")==0);assert(armed);
+    stamp=now_ms();e.time.tv_sec=stamp/1000;e.time.tv_usec=(stamp%1000)*1000;
+    assert(write(p[1],&e,sizeof e)==(ssize_t)sizeof e);
+    assert(drain(p[0])==1); /* armed ABS source activity still terminates */
+    assert(strcmp(stream_activity_message,"ACTIVITY_POINTER\n")==0);
     assert(write(p[1],lost,sizeof lost)==(ssize_t)sizeof lost);
     assert(drain(p[0])==-1);assert(collector_phase==42); /* armed drop never resyncs */
     armed=false;calibrated=false;calibrating=true;calibration_reset_pending=false;
@@ -295,7 +320,7 @@ int main(void) {
     assert(drain(p[0])==-1);assert(collector_phase==42); /* third round refuses */
     calibration_reset_pending=false;calibration_reset_rounds=0;
     memset(calibration_resync,0,sizeof calibration_resync);
-    fixture_quiet=fixture_capture=0; device_count=0; e.type=EV_KEY;
+    fixture_quiet=fixture_capture=0; device_count=0; e.type=EV_KEY;e.value=1;
     armed = false; calibrating = true; calibration_seen = 0;
     calibration_time = stamp + 1000;
     assert(write(p[1], &e, sizeof e) == (ssize_t)sizeof e);
@@ -319,6 +344,13 @@ int main(void) {
     e.type = EV_KEY;
     assert(write(p[1], &e, sizeof e) == (ssize_t)sizeof e);
     armed = true; arm_time = stamp; assert(drain(p[0]) == 1);
+    assert(strcmp(stream_activity_message,"ACTIVITY_KEY\n")==0);
+    e.type=EV_SW;
+    assert(write(p[1],&e,sizeof e)==(ssize_t)sizeof e);assert(drain(p[0])==1);
+    assert(strcmp(stream_activity_message,"ACTIVITY_SWITCH\n")==0);
+    e.type=EV_MSC;
+    assert(write(p[1],&e,sizeof e)==(ssize_t)sizeof e);assert(drain(p[0])==1);
+    assert(strcmp(stream_activity_message,"ACTIVITY_METADATA\n")==0);
     e.type=EV_SYN; e.code=SYN_DROPPED;
     assert(write(p[1], &e, sizeof e) == (ssize_t)sizeof e);
     assert(drain(p[0]) == -1); assert(collector_phase == 42);
@@ -382,6 +414,11 @@ int main(void) {
     assert(strcmp(fixture_reply, "CAL_DIAG_11111011\n") == 0);
     assert(fcntl(7, F_GETFD) == -1 && errno == EBADF);
     assert(!calibrated && !calibrating); assert(command("ARM") == -1);
+    assert(pipe(terminal_pipe)==0);assert(dup2(terminal_pipe[0],7)==7);
+    close(terminal_pipe[0]);close(terminal_pipe[1]);
+    assert(report("ACTIVITY_HELD\n")==0);
+    assert(strcmp(fixture_reply,"ACTIVITY_HELD\n")==0);
+    assert(fcntl(7,F_GETFD)==-1 && errno==EBADF);
     calibrating = true; fixture_capture = 0;
     assert(command("REPORT") == -1); assert(collector_phase == 27);
     return 0;

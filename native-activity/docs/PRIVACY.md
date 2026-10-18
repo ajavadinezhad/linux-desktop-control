@@ -5,7 +5,7 @@ values enter its process memory. It does not interpret key meanings as text,
 accumulate pointer coordinates, or export the raw stream. Saying that it never
 reads raw input would be incorrect.
 
-Only fixed READY, ARMED, ACTIVITY, FAULT, and ALIVE notifications leave the helper
+Only fixed readiness/calibration/reset, ARMED, activity/fault/ALIVE notifications and terminal calibration diagnostic bits leave the helper
 over its private channel. No key codes, text, pointer deltas/coordinates, event
 timestamps, device identifiers, or raw file descriptors are exported to the
 backend or assistant. Event contents are not logged, persisted, or included in
@@ -47,3 +47,5 @@ own sharing stop remains independent of the helper.
 The current evidence is a build and isolated tests. The helper is not yet
 installed or live-verified; do not infer verified device coverage, live cleanup,
 or assistant integration from these documents.
+
+Activity kind is a fixed coarse enum: key/button, pointer, switch, metadata or held-state. It contains no event codes, identities, values or coordinates; key includes pointer/touch buttons. Terminal diagnostics contain only eight calibration booleans, sent after raw descriptors close. They cannot authorize control.
