@@ -1,16 +1,40 @@
 # Same-window physical takeover boundary
 
-Research and optional source integration, 2026-10-18. No live compositor
-callback, settings change, or live input was activated by this work.
+## Current 0.8.0 native replacement
+
+The optional system helper is installed, but live same-window takeover remains **failed/unverified**. In the latest held-key typing attempt, the user confirmed a physical one-second key hold while text grew. The backend completed960characters without cancellation (result `0e2c7f56251f467c87cfde4c071a34a7`). Sharing subsequently closed with zero held virtual input and no cleanup warning. Drag interruption has not passed.
+
+A fail-closed keyboard/pointer calibration before capture and input is being added; it is not live-verified. It must establish actual source coverage rather than treating READY/ARMED as evidence that input reaches the observer. Calibration establishes only the challenged devices at that moment, not universal coverage or human provenance. The following sections preserve the older Clutter investigation.
+
 
 ## Current supported claim
 
-The current context guard detects foreground-window/geometry/context changes.
-Its pointer snapshot has coordinates, not event provenance. With the default
-`physical_takeover=false`, motion or typing which leaves that context unchanged
-is not detected by a device-source observer. The new optional observer awaits
-manual helper reload and real-device acceptance; reliable same-window takeover
-is not yet a verified claim. A successful Alt+Tab test cannot establish it.
+Same-window physical takeover is **unsupported and refused before sharing**.
+`desktop_start(physical_takeover=true)` fails regardless of helper capability,
+before backend construction, portal consent or observer activation. Ordinary
+`physical_takeover=false` control retains foreground/context fences. Physical
+activity that leaves the same window/context unchanged is not detected reliably.
+A successful Alt+Tab test does not establish same-window support.
+
+## Failed live acceptance, 2026-10-18
+
+Server 0.7.6/helper revision 4 had physical_takeover enabled. Typing ran from
+2026-10-18T05:01:09.845Z to 05:01:24.897Z (UTC), result
+`77f18af35e2542cd8aff6aa1adaf4e15`. The human confirmed a physical key press
+while letters appeared, but the batch continued until its 15-second deadline:
+1,719 characters and 3,454 attempted input events. Native-activity cancellation
+was not recorded. Baseline context epoch was 26; no epoch or exact timestamp
+at the physical event and no release-event trace were captured. This is a
+failed detector acceptance, not a takeover success. The drag trial was not run.
+Cleanup confirmed sharing/input off, helper hidden/unowned and Yaru unchanged.
+
+Root-cause research identifies an event-coverage gap: Clutter filters run
+oldest first and earlier Mutter handling can stop client events before an
+extension filter. Actor captured-event is downstream. last-device-changed is
+idle-coalesced and can omit intervening activity; the installed public APIs
+provide no supported early passive per-event substitute. No repeated live test
+or automatic fallback is authorized by the refusal. Internal observer cleanup
+code and fake tests remain for regression coverage, not a working public feature.
 
 ## What GNOME 51 exposes
 

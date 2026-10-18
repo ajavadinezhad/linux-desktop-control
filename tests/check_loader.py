@@ -44,7 +44,7 @@ with tempfile.TemporaryDirectory(prefix='desktop-plugin-loader-') as home:
         assert server['tools']['desktop_start']['inputSchema']['properties']['cursor_glow']['type']=='boolean'
         physical=server['tools']['desktop_start']['inputSchema']['properties']['physical_takeover']
         assert physical['type']=='boolean' and physical['default'] is False,physical
-        assert 'metadata' in physical['description'] and 'Unknown sources' in physical['description'],physical
+        assert 'administrator' in physical['description'] and 'raw' in physical['description'],physical
         observe=server['tools']['desktop_observe']['inputSchema']
         assert 'inspect_target' in observe['properties'] and not observe.get('required'),observe
         print(json.dumps({'passed':True,'server':server['name'],'version':server['serverInfo']['version'],'tools':sorted(server['tools'])},indent=2))
