@@ -85,6 +85,9 @@ int main(void) {
     line(control[1],"CALIBRATING\n");usleep(5000);
     long long stamp=now_ms();struct input_event event={0};
     event.time.tv_sec=stamp/1000;event.time.tv_usec=(stamp%1000)*1000;
+    event.type=EV_LED;event.code=LED_NUML;event.value=1;
+    assert(write(stream[1],&event,sizeof event)==(ssize_t)sizeof event);
+    assert(write(control[1],"HB\n",3)==3);line(control[1],"ALIVE\n");
     event.type=EV_KEY;event.code=KEY_LEFTSHIFT;event.value=1;
     assert(write(stream[1],&event,sizeof event)==(ssize_t)sizeof event);
     assert(write(control[1],"HB\n",3)==3);line(control[1],"ALIVE\n");
@@ -121,7 +124,17 @@ int main(void) {
 #include <poll.h>
 static int fixture_held_fd = -1, fixture_query_error, fixture_queries, fixture_code = KEY_MAX;
 static int fixture_quiet, fixture_capture;
+static int fixture_fill_budget;
 static char fixture_reply[32];
+static ssize_t fixture_read(int fd, void *data, size_t size) {
+    if (fixture_fill_budget) {
+        assert(size == sizeof(struct input_event));
+        struct input_event event = {.type = EV_SYN, .code = SYN_REPORT};
+        memcpy(data, &event, sizeof event); return sizeof event;
+    }
+    return read(fd, data, size);
+}
+#define read fixture_read
 static int fixture_poll(struct pollfd *fds, nfds_t count, int timeout) {
     if (fixture_quiet) return 0;
     return poll(fds, count, timeout);
@@ -225,6 +238,10 @@ int main(void) {
     e.type = EV_SYN; e.code = SYN_REPORT; assert(classify(&e) == 0);
     e.code = SYN_DROPPED; assert(classify(&e) == -1);
     e.type = EV_MAX + 1; assert(classify(&e) == -1);
+    unsigned feedback[] = {EV_LED, EV_REP, EV_SND, EV_FF, EV_FF_STATUS};
+    for(unsigned i=0;i<sizeof feedback/sizeof *feedback;i++) {
+        e.type=feedback[i]; assert(classify(&e)==2);
+    }
     int p[2]; assert(pipe2(p, O_NONBLOCK) == 0);
     e.type = EV_KEY; e.code = KEY_B; e.value = 1;
     long long stamp = now_ms(); e.time.tv_sec = stamp / 1000; e.time.tv_usec = (stamp % 1000) * 1000;
@@ -250,10 +267,28 @@ int main(void) {
     assert(write(p[1], &e, sizeof e) == (ssize_t)sizeof e);
     armed = false; assert(drain(p[0]) == 0);
     stamp = now_ms(); e.time.tv_sec = stamp / 1000; e.time.tv_usec = (stamp % 1000) * 1000;
+    e.type = EV_LED;
+    assert(write(p[1], &e, sizeof e) == (ssize_t)sizeof e);
+    armed = true; arm_time = stamp; assert(drain(p[0]) == 0); /* feedback isn't takeover */
+    e.type = EV_KEY;
     assert(write(p[1], &e, sizeof e) == (ssize_t)sizeof e);
     armed = true; arm_time = stamp; assert(drain(p[0]) == 1);
-    assert(write(p[1], "x", 1) == 1); assert(drain(p[0]) == -1);
-    close(p[1]); assert(drain(p[0]) == -1); close(p[0]);
+    e.type=EV_SYN; e.code=SYN_DROPPED;
+    assert(write(p[1], &e, sizeof e) == (ssize_t)sizeof e);
+    assert(drain(p[0]) == -1); assert(collector_phase == 42);
+    e.type=EV_MAX+1;
+    assert(write(p[1], &e, sizeof e) == (ssize_t)sizeof e);
+    assert(drain(p[0]) == -1); assert(collector_phase == 44);
+    e.type=EV_KEY; e.code=KEY_B; e.time.tv_sec=(now_ms()+5000)/1000;
+    assert(write(p[1], &e, sizeof e) == (ssize_t)sizeof e);
+    assert(drain(p[0]) == -1); assert(collector_phase == 45);
+    armed=false; calibrated=true;
+    assert(write(p[1], &e, sizeof e) == (ssize_t)sizeof e);
+    assert(drain(p[0]) == -1); assert(collector_phase == 46); calibrated=false;
+    assert(write(p[1], "x", 1) == 1); assert(drain(p[0]) == -1); assert(collector_phase == 41);
+    close(p[1]); assert(drain(p[0]) == -1); assert(collector_phase == 41); close(p[0]);
+    assert(drain(-1)==-1); assert(collector_phase==40);
+    fixture_fill_budget=1; assert(drain(-1)==-1); assert(collector_phase==47); fixture_fill_budget=0;
     control_used = 0;
     assert(feed_control("CL", 2) == 0); assert(control_used == 2);
     assert(feed_control("OSE\n", 4) == 2); assert(control_used == 0);

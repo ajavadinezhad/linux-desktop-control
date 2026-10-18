@@ -2,6 +2,8 @@
 
 ## 0.8.0
 
+- Accept known kernel output/configuration feedback without treating it as human activity; preserve unknown/lost-stream refusal and add distinct drain failure codes.
+
 - Replace the failed optional Clutter filter with a separately authorized native device-activity helper. Missing or untrusted helper refuses before sharing. Default control needs no helper or administrator authorization.
 - Split portal consent from capture: administrator approval and native ARM acknowledgment precede screenshots/input. Activity and faults invalidate pending work independently of foreground tracking.
 - Add root-owned optional helper package: read-only input descriptors, UID/capability drop, private fixed-token channel, peer pidfd, topology/session monitors, heartbeat expiry and seccomp confinement. No persistent service, setuid installation, input-group change or device ACL change.

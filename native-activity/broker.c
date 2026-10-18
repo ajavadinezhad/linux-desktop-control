@@ -84,6 +84,11 @@ static int count_arg(const char *text) {
  * no identities, values or coordinates are recorded or exported. */
 static int classify(const struct input_event *event) {
     if (event->type == EV_SYN) return event->code == SYN_DROPPED ? -1 : 0;
+    /* Kernel output/feedback can appear on an evdev reader, including LED and
+     * repeat configuration sent by another client. It is neither physical
+     * takeover nor a broken stream. Never inspect its payload. */
+    if (event->type == EV_LED || event->type == EV_REP || event->type == EV_SND ||
+        event->type == EV_FF || event->type == EV_FF_STATUS) return 2;
     if (event->type == EV_KEY || event->type == EV_REL || event->type == EV_ABS ||
         event->type == EV_SW || event->type == EV_MSC) return 1;
     return -1;
@@ -115,25 +120,30 @@ static int drain(int fd) {
         ssize_t n = read(fd, &event, sizeof event);
         if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return 0;
         if (n < 0 && errno == EINTR) continue;
-        if (n != (ssize_t)sizeof event) return -1;
+        if (n < 0) { collector_phase = 40; return -1; }
+        if (n != (ssize_t)sizeof event) { collector_phase = 41; return -1; }
         if (calibrating) {
             calibration_diag.stream_record = true;
             long long stamp = (long long)event.time.tv_sec * 1000 + event.time.tv_usec / 1000;
             if (stamp <= calibration_time) calibration_diag.stale_timestamp = true;
         }
         int kind = classify(&event);
-        if (kind < 0) return -1;
+        if (kind < 0) {
+            collector_phase = event.type == EV_SYN && event.code == SYN_DROPPED ? 42 : 44;
+            return -1;
+        }
+        if (kind == 2) continue; /* Known output feedback: no calibration credit. */
         if (kind) {
             if (armed) {
                 long long stamp = (long long)event.time.tv_sec * 1000 + event.time.tv_usec / 1000;
-                if (stamp < arm_time || stamp > now_ms() + 1000) return -1;
+                if (stamp < arm_time || stamp > now_ms() + 1000) { collector_phase = 45; return -1; }
                 return 1;
             }
-            if (calibrated) return -1;
+            if (calibrated) { collector_phase = 46; return -1; }
             if (calibrating) {
                 long long stamp = (long long)event.time.tv_sec * 1000 + event.time.tv_usec / 1000;
                 long long current = now_ms();
-                if (current < 0 || stamp > current + 1000) return -1;
+                if (current < 0 || stamp > current + 1000) { collector_phase = 45; return -1; }
                 if (stamp > calibration_time)
                     calibration_note(event_category(fd - 4, &event), current);
             }
@@ -141,6 +151,7 @@ static int drain(int fd) {
              * is discarded. ARM separately requires every key released. */
         }
     }
+    collector_phase = 47;
     return -1;
 }
 /* Read only aggregate held state, including buttons; never identify/export a
