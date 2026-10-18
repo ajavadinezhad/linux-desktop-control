@@ -1,5 +1,9 @@
 # Changes
 
+## 0.7.5
+
+An expired matching observation with unchanged foreground returns a fresh image and explicit action_refused with zero input, avoiding a new portal session for read-only refresh. Context/generation mismatch and protected UI still close. No automatic action replay. Live 0.7.4 verified Save/Open native dialog transitions and actual themed cursor glow/restoration; file reopen and physical takeover remain pending.
+
 ## 0.7.4
 
 - Keep approach/modifiers guarded until the activating press of one explicit transition; allow Save/Open chords with releases only afterward.

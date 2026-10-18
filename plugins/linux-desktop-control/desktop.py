@@ -17,7 +17,7 @@ import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import Gio, GLib, Gst
 
-VERSION = '0.7.4'
+VERSION = '0.7.5'
 DEST = 'org.freedesktop.portal.Desktop'
 PATH = '/org/freedesktop/portal/desktop'
 RD = 'org.freedesktop.portal.RemoteDesktop'
@@ -578,7 +578,7 @@ def tools():
     specs=[
       ('desktop_start','Request personal GNOME consent for one monitor, keyboard and pointer; return a fresh screenshot. Optional cursor_glow temporarily changes the desktop-wide cursor theme and restores it on close.',{'cursor_glow':{'type':'boolean','description':'Explicit opt-in after explaining desktop-wide theme scope. Applies real themed cursor glow while active; custom app cursors may ignore it.'}}),
       ('desktop_observe','Return a fresh screenshot and dimensions. Optional inspect_target binds a single-use editable accessibility identity; inspect before input.',{'inspect_target':{'type':'boolean'}}),
-      ('desktop_action','Perform bounded input and return a fresh screenshot. Text/keys need same-call focus or a sequence beginning with a target click/focus shortcut. Coordinates use logical_size. Discrete wheel steps only. Text uses GNOME Unicode composition by default; verify actual results. Never replay uncertain input.',{'action':ACTION_SCHEMA,'target_id':{'type':'string','minLength':32,'maxLength':32},'recovery_observation_id':{'type':'string'},'window_observation_id':{'type':'string','minLength':32,'maxLength':32},'focus_transition':{'type':'boolean','description':'Only one explicit left click or launcher/Return gesture may change foreground; no remaining batch. Inspect its returned image before further input.'}}),
+      ('desktop_action','Perform bounded input and return a fresh screenshot. Text/keys need same-call focus or a sequence beginning with a target click/focus shortcut. Coordinates use logical_size. Discrete wheel steps only. Text uses GNOME Unicode composition by default; verify actual results. Never replay uncertain input.',{'action':ACTION_SCHEMA,'target_id':{'type':'string','minLength':32,'maxLength':32},'recovery_observation_id':{'type':'string'},'window_observation_id':{'type':'string','minLength':32,'maxLength':32},'focus_transition':{'type':'boolean','description':'Only one explicit left click, launcher/Return or Ctrl+s/Ctrl+Shift+s/Ctrl+o gesture may change foreground; no remaining batch. Inspect its returned image before further input.'}}),
       ('desktop_status','Read session and cleanup state without capturing or sending input.',{}),
       ('desktop_close','Close this session and release virtual input, capture and the portal. This is resource cleanup; a later session requires fresh GNOME consent.',{})]
     return [{'name':n,'description':d,'inputSchema':{'type':'object','properties':props,'required':['action','window_observation_id'] if n=='desktop_action' else [],'additionalProperties':False},'annotations':{'readOnlyHint':n in ('desktop_status','desktop_observe'),'destructiveHint':n=='desktop_action','openWorldHint':True}} for n,d,props in specs]
@@ -857,11 +857,21 @@ class Server:
                 if type(transition) is not bool:raise ValueError('focus_transition must be boolean')
                 if transition and 'target_id' in args:raise ValueError('A focus transition cannot reuse an editable-control identity')
                 if getattr(self.backend,'requires_window_guard',False):
-                    if not window_record or args.get('window_observation_id')!=window_record['id'] or window_record['generation']!=self.generation or time.monotonic()-window_record['issued']>60:raise RuntimeError('Foreground observation expired or invalid; inspect a fresh screenshot before input')
+                    if not window_record or args.get('window_observation_id')!=window_record['id'] or window_record['generation']!=self.generation:raise RuntimeError('Foreground observation expired or invalid; inspect a fresh screenshot before input')
                     def cancel_window():
                         self.backend.cancelled.set()
                         if self.cancel_token:self.cancel_token.set()
                     module=self.window_guard_module();window=module.WindowGuard(self.indicator,window_record['context'],cancel_window);window.check()
+                    if time.monotonic()-window_record['issued']>60:
+                        # A matching old token grants no input. If its foreground
+                        # still matches, return a fresh inspected-image opportunity
+                        # instead of needlessly reopening the portal. No replay.
+                        self.recovery.finish(self.backend.transaction_info,failed=True)
+                        content=self.capture_result(('active',),window.baseline)
+                        metadata=json.loads(content[0]['text'])
+                        metadata['action_refused']='Observation expired; zero input was sent. Inspect this fresh image and use its new token for any next action.'
+                        metadata['recovery']=self.recovery.snapshot();content[0]=text(metadata)
+                        return content
                     geometry=self.backend.monitor_geometry() if callable(getattr(self.backend,'monitor_geometry',None)) else None
                     def pointer_reader():
                         window.check()

@@ -270,3 +270,18 @@ class IdleObservationGuardTests(unittest.TestCase):
   s,b=WindowServerTests().make();b.value.update(epoch=11,window_id='human-app')
   r=s.handle({'id':1,'method':'tools/call','params':{'name':'desktop_observe','arguments':{}}})
   self.assertTrue(r['result']['isError']);self.assertFalse(any(c['type']=='image' for c in r['result']['content']));self.assertFalse(s.status()['active'])
+
+class ExpiredObservationTests(unittest.TestCase):
+ def test_expired_matching_foreground_returns_fresh_image_with_zero_input(self):
+  s,b,d=FullTransitionTests().make();s.window_record['issued']-=61;old=s.window_record['id'];events=len(d.events)
+  q={'id':1,'method':'tools/call','params':{'name':'desktop_action','arguments':{'window_observation_id':old,'action':{'type':'click','x':100,'y':100}}}}
+  r=s.fence_response(q,s.handle(q));metadata=json.loads(r['result']['content'][0]['text'])
+  self.assertIn('action_refused',metadata);self.assertEqual(len(d.events),events);self.assertTrue(s.status()['active']);self.assertNotEqual(s.window_record['id'],old)
+  self.assertEqual(metadata['recovery']['last_result']['input_events_attempted'],0);self.assertTrue(any(c['type']=='image' for c in r['result']['content']))
+ def test_expiry_never_refreshes_past_human_switch_or_unknown_token(self):
+  for unknown in (False,True):
+   s,b,d=FullTransitionTests().make();s.window_record['issued']-=61;token=s.window_record['id']
+   if unknown:token='0'*32
+   else:b.value.update(window_id='human-app',epoch=11)
+   r=s.handle({'id':1,'method':'tools/call','params':{'name':'desktop_action','arguments':{'window_observation_id':token,'action':{'type':'click','x':100,'y':100}}}})
+   self.assertTrue(r['result']['isError']);self.assertFalse(any(c['type']=='image' for c in r['result']['content']));self.assertFalse(s.status()['active']);self.assertFalse(any(e[1].startswith('Notify') for e in d.events))

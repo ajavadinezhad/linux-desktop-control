@@ -1,4 +1,4 @@
-# Private review status — 0.7.4
+# Private review status — 0.7.5
 
 Current changes add guarded activating-press transitions, Save/Open chords, stable read-only context settling, idle context-loss cleanup and opt-in actual themed cursor glow with an independent restoration watchdog. No removed toolbar or shortcuts return. The human reported pointer movement good in the preceding live test. Normal native dialog, physical Alt+Tab and themed-glow acceptance for 0.7.4 remain pending until recorded below. Source remains private; project reuse licensing is deferred. Third-party cursor assets retain their separate CC BY-SA attribution/terms.
 
@@ -25,3 +25,11 @@ GUI Firefox search completed seven characters. Capture reconnected once without 
 The continued 0.7.2 trial successfully searched Mozilla Support for “save web pages”, opened “How to save a web page”, scrolled through both saving sections, and selected the browser menu’s Save Page As. The deliberate dialog gesture then produced “Foreground changed while capturing; no image is published” (result 7ad6c8d7737a4098bd84110687afa7e3; one gesture, 15 events). Sharing closed, no save dialog pixels were published, and save/reopen was not reached. Cleanup confirmed portal closed, input/capture disabled, helper unowned/inactive/hidden, no warning.
 
 0.7.3 addresses the evidenced available-context capture race: an explicit single transition may discard the changed frame and make one additional capture within the existing two-second deadline. No input retry occurs. Protected/unavailable context after capture, repeated changes, normal actions, cancellation and publication-fence changes still refuse. 134 isolated tests pass; live acceptance remains pending. Helper unchanged; no new GNOME logout is needed.
+
+## Live 0.7.4 and expiry correction
+
+The user approved fresh sharing with glow opt-in after desktop-wide scope disclosure. Actual cyan-glowing pointer pixels were visible in Firefox and the native chooser; the independent worker reported active. Switching to the existing Firefox window, Ctrl+s opening its native Save dialog, chooser typing/navigation, Save closing it, Ctrl+o opening the native Open dialog, and dismissing an in-app error all returned stable observations without closing sharing.
+
+The chosen /tmp save was not found on reopen, so file-save/reopen success is not claimed. The next click was refused before input due to a 60-second screenshot-token expiry. Portal closure and theme restoration were confirmed: original Yaru returned, worker stopped/restored=true, no cleanup warning, helper inactive/unowned/hidden. The physical Alt+Tab cue was not reached.
+
+0.7.5 returns a fresh image without input for an expired matching observation only when foreground identity/epoch/geometry and generation still match. Wrong tokens or changed contexts still close. 160 isolated tests and the real five-tool loader pass. Remaining live checks are save/reopen in a normal writable folder and physical takeover; no further GNOME logout is needed.
