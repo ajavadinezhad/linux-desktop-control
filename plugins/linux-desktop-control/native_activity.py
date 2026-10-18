@@ -85,6 +85,7 @@ class Controller:
         self.calibration_evidence = None
         self.calibration_report_kind = 'not-requested'
         self.calibration_late_result = False
+        self.calibration_resets = 0
 
     def _send(self, token):
         payload = (token + '\n').encode('ascii')
@@ -223,7 +224,12 @@ class Controller:
                 raise NativeFailure('session-ended','Native calibration authorization ended')
             message=self._read(.02)
             if message=='CALIBRATED':return
-            if message=='ALIVE':peer_seen=time.monotonic()
+            if message=='CALIBRATION_RESET':
+                if self.calibration_state!='waiting' or self.calibration_resets>=2:
+                    raise NativeFailure('protocol-invalid','Native calibration reset invalid')
+                self.calibration_resets+=1
+                print('DESKTOP_CALIBRATION_READY_AGAIN',file=sys.stderr,flush=True)
+            elif message=='ALIVE':peer_seen=time.monotonic()
             elif message=='FAULT':raise NativeFailure('helper-fault','Native calibration failed')
             elif message is not None:raise NativeFailure('protocol-invalid','Native calibration response invalid')
             now=time.monotonic()
@@ -243,7 +249,7 @@ class Controller:
             return
         names=('keyboard_seen','pointer_seen','any_stream_record','query_success',
                'any_held_seen','held_last_check','quiet_blocked','any_stale_timestamp')
-        deadline=time.monotonic()+.25
+        deadline=time.monotonic()+2
         self.calibration_report_kind='send-pending'
         try:self._send('REPORT')
         except (OSError,RuntimeError,ValueError):
@@ -258,6 +264,12 @@ class Controller:
                     return
                 message=self._read(remaining)
                 if message=='ALIVE':continue
+                if message=='CALIBRATION_RESET':
+                    if self.calibration_resets>=2:
+                        self.calibration_report_kind='malformed'
+                        return
+                    self.calibration_resets+=1
+                    continue # Terminal reporting never requests another challenge.
                 if message=='CALIBRATED':
                     self.calibration_late_result=True
                     continue # Timeout already won; never ARM on this late result.
@@ -355,6 +367,7 @@ class Controller:
                 'calibration_evidence':self.calibration_evidence,
                 'calibration_report_kind':self.calibration_report_kind,
                 'calibration_late_result':self.calibration_late_result,
+                'calibration_resets':self.calibration_resets,
                 'lease_remaining_is_estimate':True}
 
     def close(self):
