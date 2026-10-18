@@ -200,6 +200,7 @@ class Controller:
             self.calibration_state='challenge-seen'
             self._close_notice()
             if self.notice_active or self.notice_delivery_unknown:raise NativeFailure('helper-fault','Calibration notification closure unconfirmed')
+            if self.stop.is_set() or not self.active():raise NativeFailure('session-ended','Native observer authorization ended')
             self._send('ARM')
             arm_deadline=time.monotonic()+1
             while True:
@@ -268,6 +269,14 @@ class Controller:
             if not self.active() or self.stop.is_set():
                 raise NativeFailure('session-ended','Native calibration authorization ended')
             message=self._read(.02)
+            # The read can complete after revocation or the original deadline.
+            # A terminal success token must not jump over either fence.
+            if self.stop.is_set() or not self.active():
+                raise NativeFailure('session-ended','Native calibration authorization ended')
+            if time.monotonic()>=deadline:
+                if message=='CALIBRATED':self.calibration_late_result=True
+                self._request_calibration_report()
+                raise NativeFailure('helper-fault','Native calibration challenge timed out')
             if message=='CALIBRATED':return
             if message=='CALIBRATION_RESET':
                 if self.calibration_state!='waiting' or self.calibration_resets>=2:
