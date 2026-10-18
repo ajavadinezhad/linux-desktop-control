@@ -17,7 +17,7 @@ import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import Gio, GLib, Gst
 
-VERSION = '0.8.1'
+VERSION = '0.8.3'
 # Freeze identity at module load: old providers must never report a new disk build.
 _build_spec = importlib.util.spec_from_file_location('_desktop_runtime_build', os.path.join(os.path.dirname(__file__), 'runtime_build.py'))
 _runtime_build = importlib.util.module_from_spec(_build_spec)
@@ -705,6 +705,27 @@ class Server:
             self.invalidate();self.close_backend()
             raise
 
+    def startup_status_snapshot(self):
+        # Only coarse Python-owned fields: no backend/GUI calls or authority writes.
+        if not self.state_lock.acquire(blocking=False):return None
+        try:
+            if self.state!='opening':return None
+            controller=self.native_activity
+            native={'active':False,'calibration_state':'not-started','calibration_verified':False}
+            if controller is not None:
+                state=getattr(controller,'calibration_state','not-started')
+                native['calibration_state']=state if state in ('not-started','waiting','challenge-seen','verified','failed') else 'not-started'
+                native['calibration_resets']=min(2,max(0,getattr(controller,'calibration_resets',0)))
+                native['calibration_notice']={'requested':getattr(controller,'notice_requested',False) is True,
+                    'request_acknowledged':getattr(controller,'notice_acknowledged',False) is True,
+                    'request_active':getattr(controller,'notice_active',False) is True,
+                    'visibility_verified':False}
+            return {'server_version':VERSION,'server_build':SERVER_BUILD,
+                'session_state':'opening','active':False,'capture_allowed':False,'input_allowed':False,
+                'startup_snapshot':True,'snapshot_kind':'startup-read-only',
+                'portal_closed_confirmed':False,'held_input_count':None,'native_activity':native}
+        finally:self.state_lock.release()
+
     def preflight_context(self):
         self.require_runtime()
         path=os.path.join(os.path.dirname(__file__),'indicator_bridge.py')
@@ -1120,13 +1141,29 @@ class Server:
 class StdioTransport:
     """Serialize desktop work; read cancellation and closure independently."""
     def __init__(self,server):
-        self.server=server;self.pending=queue.Queue();self.tokens={};self.token_lock=threading.Lock();self.disconnected=threading.Event()
+        self.startup_responses=queue.Queue(maxsize=1);self.writer_stop=threading.Event();self.startup_writer=None
+        self.server=server;self.output_lock=threading.Lock();self.output_stream=None;self.pending=queue.Queue();self.tokens={};self.token_lock=threading.Lock();self.disconnected=threading.Event()
     def interrupt(self,request_id=None,all_requests=False):
         with self.token_lock:
             for key,token in self.tokens.items():
                 if all_requests or key==request_id:token.set()
         active=self.server.cancel_token
         if self.server.backend and (all_requests or (active is not None and active.is_set())):self.server.backend.cancelled.set()
+    def write_response(self,response):
+        with self.output_lock:
+            self.output_stream.write(json.dumps(response)+'\n');self.output_stream.flush()
+
+    def write_startup_responses(self):
+        # One bounded daemon writer: output backpressure must never block the
+        # stdin reader that consumes cancellation, close, and disconnect.
+        while not self.writer_stop.is_set():
+            try:response=self.startup_responses.get(timeout=.1)
+            except queue.Empty:continue
+            if self.writer_stop.is_set():break
+            try:self.write_response(response)
+            except (BrokenPipeError,OSError):
+                self.disconnected.set();self.interrupt(all_requests=True);break
+
     def read(self,stream):
         try:
             for line in stream:
@@ -1140,14 +1177,26 @@ class StdioTransport:
                     if request['method']=='notifications/cancelled':self.interrupt(params.get('requestId'));continue
                     if request['method']=='tools/call':
                         if not isinstance(params.get('name'),str) or not isinstance(params.get('arguments',{}),dict):raise ValueError('Invalid tool arguments')
+                        if params['name']=='desktop_status' and rid is not None:
+                            snapshot=self.server.startup_status_snapshot()
+                            if snapshot is not None:
+                                try:
+                                    self.startup_responses.put_nowait({'jsonrpc':'2.0','id':rid,'result':{'content':[text(snapshot)]}})
+                                except queue.Full:pass # Busy: retain normal serialized handling below.
+                                else:continue
                         if params['name']=='desktop_close':self.interrupt(all_requests=True);self.server.invalidate()
                     request['_generation']=self.server.generation;token=threading.Event()
                     if rid is not None:
                         with self.token_lock:self.tokens[rid]=token
                     self.pending.put((request,token))
+                except (BrokenPipeError,OSError):
+                    self.disconnected.set();self.interrupt(all_requests=True);break
                 except Exception as error:self.pending.put(({'_parse_error':str(error)},threading.Event()))
         finally:self.disconnected.set();self.interrupt(all_requests=True);self.pending.put(None)
     def run(self,input_stream,output_stream):
+        self.output_stream=output_stream
+        self.startup_writer=threading.Thread(target=self.write_startup_responses,daemon=True,name='startup-status-writer')
+        self.startup_writer.start()
         threading.Thread(target=self.read,args=(input_stream,),daemon=True).start()
         try:
             while True:
@@ -1163,12 +1212,14 @@ class StdioTransport:
                     if response is not None:
                         with self.server.state_lock:
                             response=self.server.fence_response(request,response)
-                            output_stream.write(json.dumps(response)+'\n');output_stream.flush()
+                            self.write_response(response)
                 except (BrokenPipeError,OSError):self.disconnected.set();self.interrupt(all_requests=True);break
                 finally:
                     self.server.cancel_token=None;self.server.request_epoch=None
                     with self.token_lock:self.tokens.pop(request.get('id'),None)
-        finally:self.disconnected.set();self.interrupt(all_requests=True);self.server.shutdown()
+        finally:
+            self.writer_stop.set();self.disconnected.set();self.interrupt(all_requests=True);self.server.shutdown()
+            self.startup_writer.join(timeout=.2)
 
 def main():
     server=Server();server.recover_cursor_glow();transport=StdioTransport(server)
