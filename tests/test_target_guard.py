@@ -27,13 +27,15 @@ class ProviderTests(unittest.TestCase):
   node=Node('/field',(A.VISIBLE,A.SHOWING,A.FOCUSED,A.EDITABLE));win=Node('/window',(A.VISIBLE,A.SHOWING,A.ACTIVE),(node,));app=Node('/app',(),(win,));root=Node('/root',(),(app,));api=NS(StateType=A,Role=NS(PASSWORD_TEXT=PASSWORD),CoordType=NS(WINDOW=1),get_desktop=lambda i:root)
   provider=g.AtspiProvider.__new__(g.AtspiProvider);provider.api=api;return provider,win,node
  def test_snapshot_uses_only_identity_and_states_no_values(self):
-  provider,w,n=self.make();t=provider.snapshot(lambda:None);self.assertEqual(t.identity,(':1.44','/field','/window',42));self.assertEqual(t.describe()['role'],'text');self.assertFalse(t.describe()['text_values_read']);t.acquire();self.assertEqual(n.focuses,0);n.values.discard(A.FOCUSED);t.acquire();self.assertEqual(n.focuses,1)
+  provider,w,n=self.make();t=provider.snapshot(lambda:None);self.assertEqual(t.identity,(':1.44','/field','/window',42));self.assertEqual(t.describe()['role'],'text');self.assertFalse(t.describe()['text_values_read']);t.acquire();self.assertEqual(n.focuses,0);n.values.discard(A.FOCUSED)
+  with self.assertRaisesRegex(g.TargetUnavailable,'lost keyboard focus'):t.acquire()
+  self.assertEqual(n.focuses,0)
  def test_already_focused_control_does_not_require_optional_grab_focus(self):
   p,w,n=self.make();t=p.snapshot(lambda:None)
   def unsupported():raise RuntimeError('org.freedesktop.DBus.Error.NotSupported')
   n.grab_focus=unsupported;t.acquire();t.check()
   n.values.discard(A.FOCUSED)
-  with self.assertRaisesRegex(RuntimeError,'NotSupported'):t.acquire()
+  with self.assertRaisesRegex(RuntimeError,'lost keyboard focus'):t.acquire()
  def test_vanished_dialog_fails_before_focus(self):
   p,w,n=self.make();t=p.snapshot(lambda:None);w.values.remove(A.SHOWING)
   with self.assertRaisesRegex(g.TargetUnavailable,'vanished'):t.acquire()
@@ -184,7 +186,7 @@ class DirectTransportTests(unittest.TestCase):
      def unpack(self):return (7,)
     return Reply()
   client.bus=Bus()
-  for interface,method,signature,args in [('org.a11y.atspi.Text','GetText','(ii)',(0,-1)),('org.a11y.atspi.Value','GetCurrentValue','()',()),('org.a11y.atspi.Cache','GetItems','()',()),('org.freedesktop.DBus.Properties','Get','(ss)',(g.DirectNode.ACCESSIBLE,'Name'))]:
+  for interface,method,signature,args in [('org.a11y.atspi.Component','GrabFocus','()',()),('org.a11y.atspi.Text','GetText','(ii)',(0,-1)),('org.a11y.atspi.Value','GetCurrentValue','()',()),('org.a11y.atspi.Cache','GetItems','()',()),('org.freedesktop.DBus.Properties','Get','(ss)',(g.DirectNode.ACCESSIBLE,'Name'))]:
    with self.assertRaises(g.TargetUnavailable):client.call(':1.1','/field',interface,method,signature,args)
   self.assertEqual(client.bus.calls,[])
   self.assertEqual(client.call(':1.1','/field',g.DirectNode.ACCESSIBLE,'GetRole','()',()),(7,))

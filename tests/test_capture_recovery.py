@@ -76,3 +76,18 @@ class CaptureRecoveryTests(unittest.TestCase):
   self.assertEqual(d.capture_info['freshness'],'new_stream')
 
 if __name__=='__main__':unittest.main()
+
+class CaptureRevocationTests(unittest.TestCase):
+ setup_backend=CaptureRecoveryTests.setup_backend
+ backend=test_control.Tests.backend
+ def test_revocation_during_pipeline_reconnect_never_publishes_a_frame(self):
+  d=self.setup_backend();original=d._capture_once;calls=[]
+  def capture(new_stream=False):
+   calls.append(new_stream)
+   if not new_stream:raise m.CaptureTimeout('stalled')
+   return original(new_stream=True)
+  d._capture_once=capture
+  def restart():d.restarts+=1;d.cancelled.set();d.session=None
+  d._start_capture_pipeline=restart
+  with self.assertRaises(RuntimeError):d.capture()
+  self.assertEqual(calls,[False,True]);self.assertEqual(d.restarts,1)
