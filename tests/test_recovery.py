@@ -69,12 +69,10 @@ class PublicationRecoveryTests(unittest.TestCase):
     def test_cancel_after_capture_requires_inspection_before_more_input(self):
         import threading
         s=m.Server(Partial)
-        # Panel creation is independently covered; this test is a pure backend.
-        s.ensure_panel=lambda:None
         s.call('desktop_start',{})
         content=s.call('desktop_action',{'action':{'type':'click','x':1,'y':1}})
         s.cancel_token=threading.Event();s.cancel_token.set()
-        request={'id':7,'params':{'name':'desktop_action'},'_control_epoch':s.control_epoch}
+        request={'id':7,'params':{'name':'desktop_action'},'_generation':s.generation}
         response=s.fence_response(request,{'id':7,'result':{'content':content}})
         self.assertTrue(response['result']['isError'])
         self.assertTrue(s.recovery.inspection_required)

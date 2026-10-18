@@ -1,0 +1,9 @@
+{
+  "uuid": "desktop-indicator@local.codex",
+  "name": "Desktop Control Indicator",
+  "description": "Passive text identifying an active local desktop-control session. No input or keyboard shortcuts.",
+  "shell-version": [
+    "51"
+  ],
+  "version": 1
+}

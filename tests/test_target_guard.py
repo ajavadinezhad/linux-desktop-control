@@ -82,35 +82,35 @@ class ProviderTests(unittest.TestCase):
   p.api.get_desktop=late
   with patch.object(g.time,'monotonic',lambda:clock[0]):
    with self.assertRaisesRegex(g.TargetUnavailable,'budget'):p.snapshot(lambda:None)
- def test_deadline_and_pause_checked_after_provider_reply(self):
+ def test_deadline_and_closure_checked_after_provider_reply(self):
   p,w,n=self.make();t=p.snapshot(lambda:None);t.deadline=time.monotonic()-1
   with self.assertRaisesRegex(g.TargetUnavailable,'budget'):t.call(lambda:True)
-  paused=[False]
+  cancelled=[False]
   def gate():
-   if paused[0]:raise RuntimeError('paused')
+   if cancelled[0]:raise RuntimeError('cancelled')
   t.gate=gate;t.deadline=time.monotonic()+1
-  def reply():paused[0]=True;return True
-  with self.assertRaisesRegex(RuntimeError,'paused'):t.call(reply)
+  def reply():cancelled[0]=True;return True
+  with self.assertRaisesRegex(RuntimeError,'cancelled'):t.call(reply)
 
 class TargetBridgeTests(unittest.TestCase):
  def make(self):
   s=m.Server(Partial);s.call('desktop_start',{});p,w,n=ProviderTests().make();s.target_provider=p;return s,w,n
  def observe(self,s):return json.loads(s.call('desktop_observe',{'inspect_target':True})[0]['text'])
- def test_single_use_token_rejected_after_any_action_and_pause(self):
+ def test_single_use_token_rejected_after_any_action_and_closure(self):
   s,w,n=self.make();meta=self.observe(s);token=meta['target']['target_id'];self.assertEqual(len(token),32)
   s.call('desktop_action',{'target_id':token,'action':{'type':'click','x':1,'y':1}})
   with self.assertRaisesRegex(RuntimeError,'expired'):s.call('desktop_action',{'target_id':token,'action':{'type':'click','x':1,'y':1}})
   self.assertEqual(s.recovery.last['outcome'],'failed_before_input');self.assertEqual(s.backend.actions,1)
-  self.observe(s);s.begin_boundary('desktop_pause',{'reason':'Review','task_summary':'Scratch'});self.assertIsNone(s.target_record)
+  self.observe(s);s.invalidate();self.assertIsNone(s.target_record)
  def test_unavailable_is_explicit_and_no_guard_fallback(self):
   s,w,n=self.make();n.values.remove(A.FOCUSED);meta=self.observe(s);self.assertFalse(meta['target']['available']);self.assertTrue(meta['target']['no_fallback']);self.assertIsNone(s.target_record)
   with self.assertRaises(RuntimeError):s.call('desktop_action',{'target_id':'x'*32,'action':{'type':'click','x':1,'y':1}})
   self.assertEqual(s.backend.actions,0)
- def test_late_paused_traversal_and_suppressed_image_cannot_publish_token(self):
+ def test_late_cancelled_traversal_and_suppressed_image_cannot_publish_token(self):
   s,w,n=self.make()
   class Late:
    def snapshot(self,gate):
-    s.begin_boundary('desktop_pause',{'reason':'Review','task_summary':'Scratch'});gate()
+    s.invalidate();gate()
   s.target_provider=Late()
   with self.assertRaises(RuntimeError):self.observe(s)
   self.assertIsNone(s.target_record)
@@ -125,7 +125,7 @@ class TargetBridgeTests(unittest.TestCase):
 
 class DispatchTests(unittest.TestCase):
  def make(self):
-  d=test_control.Tests().backend();d.pause=lambda seconds:None;d.keysym=lambda k:ord(k[0]);p,w,n=ProviderTests().make();d.target_guard=p.snapshot(d.check);return d,w,n
+  d=test_control.Tests().backend();d.wait_interruptibly=lambda seconds:None;d.keysym=lambda k:ord(k[0]);p,w,n=ProviderTests().make();d.target_guard=p.snapshot(d.check);return d,w,n
  def test_guarded_keyboard_can_acquire_exact_control_without_pointer(self):
   d,w,n=self.make();d.action({'type':'text','text':'ok'});self.assertEqual(n.focuses,0);self.assertTrue(d.events);self.assertTrue(all(e[1]=='NotifyKeyboardKeysym' for e in d.events))
  def test_focus_loss_during_text_blocks_next_press_and_releases_held(self):
@@ -150,7 +150,7 @@ class DispatchTests(unittest.TestCase):
   with self.assertRaisesRegex(ValueError,'32characters'):d.action({'type':'text','focus':{'x':10,'y':10},'text':'x'*33})
   self.assertFalse(d.events)
  def test_slow_guard_honestly_bounds_partial_character_progress(self):
-  d=test_control.Tests().backend();d.pause=lambda seconds:None;d.keysym=lambda k:ord(k[0]);clock=[0.0]
+  d=test_control.Tests().backend();d.wait_interruptibly=lambda seconds:None;d.keysym=lambda k:ord(k[0]);clock=[0.0]
   class Slow:
    def live(self):pass
    def acquire(self):pass
@@ -208,16 +208,16 @@ class DirectTransportTests(unittest.TestCase):
   s=m.Server(Partial);s.call('desktop_start',{})
   class Provider:
    def close(self):raise RuntimeError('timed out')
-  s.target_provider=Provider();s.call('desktop_stop',{})
-  self.assertEqual(s.status()['control_state'],'stopped');self.assertFalse(s.status()['input_allowed']);self.assertIsNone(s.target_provider)
+  s.target_provider=Provider();s.call('desktop_close',{})
+  self.assertEqual(s.status()['session_state'],'closed');self.assertFalse(s.status()['input_allowed']);self.assertIsNone(s.target_provider)
   self.assertIn('unconfirmed',s.status()['accessibility_cleanup_warning'])
- def test_state_bits_and_pause_close_connection_without_queries(self):
+ def test_state_bits_and_session_close_without_queries(self):
   state=g.DirectStates([1<<12,1<<8]);self.assertTrue(state.contains(12));self.assertTrue(state.contains(40));self.assertFalse(state.contains(39))
   s=m.Server(Partial);s.call('desktop_start',{});closed=[]
   class Provider:
    def close(self):closed.append(True)
-   def snapshot(self,gate):raise AssertionError('must never inspect during pause')
-  s.target_provider=Provider();s.call('desktop_pause',{'reason':'Review','task_summary':'Scratch'})
+   def snapshot(self,gate):raise AssertionError('must never inspect during closure')
+  s.target_provider=Provider();s.call('desktop_close',{})
   self.assertEqual(closed,[True]);self.assertIsNone(s.target_provider)
   with self.assertRaises(RuntimeError):s.call('desktop_observe',{'inspect_target':True})
 

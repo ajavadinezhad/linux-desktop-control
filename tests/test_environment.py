@@ -29,5 +29,5 @@ class EnvironmentTests(unittest.TestCase):
   self.assertFalse(r['ready']);self.assertTrue(any(c['name']=='codex' and not c['ok'] for c in r['checks']))
  def test_installer_preflight_precedes_every_mutation(self):
   s=(p.parent/'install.sh').read_text();check=s.index('/usr/bin/python3 "$root/check_environment.py"\n')
-  self.assertLess(check,s.index('PYCONFIG'));self.assertLess(check,s.index('"$root/install-toolbar.py"'))
+  self.assertLess(check,s.index('PYCONFIG'));self.assertLess(check,s.index('"$root/install-indicator.py"'))
 if __name__=='__main__':unittest.main()

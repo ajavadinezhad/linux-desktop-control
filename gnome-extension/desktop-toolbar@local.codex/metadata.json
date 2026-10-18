@@ -1,7 +1,0 @@
-{
-  "uuid": "desktop-toolbar@local.codex",
-  "name": "Desktop Control Toolbar",
-  "description": "Compact bottom toolbar for the local consented desktop control backend.",
-  "shell-version": ["51"],
-  "version": 2
-}
