@@ -17,7 +17,7 @@ import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import Gio, GLib, Gst
 
-VERSION = '0.7.1'
+VERSION = '0.7.6'
 DEST = 'org.freedesktop.portal.Desktop'
 PATH = '/org/freedesktop/portal/desktop'
 RD = 'org.freedesktop.portal.RemoteDesktop'
@@ -178,7 +178,7 @@ class Desktop:
         if getattr(self,'action_deadline',None) and time.monotonic()>self.action_deadline:
             raise RuntimeError('Input sequence exceeded 15 seconds; stopped before next event')
         window=getattr(self,'window_guard',None)
-        if window is not None and not getattr(self,'window_transition',False):window.check()
+        if window is not None and not (getattr(self,'window_transition',False) and getattr(self,'transition_activated',False)):window.check()
         self.last_used = time.monotonic()
 
     def wait_interruptibly(self,seconds):
@@ -233,6 +233,13 @@ class Desktop:
 
     def notify(self, method, sig, *args):
         self.check()
+        # Keep the approach and modifiers fenced. The one authorized gesture
+        # begins only at its activating press, never at motion or key release.
+        activating=(method=='NotifyPointerButton' and args[-1]==1) or (method=='NotifyKeyboardKeysym' and args[-1]==1 and args[0] not in (0xffe1,0xffe2,0xffe3,0xffe4,0xffe9,0xffea))
+        if getattr(self,'window_transition',False) and not getattr(self,'transition_activated',False) and activating:
+            callback=getattr(self,'begin_transition',None)
+            if callback is not None:callback()
+            self.transition_activated=True
         target=getattr(self,'target_guard',None)
         if target is not None:
             if method=='NotifyKeyboardKeysym' and args[-1]:target.check()
@@ -254,12 +261,14 @@ class Desktop:
         if start is None or seconds==0:
             self.position(x,y)
             return
-        count=max(1,int(seconds/.016))
-        for i in range(1,count+1):
-            t=i/count
+        deadline=time.monotonic()+seconds
+        while True:
+            remaining=deadline-time.monotonic()
+            t=max(0,min(1,1-remaining/seconds))
             blend=t*t*(3-2*t)
             self.position(start[0]+(x-start[0])*blend,start[1]+(y-start[1])*blend)
-            self.wait_interruptibly(seconds/count)
+            if t>=1:break
+            self.wait_interruptibly(min(.016,max(0,deadline-time.monotonic())))
 
     def state(self, kind, code, down):
         method = 'NotifyKeyboardKeysym' if kind == 'key' else 'NotifyPointerButton'
@@ -410,6 +419,9 @@ class Desktop:
             # Approval/user activity may have moved the physical pointer. Never
             # interpolate from a cached position belonging to a previous call.
             self.pointer_position=None
+            self.transition_activated=False
+            reader=getattr(self,'pointer_reader',None)
+            if reader is not None and any(step['type'] in ('move','click','drag','scroll') or 'focus' in step for step in steps):self.pointer_position=reader()
             self.action_deadline=time.monotonic()+15
             try:
                 for index,step in enumerate(steps):
@@ -564,9 +576,9 @@ ACTION_SCHEMA['properties']['steps']={'type':'array','items':STEP_SCHEMA,'minIte
 
 def tools():
     specs=[
-      ('desktop_start','Request personal GNOME consent for one monitor, keyboard and pointer; return a fresh screenshot.',{}),
+      ('desktop_start','Request personal GNOME consent for one monitor, keyboard and pointer; return a fresh screenshot. Optional cursor_glow temporarily changes the desktop-wide cursor theme and restores it on close.',{'physical_takeover':{'type':'boolean','default':False,'description':'Explicit opt-in to session-only global source-device metadata observation; stops on native device-source activity. No key contents or event positions are observed. Unknown sources are unsupported; this is not human provenance attestation.'},'cursor_glow':{'type':'boolean','description':'Explicit opt-in after explaining desktop-wide theme scope. Applies real themed cursor glow while active; custom app cursors may ignore it.'}}),
       ('desktop_observe','Return a fresh screenshot and dimensions. Optional inspect_target binds a single-use editable accessibility identity; inspect before input.',{'inspect_target':{'type':'boolean'}}),
-      ('desktop_action','Perform bounded input and return a fresh screenshot. Text/keys need same-call focus or a sequence beginning with a target click/focus shortcut. Coordinates use logical_size. Discrete wheel steps only. Text uses GNOME Unicode composition by default; verify actual results. Never replay uncertain input.',{'action':ACTION_SCHEMA,'target_id':{'type':'string','minLength':32,'maxLength':32},'recovery_observation_id':{'type':'string'},'window_observation_id':{'type':'string','minLength':32,'maxLength':32},'focus_transition':{'type':'boolean','description':'Only one explicit left click or launcher/Return gesture may change foreground; no remaining batch. Inspect its returned image before further input.'}}),
+      ('desktop_action','Perform bounded input and return a fresh screenshot. Text/keys need same-call focus or a sequence beginning with a target click/focus shortcut. Coordinates use logical_size. Discrete wheel steps only. Text uses GNOME Unicode composition by default; verify actual results. Never replay uncertain input.',{'action':ACTION_SCHEMA,'target_id':{'type':'string','minLength':32,'maxLength':32},'recovery_observation_id':{'type':'string'},'window_observation_id':{'type':'string','minLength':32,'maxLength':32},'focus_transition':{'type':'boolean','description':'Only one explicit left click, launcher/Return or Ctrl+s/Ctrl+Shift+s/Ctrl+o gesture may change foreground; no remaining batch. Inspect its returned image before further input.'}}),
       ('desktop_status','Read session and cleanup state without capturing or sending input.',{}),
       ('desktop_close','Close this session and release virtual input, capture and the portal. This is resource cleanup; a later session requires fresh GNOME consent.',{})]
     return [{'name':n,'description':d,'inputSchema':{'type':'object','properties':props,'required':['action','window_observation_id'] if n=='desktop_action' else [],'additionalProperties':False},'annotations':{'readOnlyHint':n in ('desktop_status','desktop_observe'),'destructiveHint':n=='desktop_action','openWorldHint':True}} for n,d,props in specs]
@@ -612,6 +624,8 @@ class Server:
         self.factory=factory;self.backend=None;self.cancel_token=None;self.request_epoch=None
         self.state_lock=threading.RLock();self.generation=0;self.state='closed'
         self.recovery=RecoveryLedger();self.target_provider=None;self.target_record=None
+        self.cursor_glow=None;self.cursor_glow_pending=None;self.cursor_glow_warning=None;self.cursor_glow_last=None
+        self.physical_takeover=False;self.physical_takeover_warning=None
         self.target_cleanup_warning=None;self.indicator=None;self.indicator_warning=None;self.window_record=None
 
     def invalidate(self):
@@ -636,14 +650,34 @@ class Server:
             recovery=self.recovery.snapshot(),fresh_observation_required=not active or self.recovery.inspection_required)
         if not active:result['logical_size']=[0,0]
         if self.target_cleanup_warning:result['accessibility_cleanup_warning']=self.target_cleanup_warning
+        result['physical_takeover']={'enabled':self.physical_takeover,'classification':'native-device-source-activity','human_provenance':False}
+        if self.physical_takeover_warning:result['physical_takeover_warning']=self.physical_takeover_warning
         if self.indicator_warning:result['indicator_warning']=self.indicator_warning
+        result['cursor_glow']=self.cursor_glow.status() if self.cursor_glow else (self.cursor_glow_pending.status() if self.cursor_glow_pending else (self.cursor_glow_last or {'active':False}))
+        if self.cursor_glow_warning:result['cursor_glow_warning']=self.cursor_glow_warning
         return result
 
     def preflight_context(self):
         path=os.path.join(os.path.dirname(__file__),'indicator_bridge.py')
         spec=importlib.util.spec_from_file_location('desktop_indicator_preflight',path)
         module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
-        module.IndicatorBridge(self.status).preflight()
+        bridge=module.IndicatorBridge(self.status);bridge.preflight();return bridge
+
+    def preflight_physical_guard(self):
+        bridge=self.preflight_context()
+        diagnostics=json.loads(bridge.call('GetDiagnostics','()',())[0])
+        if diagnostics.get('physical_activity_candidate') is not True or diagnostics.get('failed') is True:
+            raise RuntimeError('Optional device-source activity observer is not loaded; no sharing requested. Default desktop control remains available without this opt-in.')
+
+    def enable_physical_guard(self):
+        if self.indicator is None or not self.indicator.bound:raise RuntimeError('Device-source activity observer is not bound')
+        self.indicator.update()
+        self.physical_takeover=True # Cleanup must disarm even if the enable reply is lost.
+        bridge=self.indicator
+        bridge.set_physical_guard(True,lambda:self.foreground_lost(bridge))
+        if bridge.call('SetPhysicalGuard','(sb)',(bridge.nonce,True))!=(True,):
+            raise RuntimeError('Device-source activity observation refused; session must close')
+        self.physical_takeover=True;self.physical_takeover_warning=None
 
     def show_indicator(self):
         if self.factory is not Desktop:return
@@ -652,14 +686,80 @@ class Server:
             spec=importlib.util.spec_from_file_location('desktop_indicator',path)
             module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
             self.indicator=module.IndicatorBridge(self.status)
+            bridge=self.indicator
+            bridge.on_failure=lambda:self.indicator_failed(bridge)
             self.indicator.start();self.indicator_warning=None
         except Exception:
             if self.indicator:self.indicator.close()
-            self.indicator=None;self.indicator_warning='Passive pointer label unavailable in this session; core desktop control has no extension prerequisite.'
+            self.indicator=None;self.indicator_warning='Foreground observer or pointer label unavailable; guarded desktop control is refused.'
+
+    def indicator_failed(self,expected=None):
+        if expected is not None and self.indicator is not expected:return
+        self.indicator_warning='Foreground observer heartbeat failed; session closed without retry.'
+        self.invalidate()
+        self.close_backend()
+
+    def cursor_glow_config(self):
+        path=os.path.join(os.path.dirname(__file__),'cursor_theme_config.json')
+        if os.path.getsize(path)>4096:raise RuntimeError('Invalid cursor theme configuration')
+        with open(path) as f:config=json.load(f)
+        if not isinstance(config,dict) or not all(isinstance(config.get(key),str) for key in ('theme','theme_root','state_dir')):raise RuntimeError('Cursor theme is not installed')
+        return config
+
+    def recover_cursor_glow(self):
+        if self.factory is not Desktop:return
+        try:
+            config=self.cursor_glow_config()
+            service=os.path.join(os.path.dirname(__file__),'cursor_glow_service.py')
+            import subprocess
+            result=subprocess.run(['/usr/bin/python3',service,'--theme',config['theme'],'--state',config['state_dir'],'--root',config['theme_root'],'--owner',str(os.getpid()),'--recover'],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=4)
+            if result.returncode:raise RuntimeError('Cursor theme recovery could not be confirmed')
+        except FileNotFoundError:pass
+        except Exception as error:self.cursor_glow_warning=str(error)
+
+    def show_cursor_glow(self):
+        if self.cursor_glow is not None:return
+        if self.cursor_glow_pending is not None:raise RuntimeError('Previous cursor restoration is unconfirmed; no new glow lease is allowed')
+        config=self.cursor_glow_config()
+        path=os.path.join(os.path.dirname(__file__),'cursor_glow_service.py')
+        spec=importlib.util.spec_from_file_location('desktop_cursor_glow',path)
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        controller=module.Controller(config['theme'],config['state_dir'],config['theme_root'],active=lambda:self.state=='active' and self.backend is not None and self.backend.status().get('active') is True,on_failure=lambda error:self.cursor_glow_failed(controller,error))
+        self.cursor_glow=controller;self.cursor_glow_warning=None
+        try:controller.start()
+        except Exception:
+            self.cursor_glow=None
+            raise
+
+    def cursor_glow_failed(self,expected,error):
+        if self.cursor_glow is not expected:return
+        self.cursor_glow_warning=str(error)
+        if self.indicator is not None:self.foreground_lost(self.indicator)
+
+    def foreground_lost(self,expected):
+        if self.indicator is not expected or self.state not in ('opening','active'):return
+        self.invalidate()
+        # Do not do synchronous D-Bus cleanup in the context-signal callback.
+        def cleanup():
+            if self.indicator is expected:self.close_backend()
+        threading.Thread(target=cleanup,daemon=True).start()
 
     def close_backend(self):
-        if self.indicator:self.indicator.close();self.indicator=None
+        glow=self.cursor_glow;self.cursor_glow=None
+        if self.indicator:
+            if self.physical_takeover:
+                self.indicator.set_physical_guard(False)
+                try:
+                    if self.indicator.call('SetPhysicalGuard','(sb)',(self.indicator.nonce,False))!=(True,):raise RuntimeError('disarm refused')
+                except Exception:self.physical_takeover_warning='Explicit observer disarm unconfirmed; ownership unbind and portal close attempted.'
+            self.indicator.close();self.indicator=None
+        self.physical_takeover=False
         if self.backend:self.backend.cancelled.set();self.backend.close();self.backend.pointer_position=None
+        if glow is not None:
+            try:glow.close()
+            except Exception as error:
+                self.cursor_glow_warning=str(error);self.cursor_glow_pending=glow
+            self.cursor_glow_last=glow.status()
         self.target_record=None;self.window_record=None;self.close_target_provider();self.state='closed'
 
     def ensure_backend(self):
@@ -692,25 +792,51 @@ class Server:
         if callable(getattr(self.backend,'check',None)):self.backend.check()
 
 
-    def read_window_context(self):
+    def read_window_context(self,settle_seconds=0):
         if self.indicator is None:raise RuntimeError('Updated foreground observer unavailable; input is refused. Reload the indicator extension before a new session.')
-        context=self.indicator.context()
-        if context.get('available') is not True:raise RuntimeError('Foreground context unavailable or system UI active; session must close')
-        return context
+        deadline=time.monotonic()+settle_seconds
+        while True:
+            self.guard()
+            if callable(getattr(self.backend,'check',None)):self.backend.check()
+            context=self.indicator.context()
+            if context.get('available') is True:return context
+            if context.get('reason')!='no-foreground-window' or settle_seconds<=0 or time.monotonic()>=deadline:raise RuntimeError('Foreground context unavailable or system UI active; session must close')
+            # This is read-only app-launch settling, never readiness or a retry.
+            if callable(getattr(self.backend,'wait_interruptibly',None)):self.backend.wait_interruptibly(.05)
+            else:time.sleep(.05)
 
     def window_guard_module(self):
         path=os.path.join(os.path.dirname(__file__),'window_guard.py')
         spec=importlib.util.spec_from_file_location('desktop_window_guard',path)
         module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
 
-    def capture_result(self,allowed,expected_window=None):
+    def stable_transition_context(self,deadline):
+        stable=None;since=None
+        while True:
+            context=self.read_window_context(max(0,deadline-time.monotonic()))
+            signature=self.window_guard_module().WindowGuard.signature(context)
+            now=time.monotonic()
+            if signature!=stable:stable=signature;since=now
+            if now-since>=.15:return context
+            if now>=deadline:raise RuntimeError('Intentional transition did not settle; session must close')
+            wait=min(.05,deadline-now)
+            if callable(getattr(self.backend,'wait_interruptibly',None)):self.backend.wait_interruptibly(wait)
+            else:time.sleep(wait)
+
+    def capture_result(self,allowed,expected_window=None,transition_settle=False):
         required=getattr(self.backend,'requires_window_guard',False)
-        before=self.read_window_context() if required else None
-        if expected_window is not None and self.window_guard_module().WindowGuard.signature(before)!=expected_window:raise RuntimeError('Foreground changed after input; session must close')
-        self.guard(allowed);png=self.backend.capture();self.guard(allowed)
-        after=self.read_window_context() if required else None
-        if required and self.window_guard_module().WindowGuard.signature(before)!=self.window_guard_module().WindowGuard.signature(after):
-            raise RuntimeError('Foreground changed while capturing; no image is published')
+        deadline=time.monotonic()+2
+        attempts=0
+        while True:
+            before=(self.stable_transition_context(deadline) if transition_settle else self.read_window_context()) if required else None
+            if expected_window is not None and self.window_guard_module().WindowGuard.signature(before)!=expected_window:raise RuntimeError('Foreground changed after input; session must close')
+            self.guard(allowed);png=self.backend.capture();self.guard(allowed)
+            after=self.read_window_context(max(0,deadline-time.monotonic()) if transition_settle else 0) if required else None
+            if not required or self.window_guard_module().WindowGuard.signature(before)==self.window_guard_module().WindowGuard.signature(after):break
+            # Only the already-authorized single transition may settle across a
+            # capture race. Discard pixels and observe again; never repeat input.
+            attempts+=1
+            if not transition_settle or attempts>=2 or time.monotonic()>=deadline:raise RuntimeError('Foreground changed while capturing; no image is published')
         self.state='active';self.recovery.observed();self.window_record=None
         observation={'available':False}
         if after:
@@ -728,14 +854,28 @@ class Server:
             self.invalidate();self.close_backend();return [text(self.status())]
         self.guard()
         if name=='desktop_start':
+            physical=args.get('physical_takeover',False)
+            if type(physical) is not bool:raise ValueError('physical_takeover must be boolean')
+            glow=args.get('cursor_glow',False)
+            if type(glow) is not bool:raise ValueError('cursor_glow must be boolean')
             self.ensure_backend()
             if not self.backend.status().get('active'):
                 self.state='opening';self.target_record=None
                 try:
-                    if getattr(self.backend,'requires_window_guard',False) and self.indicator is None:self.preflight_context()
-                    self.backend.start();self.show_indicator();return self.capture_result(('opening',))
+                    if physical:self.preflight_physical_guard()
+                    elif getattr(self.backend,'requires_window_guard',False) and self.indicator is None:self.preflight_context()
+                    self.backend.start();self.show_indicator();content=self.capture_result(('opening',))
+                    if physical:
+                        self.enable_physical_guard()
+                        metadata=json.loads(content[0]['text']);metadata.update(self.status());content[0]=text(metadata)
+                    if glow:
+                        self.show_cursor_glow()
+                        metadata=json.loads(content[0]['text']);metadata.update(self.status());content[0]=text(metadata)
+                    return content
                 except BaseException:self.close_backend();raise
-            return self.capture_result(('active',))
+            if physical and not self.physical_takeover:raise RuntimeError('Device-source observation must be selected before a new consent session')
+            expected=self.window_guard_module().WindowGuard.signature(self.window_record['context']) if self.window_record else None
+            return self.capture_result(('active',),expected)
         self.guard(('active',));self.ensure_backend()
         if name=='desktop_action':
             record=self.target_record;self.target_record=None
@@ -750,17 +890,36 @@ class Server:
                 if type(transition) is not bool:raise ValueError('focus_transition must be boolean')
                 if transition and 'target_id' in args:raise ValueError('A focus transition cannot reuse an editable-control identity')
                 if getattr(self.backend,'requires_window_guard',False):
-                    if not window_record or args.get('window_observation_id')!=window_record['id'] or window_record['generation']!=self.generation or time.monotonic()-window_record['issued']>60:raise RuntimeError('Foreground observation expired or invalid; inspect a fresh screenshot before input')
+                    if not window_record or args.get('window_observation_id')!=window_record['id'] or window_record['generation']!=self.generation:raise RuntimeError('Foreground observation expired or invalid; inspect a fresh screenshot before input')
                     def cancel_window():
                         self.backend.cancelled.set()
                         if self.cancel_token:self.cancel_token.set()
                     module=self.window_guard_module();window=module.WindowGuard(self.indicator,window_record['context'],cancel_window);window.check()
+                    if time.monotonic()-window_record['issued']>60:
+                        # A matching old token grants no input. If its foreground
+                        # still matches, return a fresh inspected-image opportunity
+                        # instead of needlessly reopening the portal. No replay.
+                        self.recovery.finish(self.backend.transaction_info,failed=True)
+                        content=self.capture_result(('active',),window.baseline)
+                        metadata=json.loads(content[0]['text'])
+                        metadata['action_refused']='Observation expired; zero input was sent. Inspect this fresh image and use its new token for any next action.'
+                        metadata['recovery']=self.recovery.snapshot();content[0]=text(metadata)
+                        return content
+                    geometry=self.backend.monitor_geometry() if callable(getattr(self.backend,'monitor_geometry',None)) else None
+                    def pointer_reader():
+                        window.check()
+                        return module.pointer_local(self.read_window_context(),geometry)
+                    self.backend.pointer_reader=pointer_reader
                     if transition:module.validate_transition(args['action'])
                     else:
                         geometry=self.backend.monitor_geometry() if callable(getattr(self.backend,'monitor_geometry',None)) else None
                         window.validate_points(args['action'],(geometry['x'],geometry['y']) if geometry else (0,0))
                     self.backend.window_guard=window;self.backend.window_transition=transition
-                    if not transition:self.indicator.armed=window
+                    self.indicator.armed=window
+                    def begin_transition():
+                        window.check()
+                        self.indicator.armed=None
+                    self.backend.begin_transition=begin_transition if transition else None
                 if 'target_id' in args:
                     if not record or args['target_id']!=record['id'] or record['epoch']!=self.generation or time.monotonic()-record['issued']>60:
                         raise RuntimeError('Target identity expired or invalid; inspect a fresh desktop_observe(inspect_target=true) result before input')
@@ -770,11 +929,12 @@ class Server:
                     self.backend.action(args['action'])
                     if window is not None and not transition:window.check()
                 finally:
-                    self.backend.target_guard=None
+                    self.backend.target_guard=None;self.backend.pointer_reader=None;self.backend.begin_transition=None
                     self.backend.window_guard=None;self.backend.window_transition=False
                     if self.indicator:self.indicator.armed=None
-                content=self.capture_result(('active',),window.baseline if window is not None and not transition else None)
+                content=self.capture_result(('active',),window.baseline if window is not None and not transition else None,transition_settle=transition)
             except BaseException:
+                self.backend.pointer_reader=None;self.backend.begin_transition=None
                 self.backend.window_guard=None;self.backend.window_transition=False
                 if self.indicator:self.indicator.armed=None
                 self.recovery.finish(getattr(self.backend,'transaction_info',{}),failed=True)
@@ -792,7 +952,8 @@ class Server:
             except Exception as error:
                 self.guard(('active',))
                 target_error=str(error)[:300]
-        content=self.capture_result(('active',))
+        expected=self.window_guard_module().WindowGuard.signature(self.window_record['context']) if self.window_record else None
+        content=self.capture_result(('active',),expected)
         if name=='desktop_observe':
             metadata=json.loads(content[0]['text'])
             if args.get('inspect_target') is True:
@@ -854,6 +1015,12 @@ class Server:
                 name=request.get('params',{}).get('name');self.recovery.observation_id=None;self.target_record=None;self.window_record=None
                 if name=='desktop_action':self.recovery.finish(getattr(self.backend,'transaction_info',{}),failed=True)
                 return {'jsonrpc':'2.0','id':request.get('id'),'result':self.error_result('Screenshot invalidated by session closure; no image published',name)}
+            if getattr(self.backend,'requires_window_guard',False):
+                bridge=self.indicator
+                guard=self.window_guard_module().WindowGuard(bridge,self.window_record['context'],lambda:self.foreground_lost(bridge))
+                bridge.armed=guard
+                try:guard.check()
+                except Exception:return {'jsonrpc':'2.0','id':request.get('id'),'result':self.error_result('Foreground changed before publication; session closed',request.get('params',{}).get('name'))}
         return response
 
     def shutdown(self):
@@ -914,7 +1081,7 @@ class StdioTransport:
         finally:self.disconnected.set();self.interrupt(all_requests=True);self.server.shutdown()
 
 def main():
-    server=Server();transport=StdioTransport(server)
+    server=Server();server.recover_cursor_glow();transport=StdioTransport(server)
     def terminate(signum,frame):
         if server.backend:server.backend.cancelled.set()
         raise SystemExit(0)

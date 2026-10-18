@@ -18,10 +18,12 @@ class WindowGuard:
   if current!=self.baseline:self.fail()
  def changed(self,epoch):
   # No D-Bus cleanup on this signal thread; cancellation wakes the input worker.
-  if epoch!=self.baseline[1]:self.failed=True;self.cancel()
+  if epoch>self.baseline[1]:self.failed=True;self.cancel()
  def validate_points(self,action,offset=(0,0)):
+  if not isinstance(offset,(tuple,list)) or len(offset)!=2 or not all(isinstance(v,(int,float)) and not isinstance(v,bool) and math.isfinite(v) for v in offset):raise ValueError('Selected monitor offset unavailable')
   x,y,w,h=self.baseline[2]
   def inside(px,py):
+   if not all(isinstance(v,(int,float)) and not isinstance(v,bool) and math.isfinite(v) for v in (px,py)):raise ValueError('Invalid input point')
    if not (x<=px+offset[0]<x+w and y<=py+offset[1]<y+h):raise ValueError('Input point is outside the observed foreground window')
   def visit(step):
    if 'x' in step and 'y' in step:inside(step['x'],step['y'])
@@ -33,5 +35,18 @@ class WindowGuard:
 def validate_transition(action):
  # A deliberate focus change is one gesture with no remaining batch or text.
  if action.get('type')=='click' and action.get('button','left')=='left' and action.get('count',1)==1 and 'focus' not in action:return
- if action.get('type')=='keys' and 'focus' not in action and action.get('keys') in (['Super'],['Super_L'],['Return'],['Enter']):return
- raise ValueError('A focus transition permits only one left click or launcher/Return chord; no text, drag, scroll or sequence')
+ if action.get('type')=='keys' and 'focus' not in action:
+  keys=action.get('keys')
+  if keys in (['Super'],['Super_L'],['Return'],['Enter'],['Ctrl','s'],['Ctrl','Shift','s'],['Ctrl','o']):return
+ raise ValueError('A focus transition permits only one left click or launcher/Return or Ctrl+s/Ctrl+Shift+s/Ctrl+o chord; no text, drag, scroll or sequence')
+
+def pointer_local(context,geometry):
+ # A coordinate alone must never authorize input from a protected/stale context.
+ try:WindowGuard.signature(context)
+ except Exception as error:raise RuntimeError('Foreground pointer context unavailable; pointer input refused') from error
+ pointer=context.get('pointer')
+ if not isinstance(geometry,dict) or not all(isinstance(geometry.get(k),(int,float)) and not isinstance(geometry.get(k),bool) and math.isfinite(geometry[k]) for k in ('x','y','width','height')) or geometry['width']<=0 or geometry['height']<=0:raise RuntimeError('Selected monitor mapping unavailable; pointer input refused')
+ if not isinstance(pointer,(list,tuple)) or len(pointer)!=2 or not all(isinstance(v,(int,float)) and not isinstance(v,bool) and math.isfinite(v) for v in pointer):raise RuntimeError('Fresh system pointer position unavailable; pointer input refused')
+ x,y=pointer[0]-geometry['x'],pointer[1]-geometry['y']
+ if not (0<=x<geometry['width'] and 0<=y<geometry['height']):raise RuntimeError('System pointer is outside the shared monitor; pointer input refused')
+ return (x,y)

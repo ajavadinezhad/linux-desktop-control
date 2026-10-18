@@ -1,5 +1,7 @@
-# Private review status — 0.7.1
+# Private review status — 0.7.6
 
-Core desktop tools and a passive text indicator are prepared. No custom interactive controls or keyboard shortcuts are included. The real system cursor is unchanged, and a direct cursor glow is not claimed. The prior pointer jitter symptom is not established as fixed. No live mouse test or sharing request was performed for this version. Refresh old connected tool catalogs. Source remains private and licensing is deferred.
+Recovery and display hardening are integrated. Cursor owner/worker crash tests use isolated fake settings; they do not crash the live desktop. The optional native device-source activity candidate is disabled by default and requires a manually loaded helper revision 4 before live acceptance. No new same-window physical takeover claim is made.
 
-Current 0.7.1 input requires loaded foreground-observer protocol 2 and a fresh window_observation_id. No live guard acceptance yet. See FOCUS_GUARD_0_7_1.md.
+The prior live 0.7.5 save/reopen, cursor restoration and physical Alt+Tab evidence remains in LIVE_0_7_5.md. Physical multi-monitor, mixed-DPI/hotplug and held-input takeover checks remain hardware/human-dependent. See COMPATIBILITY.md, SAME_WINDOW_TAKEOVER.md and ZAPZAP_DIAGNOSIS.md.
+
+Source remains private; project reuse licensing is deferred. Third-party cursor asset terms remain unchanged.

@@ -241,3 +241,17 @@ class RevocationTests(unittest.TestCase):
         self.assertFalse(d.cancelled.is_set())
 
 if __name__=='__main__':unittest.main()
+
+class FreshPointerTests(unittest.TestCase):
+ def test_first_move_uses_current_pointer_and_respects_elapsed_time(self):
+  from unittest.mock import patch
+  d=Tests().backend();d.pointer_reader=lambda:(100,100);clock=[0.];d.wait_interruptibly=lambda seconds:clock.__setitem__(0,clock[0]+seconds)
+  with patch.object(m.time,'monotonic',side_effect=lambda:clock[0]):d.action({'type':'move','x':200,'y':100,'seconds':.1})
+  points=[e[-1][-2:] for e in d.events if e[1]=='NotifyPointerMotionAbsolute']
+  self.assertEqual(points[0],(100.,100.));self.assertEqual(points[-1],(200.,100.));self.assertGreater(len(points),3)
+ def test_unavailable_fresh_pointer_emits_no_input(self):
+  d=Tests().backend()
+  def refuse():raise RuntimeError('pointer unavailable')
+  d.pointer_reader=refuse
+  with self.assertRaises(RuntimeError):d.action({'type':'move','x':200,'y':100})
+  self.assertEqual(d.events,[])

@@ -1,9 +1,9 @@
 {
   "uuid": "desktop-indicator@local.codex",
   "name": "Desktop Control Indicator",
-  "description": "Read-only foreground identity/geometry observer with passive assistant-control text; no shortcuts or input controls.",
+  "description": "Foreground context observer and passive control label with disabled opt-in native device-source activity candidate; no shortcuts or input controls.",
   "shell-version": [
     "51"
   ],
-  "version": 2
+  "version": 4
 }

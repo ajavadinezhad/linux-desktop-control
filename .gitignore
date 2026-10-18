@@ -18,3 +18,6 @@ plugins/linux-desktop-control/.mcp.json
 
 # Local recorder status sidecars
 *.webm.status.json
+
+# Installer-generated, local cursor theme paths
+plugins/linux-desktop-control/cursor_theme_config.json

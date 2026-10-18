@@ -14,7 +14,7 @@ class Bus:
   self.calls.append((dest,path,iface,method,args.unpack()))
   if self.reject==method:raise RuntimeError('disconnected')
   if method=='GetNameOwner':return Reply(':1.9')
-  if method=='GetDiagnostics':return Reply('{"protocol_version":2}')
+  if method=='GetDiagnostics':return Reply('{"protocol_version":2,"pointer_snapshot":true}')
   return Reply(True)
 class IndicatorBridgeTests(unittest.TestCase):
  def start(self):
@@ -47,6 +47,10 @@ class IndicatorActorTests(unittest.TestCase):
   Main.layoutManager.primaryMonitor={x:0,y:0,width:1000,height:800};
   const global={get_pointer:()=>[300,200],display:Object.assign(new Signals(),{focus_window:win})};
   const contextSignals=[];
+  const filters=new Map();let filterNext=1;
+  const Clutter={EVENT_PROPAGATE:false,event_add_filter:(stage,fn)=>{assert.equal(stage,global.stage);const id=filterNext++;filters.set(id,fn);return id},event_remove_filter:id=>filters.delete(id)};
+  const sourceEvent=node=>({get_source_device:()=>node===null?null:{get_device_node:()=>node},get_key_symbol:()=>{throw Error('key read')},get_coords:()=>{throw Error('coordinate read')},get_button:()=>{throw Error('button read')}});
+
 
   const GLib={PRIORITY_DEFAULT:0,SOURCE_CONTINUE:true,SOURCE_REMOVE:false,get_monotonic_time:()=>now,timeout_add:(_p,_t,fn)=>{timers.set(next,fn);return next++},source_remove:id=>timers.delete(id),Variant:class{constructor(_sig,value){this.value=value}}};
   const Gio={DBus:{session:{emit_signal:(...args)=>contextSignals.push(args)}},BusNameWatcherFlags:{NONE:0},bus_watch_name_on_connection:(_b,_n,_f,_a,fn)=>{watches.set(next,fn);return next++},bus_unwatch_name:id=>watches.delete(id),DBusExportedObject:{wrapJSObject:()=>({export(){},unexport(){}})}};
@@ -64,3 +68,36 @@ class IndicatorActorTests(unittest.TestCase):
   self.run_js("i.BindAsync([nonce],invocation);const first=i._focusEpoch;global.display.focus_window=null;global.display.emit('notify::focus-window');global.display.focus_window=win;global.display.emit('notify::focus-window');assert(i._focusEpoch>=first+2);const e=i._focusEpoch;win.rect[2]+=10;win.emit('size-changed');assert(i._focusEpoch>e);assert(contextSignals.length>=3);i.GetContextAsync([nonce],invocation);const data=JSON.parse(reply[0]);assert.equal(data.rect[2],1010);assert(!('title' in data));i.disable();assert.equal(win.handlers.size,0);assert.equal(global.display.handlers.size,0);")
  def test_foreign_modal_overview_lock_and_unmanaged_are_fail_closed(self):
   self.run_js("i.BindAsync([nonce],invocation);Main.modalCount=1;i.GetContextAsync([nonce],invocation);assert.equal(JSON.parse(reply[0]).available,false);Main.modalCount=1;Main.overview.visible=true;i.GetContextAsync([nonce],invocation);assert.equal(JSON.parse(reply[0]).kind,'overview');Main.modalCount=2;i.GetContextAsync([nonce],invocation);assert.equal(JSON.parse(reply[0]).available,false);Main.modalCount=0;Main.overview.visible=false;Main.sessionMode.isLocked=true;i.GetContextAsync([nonce],invocation);assert.equal(JSON.parse(reply[0]).available,false);Main.sessionMode.isLocked=false;win.emit('unmanaging');i.GetContextAsync([nonce],invocation);assert.equal(JSON.parse(reply[0]).available,false);i.disable();")
+
+class IndicatorFailureTests(unittest.TestCase):
+ def test_heartbeat_failure_closes_bridge_before_notifying_owner_once(self):
+  i,b,_=IndicatorBridgeTests().start();failures=[]
+  i.on_failure=lambda:failures.append((i.closed.is_set(),i.bound))
+  b.reject='Update'
+  from unittest.mock import patch
+  with patch.object(i.closed,'wait',return_value=False):i.publish()
+  self.assertEqual(failures,[(True,False)]);self.assertEqual(b.calls[-1][3],'Unbind')
+ def test_overview_keeps_label_visible_but_foreign_modal_hides_it(self):
+  IndicatorActorTests().run_js("i.BindAsync([nonce],invocation);i.UpdateAsync([nonce,true],invocation);Main.overview.visible=true;Main.modalCount=1;Main.overview.emit=Signals.prototype.emit;Main.overview.emit('showing');i._render();assert.equal(actors[0].visible,true);Main.modalCount=2;i._render();assert.equal(actors[0].visible,false);Main.modalCount=0;Main.overview.visible=false;i._render();assert.equal(actors[0].visible,true);i.disable();")
+
+ def test_manually_closed_heartbeat_does_not_report_new_failure(self):
+  i,b,_=IndicatorBridgeTests().start();failures=[];i.on_failure=lambda:failures.append(True)
+  def update():i.close();raise RuntimeError('retired connection')
+  i.update=update
+  from unittest.mock import patch
+  with patch.object(i.closed,'wait',return_value=False):i.publish()
+  self.assertEqual(failures,[])
+
+class PhysicalActivityCandidateTests(unittest.TestCase):
+ run_js=IndicatorActorTests.run_js
+ def test_default_disabled_authenticated_opt_in_and_passive_latched_activity(self):
+  self.run_js("assert.equal(filters.size,0);i.BindAsync([nonce],invocation);i.UpdateAsync([nonce,true],invocation);assert.equal(filters.size,0);i.SetPhysicalGuardAsync(['wrong',true],invocation);assert.deepEqual(reply,[false]);assert.equal(filters.size,0);i.SetPhysicalGuardAsync([nonce,true],invocation);assert.deepEqual(reply,[true]);assert.equal(filters.size,1);const cb=[...filters.values()][0],e=i._focusEpoch;assert.equal(cb(sourceEvent(null)),false);assert.equal(cb(sourceEvent('')),false);assert.equal(i._focusEpoch,e);assert.equal(cb(sourceEvent('/dev/input/event7')),false);assert.equal(i._focusEpoch,e+1);assert.equal(filters.size,0);assert.equal(cb(sourceEvent('/dev/input/event7')),false);assert.equal(i._focusEpoch,e+1);i.GetContextAsync([nonce],invocation);assert.equal(JSON.parse(reply[0]).reason,'device-source-activity');i.SetPhysicalGuardAsync([nonce,true],invocation);assert.deepEqual(reply,[false]);i.disable();")
+ def test_activity_candidate_cleanup_paths_and_protected_state(self):
+  self.run_js("i.BindAsync([nonce],invocation);i.SetPhysicalGuardAsync([nonce,true],invocation);assert.equal(filters.size,0);i.UpdateAsync([nonce,true],invocation);assert.equal(filters.size,1);i.UpdateAsync([nonce,false],invocation);assert.equal(filters.size,0);i.UpdateAsync([nonce,true],invocation);assert.equal(filters.size,1);Main.sessionMode.isLocked=true;i._contextChanged(false,true);assert.equal(filters.size,0);i.SetPhysicalGuardAsync([nonce,true],invocation);assert.deepEqual(reply,[false]);Main.sessionMode.isLocked=false;i.SetPhysicalGuardAsync([nonce,true],invocation);assert.equal(filters.size,1);now=4000000;timers.values().next().value();assert.equal(filters.size,0);i.BindAsync([nonce],invocation);i.SetPhysicalGuardAsync([nonce,true],invocation);i.UpdateAsync([nonce,true],invocation);assert.equal(filters.size,1);i.UnbindAsync([nonce],invocation);assert.equal(filters.size,0);i.disable();")
+ def test_activity_candidate_callback_and_cleanup_failure_latch(self):
+  self.run_js("i.BindAsync([nonce],invocation);i.UpdateAsync([nonce,true],invocation);i.SetPhysicalGuardAsync([nonce,true],invocation);const cb=[...filters.values()][0];Clutter.event_remove_filter=()=>{throw Error('remove failed')};assert.equal(cb({get_source_device:()=>{throw Error('unknown source')}}),false);assert.equal(i._failed,true);i.GetContextAsync([nonce],invocation);assert.equal(JSON.parse(reply[0]).available,false);i.SetPhysicalGuardAsync([nonce,true],invocation);assert.deepEqual(reply,[false]);i.UnbindAsync([nonce],invocation);assert.equal(cb(sourceEvent('/dev/input/event7')),false);assert.equal(i._owner,null);i.disable();")
+
+ def test_activity_candidate_owner_loss_disable_and_missing_api(self):
+  self.run_js("i.BindAsync([nonce],invocation);i.UpdateAsync([nonce,true],invocation);i.SetPhysicalGuardAsync([nonce,true],invocation);assert.equal(filters.size,1);watches.values().next().value();assert.equal(filters.size,0);i.BindAsync([nonce],invocation);i.UpdateAsync([nonce,true],invocation);Clutter.event_add_filter=undefined;i.SetPhysicalGuardAsync([nonce,true],invocation);assert.deepEqual(reply,[false]);assert.equal(filters.size,0);i.disable();")
+ def test_activity_candidate_disable_removes_filter_and_does_not_export_metadata(self):
+  self.run_js("i.BindAsync([nonce],invocation);i.UpdateAsync([nonce,true],invocation);i.SetPhysicalGuardAsync([nonce,true],invocation);const cb=[...filters.values()][0];assert.equal(cb(sourceEvent('/dev/input/private-device')),false);assert(!JSON.stringify(contextSignals).includes('/dev/input'));assert(!i.GetDiagnostics().includes('/dev/input'));i.UnbindAsync([nonce],invocation);i.BindAsync([nonce],invocation);i.UpdateAsync([nonce,true],invocation);i.SetPhysicalGuardAsync([nonce,true],invocation);assert.equal(filters.size,1);i.disable();assert.equal(filters.size,0);")
