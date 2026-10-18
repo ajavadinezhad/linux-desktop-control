@@ -22,6 +22,8 @@ Call `desktop_close` on completion or error and check `portal_closed_confirmed` 
 
 ## Verify
 
+[Live 0.7.5 evidence](docs/LIVE_0_7_5.md) records the native dialog save/reopen workflow, actual themed glow/restoration and a human-confirmed Alt+Tab during a guarded wait.
+
 `/usr/bin/python3 -m unittest discover -s tests` checks input validation, release/cancellation/disconnect behavior, fresh capture recovery, target identity and uncertain-input reconciliation without sharing. `python3 tests/check_loader.py` checks the real app loader and all five schemas in a temporary Codex home. The indicator bridge has isolated transport tests; current live outcomes and remaining acceptance gaps are documented in docs/RELEASE_STATUS.md. Do not run a headless GNOME compositor on a live user manager: it can change activation display settings even with a private D-Bus bus. Use a separate test environment for graphical tests.
 
 Source remains private; reuse licensing is deferred. No compensation or distribution terms are assigned. See docs/LICENSING_REVIEW.md.

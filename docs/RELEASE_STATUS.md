@@ -1,6 +1,6 @@
 # Private review status — 0.7.5
 
-Current changes add guarded activating-press transitions, Save/Open chords, stable read-only context settling, idle context-loss cleanup and opt-in actual themed cursor glow with an independent restoration watchdog. No removed toolbar or shortcuts return. The human reported pointer movement good in the preceding live test. Normal native dialog, physical Alt+Tab and themed-glow acceptance for 0.7.4 remain pending until recorded below. Source remains private; project reuse licensing is deferred. Third-party cursor assets retain their separate CC BY-SA attribution/terms.
+Current changes add guarded activating-press transitions, Save/Open chords, stable read-only context settling, idle context-loss cleanup and opt-in actual themed cursor glow with an independent restoration watchdog. No removed toolbar or shortcuts return. The human reported pointer movement good in the preceding live test. The final 0.7.5 live check passed native app/dialog transitions, public article save/reopen, actual themed pointer glow and a human-confirmed Alt+Tab during a guarded wait. See LIVE_0_7_5.md for evidence and scope. Source remains private; project reuse licensing is deferred. Third-party cursor assets retain their separate CC BY-SA attribution/terms.
 
 The same loaded protocol-2 helper with fresh-pointer snapshots is compatible; no additional GNOME logout is needed. See CURSOR_GLOW.md for temporary desktop-wide theme scope and crash-restoration limits.
 
@@ -32,4 +32,8 @@ The user approved fresh sharing with glow opt-in after desktop-wide scope disclo
 
 The chosen /tmp save was not found on reopen, so file-save/reopen success is not claimed. The next click was refused before input due to a 60-second screenshot-token expiry. Portal closure and theme restoration were confirmed: original Yaru returned, worker stopped/restored=true, no cleanup warning, helper inactive/unowned/hidden. The physical Alt+Tab cue was not reached.
 
-0.7.5 returns a fresh image without input for an expired matching observation only when foreground identity/epoch/geometry and generation still match. Wrong tokens or changed contexts still close. 160 isolated tests and the real five-tool loader pass. Remaining live checks are save/reopen in a normal writable folder and physical takeover; no further GNOME logout is needed.
+0.7.5 returns a fresh image without input for an expired matching observation only when foreground identity/epoch/geometry and generation still match. Wrong tokens or changed contexts still close. 160 isolated tests and the real five-tool loader pass. Those remaining checks subsequently passed in 0.7.5 as documented in LIVE_0_7_5.md; no further GNOME logout was required.
+
+## Final 0.7.5 acceptance
+
+Native Save/Open With transitions, a verified local article save/reopen, actual themed pointer glow/restoration, and human-confirmed Alt+Tab cancellation during a guarded wait passed. All sharing/input/capture and the label were off afterward; Yaru was restored without warnings. See LIVE_0_7_5.md. Remaining limits include custom client cursor coverage, same-window physical-input provenance, OS event race windows and incomplete application/display coverage.
