@@ -47,6 +47,10 @@ class IndicatorActorTests(unittest.TestCase):
   Main.layoutManager.primaryMonitor={x:0,y:0,width:1000,height:800};
   const global={get_pointer:()=>[300,200],display:Object.assign(new Signals(),{focus_window:win})};
   const contextSignals=[];
+  const filters=new Map();let filterNext=1;
+  const Clutter={EVENT_PROPAGATE:false,event_add_filter:(stage,fn)=>{assert.equal(stage,global.stage);const id=filterNext++;filters.set(id,fn);return id},event_remove_filter:id=>filters.delete(id)};
+  const sourceEvent=node=>({get_source_device:()=>node===null?null:{get_device_node:()=>node},get_key_symbol:()=>{throw Error('key read')},get_coords:()=>{throw Error('coordinate read')},get_button:()=>{throw Error('button read')}});
+
 
   const GLib={PRIORITY_DEFAULT:0,SOURCE_CONTINUE:true,SOURCE_REMOVE:false,get_monotonic_time:()=>now,timeout_add:(_p,_t,fn)=>{timers.set(next,fn);return next++},source_remove:id=>timers.delete(id),Variant:class{constructor(_sig,value){this.value=value}}};
   const Gio={DBus:{session:{emit_signal:(...args)=>contextSignals.push(args)}},BusNameWatcherFlags:{NONE:0},bus_watch_name_on_connection:(_b,_n,_f,_a,fn)=>{watches.set(next,fn);return next++},bus_unwatch_name:id=>watches.delete(id),DBusExportedObject:{wrapJSObject:()=>({export(){},unexport(){}})}};
@@ -83,3 +87,17 @@ class IndicatorFailureTests(unittest.TestCase):
   from unittest.mock import patch
   with patch.object(i.closed,'wait',return_value=False):i.publish()
   self.assertEqual(failures,[])
+
+class PhysicalActivityCandidateTests(unittest.TestCase):
+ run_js=IndicatorActorTests.run_js
+ def test_default_disabled_authenticated_opt_in_and_passive_latched_activity(self):
+  self.run_js("assert.equal(filters.size,0);i.BindAsync([nonce],invocation);i.UpdateAsync([nonce,true],invocation);assert.equal(filters.size,0);i.SetPhysicalGuardAsync(['wrong',true],invocation);assert.deepEqual(reply,[false]);assert.equal(filters.size,0);i.SetPhysicalGuardAsync([nonce,true],invocation);assert.deepEqual(reply,[true]);assert.equal(filters.size,1);const cb=[...filters.values()][0],e=i._focusEpoch;assert.equal(cb(sourceEvent(null)),false);assert.equal(cb(sourceEvent('')),false);assert.equal(i._focusEpoch,e);assert.equal(cb(sourceEvent('/dev/input/event7')),false);assert.equal(i._focusEpoch,e+1);assert.equal(filters.size,0);assert.equal(cb(sourceEvent('/dev/input/event7')),false);assert.equal(i._focusEpoch,e+1);i.GetContextAsync([nonce],invocation);assert.equal(JSON.parse(reply[0]).reason,'device-source-activity');i.SetPhysicalGuardAsync([nonce,true],invocation);assert.deepEqual(reply,[false]);i.disable();")
+ def test_activity_candidate_cleanup_paths_and_protected_state(self):
+  self.run_js("i.BindAsync([nonce],invocation);i.SetPhysicalGuardAsync([nonce,true],invocation);assert.equal(filters.size,0);i.UpdateAsync([nonce,true],invocation);assert.equal(filters.size,1);i.UpdateAsync([nonce,false],invocation);assert.equal(filters.size,0);i.UpdateAsync([nonce,true],invocation);assert.equal(filters.size,1);Main.sessionMode.isLocked=true;i._contextChanged(false,true);assert.equal(filters.size,0);i.SetPhysicalGuardAsync([nonce,true],invocation);assert.deepEqual(reply,[false]);Main.sessionMode.isLocked=false;i.SetPhysicalGuardAsync([nonce,true],invocation);assert.equal(filters.size,1);now=4000000;timers.values().next().value();assert.equal(filters.size,0);i.BindAsync([nonce],invocation);i.SetPhysicalGuardAsync([nonce,true],invocation);i.UpdateAsync([nonce,true],invocation);assert.equal(filters.size,1);i.UnbindAsync([nonce],invocation);assert.equal(filters.size,0);i.disable();")
+ def test_activity_candidate_callback_and_cleanup_failure_latch(self):
+  self.run_js("i.BindAsync([nonce],invocation);i.UpdateAsync([nonce,true],invocation);i.SetPhysicalGuardAsync([nonce,true],invocation);const cb=[...filters.values()][0];Clutter.event_remove_filter=()=>{throw Error('remove failed')};assert.equal(cb({get_source_device:()=>{throw Error('unknown source')}}),false);assert.equal(i._failed,true);i.GetContextAsync([nonce],invocation);assert.equal(JSON.parse(reply[0]).available,false);i.SetPhysicalGuardAsync([nonce,true],invocation);assert.deepEqual(reply,[false]);i.UnbindAsync([nonce],invocation);assert.equal(cb(sourceEvent('/dev/input/event7')),false);assert.equal(i._owner,null);i.disable();")
+
+ def test_activity_candidate_owner_loss_disable_and_missing_api(self):
+  self.run_js("i.BindAsync([nonce],invocation);i.UpdateAsync([nonce,true],invocation);i.SetPhysicalGuardAsync([nonce,true],invocation);assert.equal(filters.size,1);watches.values().next().value();assert.equal(filters.size,0);i.BindAsync([nonce],invocation);i.UpdateAsync([nonce,true],invocation);Clutter.event_add_filter=undefined;i.SetPhysicalGuardAsync([nonce,true],invocation);assert.deepEqual(reply,[false]);assert.equal(filters.size,0);i.disable();")
+ def test_activity_candidate_disable_removes_filter_and_does_not_export_metadata(self):
+  self.run_js("i.BindAsync([nonce],invocation);i.UpdateAsync([nonce,true],invocation);i.SetPhysicalGuardAsync([nonce,true],invocation);const cb=[...filters.values()][0];assert.equal(cb(sourceEvent('/dev/input/private-device')),false);assert(!JSON.stringify(contextSignals).includes('/dev/input'));assert(!i.GetDiagnostics().includes('/dev/input'));i.UnbindAsync([nonce],invocation);i.BindAsync([nonce],invocation);i.UpdateAsync([nonce,true],invocation);i.SetPhysicalGuardAsync([nonce,true],invocation);assert.equal(filters.size,1);i.disable();assert.equal(filters.size,0);")

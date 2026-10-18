@@ -29,6 +29,36 @@ class CursorThemeTests(unittest.TestCase):
   self.new().recover();self.assertEqual(self.settings.value,'Original')
   a.record=None
   a.enable(self.name,explicit=True);self.assertFalse(a.poll(owner_alive=False));self.assertEqual(self.settings.value,'Original')
+ def test_journal_failure_never_sets_theme_and_unlocks(self):
+  a=self.new()
+  def fail(record):raise OSError('journal disk failure')
+  a._write=fail
+  with self.assertRaisesRegex(OSError,'journal disk failure'):a.enable(self.name,explicit=True)
+  self.assertEqual(self.settings.calls,[]);self.assertIsNone(a.fd)
+  b=self.new();b.enable(self.name,explicit=True);b.close()
+ def test_mutating_write_and_restore_failure_retains_recoverable_journal(self):
+  self.settings.value='Original';a=self.new();original_set=self.settings.set
+  def fail(value):
+   self.settings.value=value
+   raise OSError('settings temporarily unavailable')
+  self.settings.set=fail
+  with self.assertRaises(OSError):a.enable(self.name,explicit=True)
+  self.assertIsNone(a.fd);self.assertTrue((self.path/'state/journal.json').exists())
+  # Simulate theme still ours when the settings daemon becomes available.
+  self.settings.value=self.name;self.settings.set=original_set
+  b=self.new();b.recover();self.assertEqual(self.settings.value,'Original');self.assertFalse((self.path/'state/journal.json').exists())
+  a.record=None
+ def test_recovery_refuses_live_owner_and_corrupt_journal(self):
+  a=self.new();a.enable(self.name,explicit=True)
+  with self.assertRaises(RuntimeError):self.new().recover()
+  self.assertEqual(self.settings.value,self.name);a.close()
+  journal=self.path/'state/journal.json';journal.write_text('[]')
+  with self.assertRaises(ValueError):self.new().recover()
+  self.assertEqual(self.settings.calls,[self.name,None]);journal.unlink()
+ def test_enable_recovers_and_snapshots_under_one_lock(self):
+  a=self.new();a._lock();a._write({'theme':self.name,'original':'Original'});a._unlock();self.settings.value=self.name
+  b=self.new();b.enable(self.name,explicit=True)
+  self.assertEqual(b.record['original'],'Original');b.close();self.assertEqual(self.settings.value,'Original')
  def test_geometry_hotspot_animation_and_nonblank(self):
   w=h=8;pixels=bytearray(w*h*4);pixels[4*(3*w+3):4*(3*w+3)+4]=bytes((255,255,255,255))
   data=struct.pack('<7I',build.MAGIC,16,0x10000,1,build.IMAGE,24,28)+struct.pack('<9I',36,build.IMAGE,24,1,w,h,3,3,40)+pixels

@@ -17,7 +17,7 @@ import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import Gio, GLib, Gst
 
-VERSION = '0.7.5'
+VERSION = '0.7.6'
 DEST = 'org.freedesktop.portal.Desktop'
 PATH = '/org/freedesktop/portal/desktop'
 RD = 'org.freedesktop.portal.RemoteDesktop'
@@ -576,7 +576,7 @@ ACTION_SCHEMA['properties']['steps']={'type':'array','items':STEP_SCHEMA,'minIte
 
 def tools():
     specs=[
-      ('desktop_start','Request personal GNOME consent for one monitor, keyboard and pointer; return a fresh screenshot. Optional cursor_glow temporarily changes the desktop-wide cursor theme and restores it on close.',{'cursor_glow':{'type':'boolean','description':'Explicit opt-in after explaining desktop-wide theme scope. Applies real themed cursor glow while active; custom app cursors may ignore it.'}}),
+      ('desktop_start','Request personal GNOME consent for one monitor, keyboard and pointer; return a fresh screenshot. Optional cursor_glow temporarily changes the desktop-wide cursor theme and restores it on close.',{'physical_takeover':{'type':'boolean','default':False,'description':'Explicit opt-in to session-only global source-device metadata observation; stops on native device-source activity. No key contents or event positions are observed. Unknown sources are unsupported; this is not human provenance attestation.'},'cursor_glow':{'type':'boolean','description':'Explicit opt-in after explaining desktop-wide theme scope. Applies real themed cursor glow while active; custom app cursors may ignore it.'}}),
       ('desktop_observe','Return a fresh screenshot and dimensions. Optional inspect_target binds a single-use editable accessibility identity; inspect before input.',{'inspect_target':{'type':'boolean'}}),
       ('desktop_action','Perform bounded input and return a fresh screenshot. Text/keys need same-call focus or a sequence beginning with a target click/focus shortcut. Coordinates use logical_size. Discrete wheel steps only. Text uses GNOME Unicode composition by default; verify actual results. Never replay uncertain input.',{'action':ACTION_SCHEMA,'target_id':{'type':'string','minLength':32,'maxLength':32},'recovery_observation_id':{'type':'string'},'window_observation_id':{'type':'string','minLength':32,'maxLength':32},'focus_transition':{'type':'boolean','description':'Only one explicit left click, launcher/Return or Ctrl+s/Ctrl+Shift+s/Ctrl+o gesture may change foreground; no remaining batch. Inspect its returned image before further input.'}}),
       ('desktop_status','Read session and cleanup state without capturing or sending input.',{}),
@@ -625,6 +625,7 @@ class Server:
         self.state_lock=threading.RLock();self.generation=0;self.state='closed'
         self.recovery=RecoveryLedger();self.target_provider=None;self.target_record=None
         self.cursor_glow=None;self.cursor_glow_pending=None;self.cursor_glow_warning=None;self.cursor_glow_last=None
+        self.physical_takeover=False;self.physical_takeover_warning=None
         self.target_cleanup_warning=None;self.indicator=None;self.indicator_warning=None;self.window_record=None
 
     def invalidate(self):
@@ -649,6 +650,8 @@ class Server:
             recovery=self.recovery.snapshot(),fresh_observation_required=not active or self.recovery.inspection_required)
         if not active:result['logical_size']=[0,0]
         if self.target_cleanup_warning:result['accessibility_cleanup_warning']=self.target_cleanup_warning
+        result['physical_takeover']={'enabled':self.physical_takeover,'classification':'native-device-source-activity','human_provenance':False}
+        if self.physical_takeover_warning:result['physical_takeover_warning']=self.physical_takeover_warning
         if self.indicator_warning:result['indicator_warning']=self.indicator_warning
         result['cursor_glow']=self.cursor_glow.status() if self.cursor_glow else (self.cursor_glow_pending.status() if self.cursor_glow_pending else (self.cursor_glow_last or {'active':False}))
         if self.cursor_glow_warning:result['cursor_glow_warning']=self.cursor_glow_warning
@@ -658,7 +661,23 @@ class Server:
         path=os.path.join(os.path.dirname(__file__),'indicator_bridge.py')
         spec=importlib.util.spec_from_file_location('desktop_indicator_preflight',path)
         module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
-        module.IndicatorBridge(self.status).preflight()
+        bridge=module.IndicatorBridge(self.status);bridge.preflight();return bridge
+
+    def preflight_physical_guard(self):
+        bridge=self.preflight_context()
+        diagnostics=json.loads(bridge.call('GetDiagnostics','()',())[0])
+        if diagnostics.get('physical_activity_candidate') is not True or diagnostics.get('failed') is True:
+            raise RuntimeError('Optional device-source activity observer is not loaded; no sharing requested. Default desktop control remains available without this opt-in.')
+
+    def enable_physical_guard(self):
+        if self.indicator is None or not self.indicator.bound:raise RuntimeError('Device-source activity observer is not bound')
+        self.indicator.update()
+        self.physical_takeover=True # Cleanup must disarm even if the enable reply is lost.
+        bridge=self.indicator
+        bridge.set_physical_guard(True,lambda:self.foreground_lost(bridge))
+        if bridge.call('SetPhysicalGuard','(sb)',(bridge.nonce,True))!=(True,):
+            raise RuntimeError('Device-source activity observation refused; session must close')
+        self.physical_takeover=True;self.physical_takeover_warning=None
 
     def show_indicator(self):
         if self.factory is not Desktop:return
@@ -727,7 +746,14 @@ class Server:
 
     def close_backend(self):
         glow=self.cursor_glow;self.cursor_glow=None
-        if self.indicator:self.indicator.close();self.indicator=None
+        if self.indicator:
+            if self.physical_takeover:
+                self.indicator.set_physical_guard(False)
+                try:
+                    if self.indicator.call('SetPhysicalGuard','(sb)',(self.indicator.nonce,False))!=(True,):raise RuntimeError('disarm refused')
+                except Exception:self.physical_takeover_warning='Explicit observer disarm unconfirmed; ownership unbind and portal close attempted.'
+            self.indicator.close();self.indicator=None
+        self.physical_takeover=False
         if self.backend:self.backend.cancelled.set();self.backend.close();self.backend.pointer_position=None
         if glow is not None:
             try:glow.close()
@@ -828,19 +854,26 @@ class Server:
             self.invalidate();self.close_backend();return [text(self.status())]
         self.guard()
         if name=='desktop_start':
+            physical=args.get('physical_takeover',False)
+            if type(physical) is not bool:raise ValueError('physical_takeover must be boolean')
             glow=args.get('cursor_glow',False)
             if type(glow) is not bool:raise ValueError('cursor_glow must be boolean')
             self.ensure_backend()
             if not self.backend.status().get('active'):
                 self.state='opening';self.target_record=None
                 try:
-                    if getattr(self.backend,'requires_window_guard',False) and self.indicator is None:self.preflight_context()
+                    if physical:self.preflight_physical_guard()
+                    elif getattr(self.backend,'requires_window_guard',False) and self.indicator is None:self.preflight_context()
                     self.backend.start();self.show_indicator();content=self.capture_result(('opening',))
+                    if physical:
+                        self.enable_physical_guard()
+                        metadata=json.loads(content[0]['text']);metadata.update(self.status());content[0]=text(metadata)
                     if glow:
                         self.show_cursor_glow()
                         metadata=json.loads(content[0]['text']);metadata.update(self.status());content[0]=text(metadata)
                     return content
                 except BaseException:self.close_backend();raise
+            if physical and not self.physical_takeover:raise RuntimeError('Device-source observation must be selected before a new consent session')
             expected=self.window_guard_module().WindowGuard.signature(self.window_record['context']) if self.window_record else None
             return self.capture_result(('active',),expected)
         self.guard(('active',));self.ensure_backend()

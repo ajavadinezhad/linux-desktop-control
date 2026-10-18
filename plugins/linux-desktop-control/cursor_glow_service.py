@@ -58,7 +58,6 @@ class Controller:
         self.args=[python,str(Path(__file__).resolve()),'--theme',theme,'--state',str(state_dir),'--root',str(theme_root),'--owner',str(os.getpid())]
         self.active=active;self.failure=on_failure or (lambda error:None);self.launcher=launcher;self.process=None;self.thread=None;self.stop=threading.Event();self.error=None;self.lock=threading.Lock();self.restored=None;self.closed=False;self.recovery_attempted=False;self.recovery_lock=threading.Lock()
     def _readline(self,process,timeout):
-        if not select.select([process.stdout],[],[],timeout)[0]:raise RuntimeError('cursor watchdog response timed out')
         # Worker emits bounded single writes. Read raw bytes to avoid buffered read-ahead.
         result=b'';deadline=time.monotonic()+timeout
         while len(result)<4096:
@@ -71,12 +70,15 @@ class Controller:
         raise RuntimeError('cursor watchdog response oversized')
     def _send(self,message):
         with self.lock:
-            self.process.stdin.write((json.dumps(message)+'\n').encode());self.process.stdin.flush()
+            payload=(json.dumps(message)+'\n').encode()
+            if not select.select([],[self.process.stdin],[],.5)[1]:raise RuntimeError('cursor watchdog command timed out')
+            if os.write(self.process.stdin.fileno(),payload)!=len(payload):raise RuntimeError('cursor watchdog command incomplete')
     def start(self):
         if self.process is not None:raise RuntimeError('cursor controller already started')
         if not self.active():raise RuntimeError('cursor activation requires active authorization')
         self.process=self.launcher(self.args,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,bufsize=0)
         try:
+            os.set_blocking(self.process.stdin.fileno(),False)
             if self._readline(self.process,4)!={'ready':True}:raise RuntimeError('cursor watchdog not ready')
             self.thread=threading.Thread(target=self._heartbeat,daemon=True,name='cursor-glow-heartbeat');self.thread.start();return self
         except BaseException:
@@ -115,7 +117,7 @@ class Controller:
         try:
             if self.process.poll() is None:
                 try:self._send({'command':'close'})
-                except (BrokenPipeError,OSError):pass
+                except (OSError,RuntimeError):pass
                 self.process.stdin.close()
                 self.process.wait(timeout=4)
             if self.process.returncode!=0:self._recover()
@@ -130,6 +132,7 @@ class Controller:
             raise RuntimeError('cursor restoration not confirmed: '+self.error) from error
         finally:
             if self.process.poll() is not None:
+                self.process.stdin.close()
                 self.process.stdout.close()
 
 def main():

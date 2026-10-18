@@ -1,5 +1,12 @@
 # Changes
 
+## 0.7.6
+
+- Bound cursor-watchdog heartbeat writes; recover safely after owner/worker failure, settings errors and journal failures. Preserve later user choices.
+- Reject protected foreground contexts and invalid monitor-coordinate mappings. Add negative-origin and fractional logical-coordinate coverage.
+- Add disabled-by-default native device-source activity cancellation candidate. Explicit physical_takeover opt-in requires helper revision 4; manual helper reload and physical acceptance remain outstanding. Unknown sources are unsupported; device-source classification does not attest human provenance.
+- Preserve previous live evidence separately from isolated tests and hardware-dependent checks.
+
 ## 0.7.5
 
 An expired matching observation with unchanged foreground returns a fresh image and explicit action_refused with zero input, avoiding a new portal session for read-only refresh. Context/generation mismatch and protected UI still close. No automatic action replay. Live 0.7.4 verified Save/Open native dialog transitions and actual themed cursor glow/restoration; file reopen and physical takeover remain pending.

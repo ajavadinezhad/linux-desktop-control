@@ -2,7 +2,7 @@
 Adapter methods: user_value() -> str|None; effective_value() -> str;
 set(value: str); reset(). Caller must disclose desktop-wide scope before enable.
 """
-import fcntl, json, os, tempfile, time, uuid
+import fcntl, json, os, stat, tempfile, time, uuid
 from pathlib import Path
 
 class CursorThemeLease:
@@ -10,9 +10,13 @@ class CursorThemeLease:
         self.settings=settings; self.directory=Path(state_dir);self.root=Path(theme_root).resolve();self.clock=clock;self.fd=None;self.record=None
     def _lock(self):
         self.directory.mkdir(mode=0o700,parents=True,exist_ok=True)
-        if self.directory.is_symlink() or self.directory.stat().st_uid!=os.getuid():raise ValueError('unsafe state directory')
+        info=self.directory.stat()
+        if self.directory.is_symlink() or info.st_uid!=os.getuid() or info.st_mode & 0o022:raise ValueError('unsafe state directory')
         fd=os.open(self.directory/'lock',os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW,0o600)
-        try:fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        try:
+            info=os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_uid!=os.getuid() or info.st_mode & 0o022:raise ValueError('unsafe lock file')
+            fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BaseException:os.close(fd);raise RuntimeError('cursor theme already leased')
         self.fd=fd
     def _write(self,record):
@@ -31,34 +35,41 @@ class CursorThemeLease:
             if record['original'] is None:self.settings.reset()
             else:self.settings.set(record['original'])
         (self.directory/'journal.json').unlink(missing_ok=True)
+    def _recover_locked(self):
+        path=self.directory/'journal.json'
+        if path.exists():
+            if path.is_symlink() or path.stat().st_size>4096:raise ValueError('unsafe journal')
+            record=json.loads(path.read_text())
+            if not isinstance(record,dict):raise ValueError('invalid journal')
+            theme=record.get('theme');original=record.get('original')
+            if not isinstance(theme,str) or len(theme)>512 or not theme.startswith('CodexGlow-') or '/' in theme or '\\' in theme or not (original is None or isinstance(original,str) and len(original)<=512):raise ValueError('invalid journal')
+            self._restore(record)
     def recover(self):
         if self.fd is not None:raise RuntimeError('already owned')
         self._lock()
-        try:
-            path=self.directory/'journal.json'
-            if path.exists():
-                if path.is_symlink() or path.stat().st_size>4096:raise ValueError('unsafe journal')
-                record=json.loads(path.read_text())
-                if not isinstance(record.get('theme'),str) or not record['theme'].startswith('CodexGlow-') or not (record.get('original') is None or isinstance(record['original'],str)):raise ValueError('invalid journal')
-                self._restore(record)
+        try:self._recover_locked()
         finally:self._unlock()
     def enable(self,theme,explicit=False):
         if not explicit:raise ValueError('explicit activation required')
-        if self.fd is not None:raise RuntimeError('already owned')
+        if self.fd is not None or self.record is not None:raise RuntimeError('already owned or restoration pending')
         if not theme.startswith('CodexGlow-') or '/' in theme or '\\' in theme:raise ValueError('invalid unique theme')
         path=(self.root/theme).resolve()
         if path.parent!=self.root or not (path/'index.theme').is_file() or not (path/'manifest.json').is_file() or not (path/'cursors').is_dir():raise ValueError('theme not installed')
         if (path/'manifest.json').stat().st_size>4*1024*1024:raise ValueError('manifest too large')
         manifest=json.loads((path/'manifest.json').read_text())
         if not manifest or not (path/'cursors'/'left_ptr').is_file():raise ValueError('incomplete theme')
-        self.recover();self._lock()
+        self._lock()
         try:
+            self._recover_locked()
             self.record={'theme':theme,'original':self.settings.user_value(),'owner':os.getpid(),'nonce':uuid.uuid4().hex}
             self._write(self.record) # Durable original BEFORE changing desktop preference.
             self.settings.set(theme);self.deadline=self.clock()+3
         except BaseException:
-            if self.record is not None:self._restore(self.record)
-            self.record=None;self._unlock();raise
+            try:
+                if self.record is not None:self._restore(self.record)
+                self.record=None
+            finally:self._unlock()
+            raise
     def heartbeat(self):
         if self.record is None:raise RuntimeError('not active')
         if self.settings.effective_value()!=self.record['theme']:
@@ -70,6 +81,7 @@ class CursorThemeLease:
     def _unlock(self):
         if self.fd is not None:os.close(self.fd);self.fd=None
     def close(self):
+        if self.record is not None and self.fd is None:self._lock()
         try:
             if self.record is not None:self._restore(self.record);self.record=None
         finally:self._unlock()
