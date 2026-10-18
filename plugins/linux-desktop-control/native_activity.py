@@ -243,7 +243,7 @@ class Controller:
             return
         names=('keyboard_seen','pointer_seen','any_stream_record','query_success',
                'any_held_seen','held_last_check','quiet_blocked','any_stale_timestamp')
-        deadline=time.monotonic()+.25
+        deadline=time.monotonic()+2
         self.calibration_report_kind='send-pending'
         try:self._send('REPORT')
         except (OSError,RuntimeError,ValueError):

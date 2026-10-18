@@ -224,4 +224,18 @@ class NativeActivityTests(unittest.TestCase):
  def test_late_calibrated_before_report_diagnostics_never_authorizes(self):
   c=self.controller();c.calibration_state='waiting';messages=iter(('ALIVE','CALIBRATED','CAL_DIAG_11011000'));sent=[];c._send=sent.append;c._read=lambda timeout:next(messages);c._request_calibration_report();self.assertTrue(c.status()['calibration_late_result']);self.assertEqual(c.status()['calibration_report_kind'],'received');self.assertTrue(c.calibration_evidence['keyboard_seen']);self.assertTrue(c.calibration_evidence['pointer_seen']);self.assertFalse(c.calibration_verified);self.assertEqual(c.calibration_state,'waiting');self.assertEqual(sent,['REPORT'])
 
+ def test_terminal_diagnostics_can_follow_delayed_fd_cleanup_and_clean_exit(self):
+  c=self.controller();c.calibration_state='waiting';left,right=socket.socketpair();left.setblocking(False);c.connection=left;done=threading.Event();commands=[]
+  class Process:
+   def poll(self):return 0 if done.is_set() else None
+   def wait(self,timeout):
+    if not done.wait(timeout):raise subprocess.TimeoutExpired('fake-cleanup',timeout)
+    return 0
+  c.process=Process()
+  def helper():
+   try:
+    stream=right.makefile('rb');commands.append(stream.readline().decode().strip());right.sendall(b'ALIVE\nCALIBRATED\n');time.sleep(.5);right.sendall(b'CAL_DIAG_11011000\n');stream.close()
+   finally:right.close();done.set()
+  worker=threading.Thread(target=helper,daemon=True);worker.start();started=time.monotonic();c._request_calibration_report();elapsed=time.monotonic()-started;self.assertGreaterEqual(elapsed,.45);self.assertLess(elapsed,2);self.assertEqual(c.status()['calibration_report_kind'],'received');self.assertTrue(c.calibration_evidence['keyboard_seen']);self.assertTrue(c.calibration_late_result);self.assertFalse(c.calibration_verified);self.assertEqual(commands,['REPORT']);c.close();worker.join(timeout=1);self.assertEqual(c.status()['helper_exit_code'],0)
+
 if __name__=='__main__':unittest.main()
