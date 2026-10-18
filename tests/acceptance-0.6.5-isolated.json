@@ -1,7 +1,7 @@
 {
   "version": "0.6.5",
   "deployment": "source candidate only; not installed or enabled",
-  "unit_tests": 171,
+  "unit_tests": 172,
   "loader_tools": 7,
   "scope": "Isolated headless GNOME51 Shell, real extension actors and D-Bus; no host desktop input or consent bypass",
   "isolated_checks": {

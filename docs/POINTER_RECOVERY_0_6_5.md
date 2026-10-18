@@ -22,10 +22,16 @@ An independent source defect was found: SIGUSR1 previously set cancellation flag
 
 ## Verification
 
-171 unit tests pass, including interrupted typing/dragging, invalidated queued input, release of held modifiers/buttons, idle emergency cleanup, failure during capture/fd cleanup, shortcut conflicts/partial registration/removal and halo state policy.
+172 unit tests pass, including interrupted typing/dragging, invalidated queued input, release of held modifiers/buttons, idle emergency cleanup, failure during capture/fd cleanup, shortcut conflicts/partial registration/removal and halo state policy.
 
 17 real-extension assertions passed in isolation. The real extension is additionally exercised only in a private D-Bus + headless GNOME51 session. Host sharing and the installed extension remain off. The test checks non-reactive halo rendering, GNOME shortcut registration, no focus theft, pause/stop states and cleanup. A private broker is used on this host because dbus-run-session is unavailable. Physical shortcuts and new live-host behavior are still unverified.
 
 GNOME API references: https://gnome.pages.gitlab.gnome.org/mutter/meta/method.Display.grab_accelerator.html and https://gnome.pages.gitlab.gnome.org/mutter/clutter/flags.EventFlags.html
 
 Reproduce the isolated Shell test with `python3 tests/check_private_toolbar.py` when dbus-run-session is unavailable. It creates a temporary socket-activated D-Bus broker, runs the extension service and headless test only on that private bus, and terminates its owned processes afterward. No live host input is exercised.
+
+Preflight follow-up: initial headless tests inherited the live XDG_RUNTIME_DIR. The user service manager's DISPLAY and WAYLAND_DISPLAY were left pointing at the expired test display; this explained extension-service activation failures, not the earlier pointer symptom. Those two values were restored to the existing host display after checking its sockets. The test now uses a private runtime directory, no Xwayland, and the private Shell's direct Extensions interface, with no separate extension service or live display connection.
+
+Correction: a private runtime directory did not prevent dbus-broker-launch from forwarding activation environment changes to the live user manager. The fallback broker harness is now explicitly refused on a live user manager, before any test process starts. The 17 headless assertions verified rendering/control lifecycle, but the earlier claim of complete host isolation is withdrawn: display activation values changed during those runs and were restored. No synthetic host input was sent. Future headless tests require an isolated environment with dbus-run-session.
+
+Authorized live-test attempt: 0.6.5 files/plugin were installed, but GNOME's ReloadExtension returned NotSupported (“deprecated and does not work”). Diagnostics showed the old extension still loaded. The extension was disabled again; sharing and input were never started. A protocol-version preflight now rejects this mismatch before requesting consent. Manual save-work/logout/login is required to load the updated extension; no session restart was performed.

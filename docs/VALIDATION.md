@@ -1,6 +1,6 @@
 # 0.6.5 source-only verification
 
-171 unit tests pass. New halo/shortcut behavior is tested in isolation, with no live-host acceptance or deployment. The reported jumpy pointer remains unresolved. See [incident report](POINTER_RECOVERY_0_6_5.md).
+172 unit tests pass. New halo/shortcut behavior is tested in isolation, with no live-host acceptance or deployment. The reported jumpy pointer remains unresolved. See [incident report](POINTER_RECOVERY_0_6_5.md).
 
 # Current acceptance
 

@@ -12,7 +12,7 @@ class Bus:
         self.calls.append((dest,path,interface,method,args.unpack()))
         if method==self.reject:raise RuntimeError('missing service')
         if method=='GetNameOwner':return Reply(':1.25')
-        if method=='GetDiagnostics':return Reply('{"visible":true}')
+        if method=='GetDiagnostics':return Reply('{"visible":true,"protocol_version":2}')
         return Reply(True)
     def signal_subscribe(self,*args):self.subs.append(args);return len(self.subs)
     def signal_unsubscribe(self,subscription):self.unsub.append(subscription)
@@ -27,7 +27,7 @@ class ToolbarTests(unittest.TestCase):
     def test_pins_unique_owner_and_only_fixed_public_metadata(self):
         b,bus,events,state=self.make();state['secret']='private';b._update()
         self.assertEqual(bus.subs[0][0],':1.25');self.assertEqual(bus.calls[1][0],':1.25')
-        self.assertNotIn('private',str(bus.calls[-1]));self.assertEqual(b.diagnostics(),{'visible':True})
+        self.assertNotIn('private',str(bus.calls[-1]));self.assertEqual(b.diagnostics(),{'visible':True,'protocol_version':2})
         b.close();self.assertEqual(bus.unsub,[1,2]);self.assertEqual(bus.calls[-1][3],'Unbind')
     def test_nonce_sender_epoch_sequence_and_event_validation(self):
         b,bus,events,state=self.make()
@@ -124,3 +124,14 @@ class StopWithoutStatusTests(unittest.TestCase):
         b.status=unavailable
         self.signal(b,event='stop',epoch=0,sequence=1)
         self.assertEqual(events,['stop']);self.assertFalse(b.failed)
+
+class ToolbarProtocolTests(unittest.TestCase):
+ def test_old_loaded_toolbar_refuses_before_consent_or_binding(self):
+  bus=Bus();original=bus.call_sync
+  def call(*args):
+   if args[3]=='GetDiagnostics':return Reply('{"visible":false,"owner":null}')
+   return original(*args)
+  bus.call_sync=call
+  b=bridge.ToolbarBridge(lambda:{},lambda *args:None,bus)
+  with self.assertRaisesRegex(RuntimeError,'not loaded'):b.preflight()
+  self.assertFalse(b.bound);self.assertFalse(bus.calls)

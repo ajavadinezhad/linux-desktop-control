@@ -33,17 +33,20 @@ methods='''    async TestScreenshotAsync([path], invocation) {
 '''
 javascript=javascript.replace(marker,methods+marker)
 (extension/'extension.js').write_text(javascript)
-env=dict(os.environ,XDG_DATA_HOME=str(base/'data'),XDG_CONFIG_HOME=str(base/'config'),GSETTINGS_BACKEND='memory')
+runtime=base/'runtime';runtime.mkdir(mode=0o700)
+env=dict(os.environ,XDG_RUNTIME_DIR=str(runtime),XDG_DATA_HOME=str(base/'data'),XDG_CONFIG_HOME=str(base/'config'),GSETTINGS_BACKEND='memory')
+env.pop('DISPLAY',None);env.pop('WAYLAND_DISPLAY',None)
 bus=Gio.bus_get_sync(Gio.BusType.SESSION,None)
 if bus.call_sync('org.freedesktop.DBus','/org/freedesktop/DBus','org.freedesktop.DBus','NameHasOwner',GLib.Variant('(s)',('org.gnome.Shell',)),None,Gio.DBusCallFlags.NONE,1000,None).unpack()[0]:
  raise SystemExit('Refusing to use an existing desktop bus. Run this test under dbus-run-session.')
 log=(OUT/'test-evidence/toolbar-nested-shell.log').open('w')
 fixture=None
-proc=subprocess.Popen(['gnome-shell','--headless','--wayland','--virtual-monitor','1280x720','--wayland-display','codex-toolbar-test'],env=env,stdout=log,stderr=log)
+proc=subprocess.Popen(['gnome-shell','--headless','--wayland','--no-x11','--virtual-monitor','1280x720','--wayland-display','codex-toolbar-test'],env=env,stdout=log,stderr=log)
 loop=GLib.MainLoop();threading.Thread(target=loop.run,daemon=True).start()
 bus=Gio.bus_get_sync(Gio.BusType.SESSION,None)
 def call(interface,method,signature,args,path='/org/gnome/Shell/Extensions'):
- return bus.call_sync('org.gnome.Shell.Extensions' if interface=='org.gnome.Shell.Extensions' else 'org.gnome.Shell',path,interface,method,GLib.Variant(signature,args),None,Gio.DBusCallFlags.NONE,3000,None).unpack()
+ if interface=='org.gnome.Shell.Extensions':path='/org/gnome/Shell'
+ return bus.call_sync('org.gnome.Shell',path,interface,method,GLib.Variant(signature,args),None,Gio.DBusCallFlags.NONE,3000,None).unpack()
 result={'scope':'Isolated headless GNOME51 Shell, real extension actors and D-Bus; no host desktop input or consent bypass','checks':{}}
 try:
  deadline=time.monotonic()+20

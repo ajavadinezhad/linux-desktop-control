@@ -1,6 +1,6 @@
 # Linux Desktop Control
 
-**0.6.5 source candidate only.** Not installed or enabled after a reported jumpy pointer incident. Keep live control off until that issue is resolved and the user explicitly says ready. See [pointer incident and source changes](docs/POINTER_RECOVERY_0_6_5.md).
+**0.6.5 candidate files installed; live test blocked.** GNOME still caches the old extension and refuses hot reload. The extension is disabled; save work and manually log out/in before testing. The reported pointer issue is not established as resolved. See [pointer incident and source changes](docs/POINTER_RECOVERY_0_6_5.md).
 
 Consent-based desktop tools for **GNOME 51 on Wayland**, with a small human-operated **Pause · Continue · Stop** toolbar.
 
@@ -69,7 +69,7 @@ The backend normally keeps images in memory and returns them to the MCP host. Th
 /usr/bin/python3 tests/check_loader.py
 ```
 
-The unit suite contains 171 tests. The loader test uses a temporary Codex home, loads the real installed client, checks all seven tool schemas, and never requests desktop sharing. Isolated toolbar rendering can be tested with `dbus-run-session -- /usr/bin/python3 tests/check_toolbar_shell.py`; this refuses an existing GNOME Shell bus. On a dbus-broker host without dbus-run-session, use `python3 tests/check_private_toolbar.py`. JavaScript feedback regressions use Node.js (`NODE_BIN` can select its path). Live human acceptance is separate from unit and isolated rendering tests.
+The unit suite contains 172 tests. The loader test uses a temporary Codex home, loads the real installed client, checks all seven tool schemas, and never requests desktop sharing. Isolated toolbar rendering can be tested with `dbus-run-session -- /usr/bin/python3 tests/check_toolbar_shell.py`; this refuses an existing GNOME Shell bus. On a dbus-broker host without dbus-run-session, use `python3 tests/check_private_toolbar.py`. JavaScript feedback regressions use Node.js (`NODE_BIN` can select its path). Live human acceptance is separate from unit and isolated rendering tests.
 
 ## Remove
 

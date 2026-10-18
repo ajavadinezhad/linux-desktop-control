@@ -139,7 +139,7 @@ export default class DesktopToolbar extends Extension {
 
     GetDiagnostics() {
         const [x, y] = this._bar.get_transformed_position();
-        return JSON.stringify({visible: this._chrome.visible && this._bar.mapped,
+        return JSON.stringify({protocol_version: 2, visible: this._chrome.visible && this._bar.mapped,
             actors: this._chrome.visible ? 1 : 0, rect: [x, y, this._bar.width, this._bar.height],
             workarea: this._workarea, monitor_bounds: this._monitorBounds, base_workarea: this._baseArea, state: this._state, epoch: this._epoch,
             can_continue: this._canContinue === true, owner: this._owner,

@@ -54,6 +54,8 @@ class ToolbarBridge:
         owner=diagnostics.get('owner')
         if owner and owner!=self.bus.get_unique_name():
             raise RuntimeError('Another desktop session owns the toolbar ('+str(owner)+'). Stop that session before starting this one; the extension is loaded and no logout is needed for this ownership conflict.')
+        if diagnostics.get('protocol_version')!=2:
+            raise RuntimeError('Updated desktop toolbar is not loaded. Save your work and log out/in manually; GNOME cannot hot-reload this extension. No sharing was requested.')
         guard()
 
     def start(self,guard=lambda:None):
