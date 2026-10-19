@@ -1,12 +1,16 @@
 # Linux Desktop Control
 
-Candidate version **0.8.11** is a private local MCP integration using GNOME Wayland's public desktop portal. It is an independent project, not an official OpenAI product.
+Installed version **0.8.12** is a private local MCP integration using GNOME Wayland's public desktop portal. It is an independent project, not an official OpenAI product.
 
 Seven tools: `desktop_start`, `desktop_observe`, `desktop_action`, `desktop_status`, `desktop_pause`, `desktop_resume`, `desktop_close`. The final tool releases session resources. Each new session needs personal GNOME monitor/keyboard/pointer consent. GNOME's native sharing control remains available independently.
 
 The read-only GNOME observer extension displays **Mouse is being controlled by ChatGPT** below the pointer while the assistant session is active. It is passive, non-focusable and untracked by the Shell input-region/workarea manager. It disappears on closure, disconnection, lease expiry or disable. It never moves or hides the cursor, injects input or registers shortcuts. The backend never enables the failed extension input-filter candidate. Optional native activity monitoring is described below. An optional opt-in changes the actual Xcursor pixels to a glow theme for the active session; it temporarily affects the desktop-wide cursor preference and custom application cursors may ignore it. A separate watchdog restores the original preference on cleanup or owner loss and preserves a later user choice. It draws no ring or duplicate cursor. See [cursor glow](docs/CURSOR_GLOW.md).
 
 Guarded input requires the updated read-only foreground observer (protocol 2); status/cleanup tools remain available without an active observer. `indicator_warning` explicitly reports an unavailable label. Loading a newly installed GNOME extension can require a manual logout/login; the installer never restarts the session. The historical 0.7.1 trial ended safely before browser acceptance; later live 0.7.5 evidence is linked below.
+
+## Authorization-release settling candidate
+
+Installed plugin 0.8.12/helper 0.8.5 bounds a reproduced startup race: authorization input still held when CALIBRATE arrives is drained without credit, with at most five seconds to reach a released, clean boundary. The controller allows six seconds for the actual CALIBRATING acknowledgement while maintaining cancellation, heartbeat and the original lease. Startup `settling` grants no cue, calibration credit, capture or input. Strict relative calibration and the separate post-ARM gate remain unchanged. This repairs startup fragility; missing live mouse delivery and automatic return remain unresolved. See [authorization-release settling](docs/CALIBRATION_RELEASE_SETTLING.md).
 
 ## Post-ARM readiness candidate
 

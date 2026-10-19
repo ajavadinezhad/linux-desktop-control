@@ -211,9 +211,7 @@ class Controller:
             if self.retain_sharing:
                 self._negotiate_yield()
             self._send('CALIBRATE')
-            calibrating=self._read(1)
-            if calibrating != 'CALIBRATING':
-                raise NativeFailure('helper-fault' if calibrating in (None,'FAULT') else 'protocol-invalid','Native observer did not begin calibration')
+            self._wait_calibration_start()
             self.calibration_state='waiting'
             self._show_notice()
             print('DESKTOP_CALIBRATION_READY',file=sys.stderr,flush=True)
@@ -334,6 +332,30 @@ class Controller:
                 self.notice_warning='Calibration notification unavailable or closure unconfirmed; visibility is unverified.'
         except Exception:
             self.notice_warning='Calibration notification closure unconfirmed; visibility is unverified.'
+
+    def _wait_calibration_start(self):
+        # The helper may wait briefly for authorization-dialog input to be
+        # released. This phase grants no challenge credit or notice authority.
+        self.calibration_state='settling'
+        now=time.monotonic();deadline=now+6;peer_seen=now;next_heartbeat=now
+        while True:
+            if not self._yield_authorized():
+                raise NativeFailure('session-ended','Native calibration authorization ended')
+            now=time.monotonic()
+            if now>=deadline:raise NativeFailure('helper-fault','Native observer did not begin calibration')
+            message=self._read(min(.02,max(0,deadline-time.monotonic())))
+            if not self._yield_authorized():
+                raise NativeFailure('session-ended','Native calibration authorization ended')
+            now=time.monotonic()
+            if now>=deadline:raise NativeFailure('helper-fault','Native observer calibration acknowledgement expired')
+            if message=='CALIBRATING':return
+            if message=='ALIVE':peer_seen=now
+            elif message=='FAULT':raise NativeFailure('helper-fault','Native observer did not begin calibration')
+            elif message is not None:raise NativeFailure('protocol-invalid','Native observer calibration response invalid')
+            if self.process.poll() is not None:raise NativeFailure('helper-fault','Native calibration helper exited')
+            if now-peer_seen>=1:raise NativeFailure('heartbeat-timeout','Native calibration heartbeat expired')
+            if now>=next_heartbeat:
+                self._send('HB');next_heartbeat=now+.2
 
     def _wait_calibrated(self):
         # No synthetic challenge: only the authenticated broker can attest that

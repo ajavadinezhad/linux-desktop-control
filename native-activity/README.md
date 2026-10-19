@@ -1,3 +1,7 @@
+## Installed helper 0.8.5: authorization-release settling
+
+CALIBRATE may remain unarmed for at most 5000 ms while held authorization input releases and primary/topology/owner queues become empty. Draining grants no challenge credit. Only the clean released boundary emits CALIBRATING and starts fresh calibration. Session health and the original 120-second lease remain required; timeout/query failure is terminal. Strict relative-stream calibration and post-ARM behavior are unchanged. This startup-race fix does not repair or explain missing live mouse delivery.
+
 # Optional native activity helper — 0.8.4 candidate
 
 This helper stops a consented GNOME desktop session when activity arrives from

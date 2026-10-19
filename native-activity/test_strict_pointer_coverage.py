@@ -25,7 +25,7 @@ static void event(unsigned type,unsigned code,int value,long long stamp){
 int main(void){
  device_count=1;device_categories[0]=3;
  assert(command("MODEYIELD2")==0);assert(!strcmp(reply,"MODEYIELD2_OK\n"));
- assert(pointer_strict_coverage);assert(command("CALIBRATE")==0);
+ assert(pointer_strict_coverage);heartbeat=session_time=fixture_now;assert(command("CALIBRATE")==0);
  fixture_now=2000;fixture_held=1;assert(calibration_tick(fixture_now)==0);assert(calibration_seen==3);
  fixture_held=0;fixture_now=3500;assert(calibration_tick(fixture_now)==0);
  assert(!calibrated&&!calibration_pointer_stream&&!calibration_diag.stream_record);
