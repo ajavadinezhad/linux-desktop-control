@@ -38,6 +38,37 @@ class Harness:
         self.reader.close()
 
 class TransportTests(unittest.TestCase):
+    def test_duplicate_pending_id_cannot_replace_original_cancellation(self):
+        h=Harness()
+        try:
+            h.begin('drag');original=h.server.cancel_token;generation=h.server.generation
+            h.send({'id':42,'method':'tools/call','params':{'name':'desktop_status'}})
+            h.send({'id':42,'method':'tools/call','params':{'name':'desktop_close'}})
+            deadline=time.monotonic()+1
+            while h.transport.pending.qsize()<2 and time.monotonic()<deadline:time.sleep(.005)
+            self.assertGreaterEqual(h.transport.pending.qsize(),2)
+            self.assertIs(h.transport.tokens[42],original)
+            self.assertFalse(h.backend.cancelled.is_set());self.assertEqual(h.server.generation,generation)
+            h.send({'method':'notifications/cancelled','params':{'requestId':42}})
+            self.assertTrue(h.backend.finished.wait(1));self.assertTrue(original.is_set())
+        finally:h.finish()
+        replies=list(map(json.loads,h.output.getvalue().splitlines()))
+        self.assertEqual(sum(r.get('error',{}).get('message')=='Duplicate pending request ID' for r in replies),2)
+
+    def test_rejected_duplicate_cleanup_cannot_pop_a_reused_id_token(self):
+        server=m.Server();transport=m.StdioTransport(server)
+        reused=threading.Event();rejected=threading.Event();ping=threading.Event();seen=[]
+        transport.tokens[7]=reused
+        transport.pending.put(({'id':7,'_protocol_error':'Duplicate pending request ID'},rejected))
+        transport.pending.put(({'id':8,'method':'ping'},ping));transport.pending.put(None)
+        handle=server.handle
+        def checked(request):
+            seen.append(transport.tokens.get(7) is reused)
+            return handle(request)
+        server.handle=checked;transport.read=lambda stream:None
+        transport.run(io.StringIO(),io.StringIO())
+        self.assertEqual(seen,[True])
+
     def test_stop_interrupts_drag_while_reader_keeps_running(self):
         h=Harness()
         try:

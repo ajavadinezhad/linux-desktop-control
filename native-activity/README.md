@@ -5,7 +5,7 @@ the covered kernel input devices, including activity in the same window. It is
 off by default. Normal desktop control does not invoke it or request its
 administrator authorization.
 
-The implementation is installed and 255 Python tests pass. Live startup and browser input worked, but same-window typing interruption has not passed. The latest held-key attempt completed 960 characters without an activity signal; the user confirmed a one-second physical key hold while text grew. Drag interruption remains unverified. Automated tests do not establish live device coverage.
+The historical native-helper candidate was installed with 255 passing Python tests. Current audit evidence is in [the scenario audit](../docs/SCENARIO_AUDIT.md). Live startup and browser input worked, but same-window typing interruption has not passed. The latest held-key attempt completed 960 characters without an activity signal; the user confirmed a one-second physical key hold while text grew. Drag interruption remains unverified. Automated tests do not establish live device coverage.
 
 ## Consent and operation
 

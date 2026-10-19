@@ -1,4 +1,4 @@
-# Private review status — 0.8.3 candidate
+# Private review status — 0.8.4 candidate
 
 The 0.7.6 same-window typing acceptance failed: the human confirmed a key during typing, but 1719 characters completed before the 15-second deadline. The Clutter filter path is not used by the new backend. Dragging was not run on that failed detector.
 
@@ -33,3 +33,5 @@ The0.8.3 startup-status repair adds a coarse read-only status response while a s
 The reviewed0.8.3 transport uses nonblocking snapshot locking and a single bounded response writer. Regression tests cover a blocked startup-status response, EOF during blocked output, and the main response writer holding the state lock while cancellation arrives. All279 isolated Python tests and the real0.8.3 loader check pass. Version0.8.3 is installed; this still does not establish live keyboard coverage.
 
 A fresh actual tool provider confirmed0.8.3 build862986851f00064dac6c657d99053a78761ece6ac68b5030cded8730dd7a1929 with matching disk sources. Independent startup-status responses arrived while desktop_start was pending, validating the new live readiness lane. GNOME approval timed out before native calibration started; no screenshot or task input occurred. Explicit cleanup confirmed sharing closed, no warning and zero held input. This trial establishes responsive startup status, not keyboard coverage or typing/drag takeover. No automatic restart occurred.
+
+The fresh 0.8.4 audit repaired focus metadata injection, late/cancelled ARM acceptance, loss of unresolved held-input tracking, overlapping cleanup and stale observer callbacks, cursor startup cancellation, duplicate pending request cancellation ownership, and restart admission with old resources attached. Session cancellation events are renewed per consent session; callbacks can stop their own session before waiting on response locks, without cancelling a replacement. The complete 304-test Python suite, eight native fixtures and the real five-tool loader pass. The installed native binary matches its existing 0.8.0 package. Version 0.8.4 is installed. These fixes do not convert the failed/unverified physical typing and drag tests into passes; see SCENARIO_AUDIT.md for scope and release blockers.

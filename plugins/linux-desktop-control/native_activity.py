@@ -207,21 +207,31 @@ class Controller:
                 remaining=arm_deadline-time.monotonic()
                 if remaining<=0:raise NativeFailure('helper-fault','Native observer did not acknowledge arm')
                 armed=self._read(remaining)
+                if self.stop.is_set() or not self.active():
+                    raise NativeFailure('session-ended','Native observer authorization ended')
+                if time.monotonic()>=arm_deadline:
+                    raise NativeFailure('helper-fault','Native observer arm acknowledgement expired')
                 # A heartbeat reply already in flight from calibration may
                 # precede ARMED; it does not establish calibration or authority.
                 if armed=='ALIVE':continue
                 if armed!='ARMED':
                     raise NativeFailure('helper-fault' if armed in (None,'FAULT') else 'protocol-invalid','Native observer did not acknowledge arm')
                 break
-            if not self.active():
-                raise NativeFailure('session-ended','Native observer authorization ended')
-            self.last_peer = time.monotonic()
-            self.armed_at_monotonic = self.last_peer
-            self.calibration_verified=True
-            self.calibration_state='verified'
-            self.ready = True
-            self.thread = threading.Thread(target=self._monitor, daemon=True, name='native-activity-observer')
-            self.thread.start()
+            with self.close_lock:
+                # Serialize readiness publication against close's stop fence.
+                authorized=self.active()
+                # An injected authorization callback may close reentrantly.
+                if self.closed or self.stop.is_set() or not authorized:
+                    raise NativeFailure('session-ended','Native observer authorization ended')
+                if time.monotonic()>=arm_deadline:
+                    raise NativeFailure('helper-fault','Native observer arm acknowledgement expired')
+                self.last_peer = time.monotonic()
+                self.armed_at_monotonic = self.last_peer
+                self.calibration_verified=True
+                self.calibration_state='verified'
+                self.ready = True
+                self.thread = threading.Thread(target=self._monitor, daemon=True, name='native-activity-observer')
+                self.thread.start()
             return self
         except BaseException:
             self.close()
@@ -432,8 +442,9 @@ class Controller:
     def close(self):
         if self.terminal_reason is None:self.terminal_reason='closed'
         if (self.armed_at_monotonic is not None or self.helper_ready_at_monotonic is not None) and self.ended_at_monotonic is None:self.ended_at_monotonic=time.monotonic()
-        self.stop.set()
-        self.ready = False
+        with self.close_lock:
+            self.stop.set()
+            self.ready = False
         self._close_notice()
         # Socket shutdown wakes an independent reader before any join.
         connection = self.connection

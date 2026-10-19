@@ -17,7 +17,7 @@ import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import Gio, GLib, Gst
 
-VERSION = '0.8.3'
+VERSION = '0.8.4'
 # Freeze identity at module load: old providers must never report a new disk build.
 _build_spec = importlib.util.spec_from_file_location('_desktop_runtime_build', os.path.join(os.path.dirname(__file__), 'runtime_build.py'))
 _runtime_build = importlib.util.module_from_spec(_build_spec)
@@ -319,6 +319,7 @@ class Desktop:
                 method = 'NotifyKeyboardKeysym' if kind == 'key' else 'NotifyPointerButton'
                 self.call(RD, method, '(oa{sv}iu)', (self.session, {}, code, 0))
                 confirmed=True
+                self.held.remove((kind,code))
             except Exception:
                 failed=True
                 self.cancelled.set()
@@ -328,6 +329,7 @@ class Desktop:
                     self.call('org.freedesktop.portal.Session','Close','()',(),path=self.session)
                     self.portal_closed=True
                     self.session=None
+                    self.held.clear()
                 except Exception:
                     self.cleanup_warning='Input release and portal close failed. Stop sharing using the GNOME indicator.'
                 break
@@ -335,7 +337,6 @@ class Desktop:
                 # Aggregate portal-call outcomes only; no input codes/content.
                 # A confirmed call is not proof of physical-device state.
                 self.release_counts['confirmed' if confirmed else 'failed']+=1
-        self.held.clear()
         return failed
 
     def keysym(self, name):
@@ -387,7 +388,7 @@ class Desktop:
             raise ValueError('Unknown action type')
         if 'focus' in a:
             f=a['focus']
-            if kind not in ('keys','text') or not isinstance(f,dict):
+            if kind not in ('keys','text') or not isinstance(f,dict) or set(f)!={'x','y'}:
                 raise ValueError('focus is supported only for keys/text')
             self.validate_point(f.get('x'),f.get('y'))
         if kind in ('text','keys') and not in_sequence and 'focus' not in a and not self.activates_focus(a) and not getattr(self,'target_guard',None) and not (kind=='keys' and getattr(self,'window_transition',False)):
@@ -464,7 +465,7 @@ class Desktop:
                     self.transaction_info['failed_step']=index+1
                     self.check()
                     if 'focus' in step:
-                        self._primitive({'type':'click',**step['focus']})
+                        self._primitive({'type':'click','x':step['focus']['x'],'y':step['focus']['y']})
                         self.wait_interruptibly(.15)
                     if target is not None:
                         if index==0 and step['type']=='click':
@@ -659,15 +660,42 @@ class Server:
     def __init__(self,factory=Desktop):
         self.factory=factory;self.backend=None;self.cancel_token=None;self.request_epoch=None
         self.state_lock=threading.RLock();self.generation=0;self.state='closed'
+        # Opening a replacement session must wait until every owned resource
+        # from the previous session has finished cleanup. Cancellation itself
+        # never waits for this lock.
+        self.lifecycle_lock=threading.RLock()
+        self.owner_cancel_events={}
         self.recovery=RecoveryLedger();self.target_provider=None;self.target_record=None
         self.cursor_glow=None;self.cursor_glow_pending=None;self.cursor_glow_warning=None;self.cursor_glow_last=None
         self.physical_takeover=False;self.physical_takeover_warning=None;self.native_activity=None;self.native_activity_last=None
         self.target_cleanup_warning=None;self.indicator=None;self.indicator_warning=None;self.window_record=None
 
-    def invalidate(self):
-        if self.backend:self.backend.cancelled.set()
+    def own_observer(self,attribute,owner):
         with self.state_lock:
+            self.owner_cancel_events[attribute]=(owner,self.backend.cancelled)
+            setattr(self,attribute,owner)
+
+    def cancel_observer(self,attribute,owner):
+        # A tuple may be replaced after this read. Its event belongs only to
+        # that consent session, so even a delayed callback cannot cancel a new
+        # session. Never wait for publication/state locks to stop owned input.
+        lease=self.owner_cancel_events.get(attribute)
+        if lease is not None and lease[0] is owner:lease[1].set()
+
+    def invalidate(self,expected_native=None,expected_indicator=None,warning=None):
+        conditional=expected_native is not None or expected_indicator is not None
+        if expected_native is not None:self.cancel_observer('native_activity',expected_native)
+        if expected_indicator is not None:self.cancel_observer('indicator',expected_indicator)
+        if not conditional and self.backend:self.backend.cancelled.set()
+        with self.state_lock:
+            if expected_native is not None and self.native_activity is not expected_native:return False
+            if expected_indicator is not None and self.indicator is not expected_indicator:return False
+            if conditional and self.state not in ('opening','active'):return False
+            if conditional and self.backend:self.backend.cancelled.set()
+            if warning=='native':self.physical_takeover_warning='Native activity observer fault; desktop session closed.'
+            elif warning=='indicator':self.indicator_warning='Foreground observer heartbeat failed; session closed without retry.'
             self.generation+=1;self.state='closing';self.target_record=None;self.window_record=None
+            return True
 
     def guard(self,allowed=None):
         if self.request_epoch is not None and self.request_epoch!=self.generation:
@@ -759,7 +787,8 @@ class Server:
             active=lambda:self.state in ('opening','active') and self.backend is not None and self.backend.status().get('active') is True,
             on_activity=lambda:self.native_activity_lost(controller),
             on_fault=lambda error:self.native_activity_lost(controller,error),notice=notice)
-        self.native_activity=controller # Own before start, including lost arm replies.
+        # Publish ownership atomically with callback invalidation checks.
+        self.own_observer('native_activity',controller)
         controller.start()
         if controller.status().get('active') is not True:raise RuntimeError('Native activity observer did not arm')
         self.guard(('opening','active'))
@@ -767,11 +796,9 @@ class Server:
         self.physical_takeover=True;self.physical_takeover_warning=None
 
     def native_activity_lost(self,expected,error=None):
-        if self.native_activity is not expected or self.state not in ('opening','active'):return
-        if error:self.physical_takeover_warning='Native activity observer fault; desktop session closed.'
-        self.invalidate()
+        if not self.invalidate(expected_native=expected,warning='native' if error else None):return
         def cleanup():
-            if self.native_activity is expected:self.close_backend()
+            self.close_backend(expected_native=expected)
         threading.Thread(target=cleanup,daemon=True).start()
 
     def show_indicator(self):
@@ -781,19 +808,19 @@ class Server:
             path=os.path.join(os.path.dirname(__file__),'indicator_bridge.py')
             spec=importlib.util.spec_from_file_location('desktop_indicator',path)
             module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
-            self.indicator=module.IndicatorBridge(self.status)
-            bridge=self.indicator
+            bridge=module.IndicatorBridge(self.status)
+            self.own_observer('indicator',bridge)
             bridge.on_failure=lambda:self.indicator_failed(bridge)
             self.indicator.start();self.indicator_warning=None
         except Exception:
             if self.indicator:self.indicator.close()
-            self.indicator=None;self.indicator_warning='Foreground observer or pointer label unavailable; guarded desktop control is refused.'
+            with self.state_lock:
+                self.owner_cancel_events.pop('indicator',None)
+                self.indicator=None;self.indicator_warning='Foreground observer or pointer label unavailable; guarded desktop control is refused.'
 
     def indicator_failed(self,expected=None):
-        if expected is not None and self.indicator is not expected:return
-        self.indicator_warning='Foreground observer heartbeat failed; session closed without retry.'
-        self.invalidate()
-        self.close_backend()
+        if not self.invalidate(expected_indicator=expected,warning='indicator'):return
+        self.close_backend(expected_indicator=expected)
 
     def cursor_glow_config(self):
         path=os.path.join(os.path.dirname(__file__),'cursor_theme_config.json')
@@ -822,29 +849,49 @@ class Server:
         spec=importlib.util.spec_from_file_location('desktop_cursor_glow',path)
         module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
         controller=module.Controller(config['theme'],config['state_dir'],config['theme_root'],active=lambda:self.state=='active' and self.backend is not None and self.backend.status().get('active') is True,on_failure=lambda error:self.cursor_glow_failed(controller,error))
-        self.cursor_glow=controller;self.cursor_glow_warning=None
+        self.own_observer('cursor_glow',controller)
+        self.cursor_glow_warning=None
         try:controller.start()
         except Exception:
-            self.cursor_glow=None
+            with self.state_lock:
+                self.owner_cancel_events.pop('cursor_glow',None)
+                self.cursor_glow=None
             raise
 
     def cursor_glow_failed(self,expected,error):
-        if self.cursor_glow is not expected:return
-        self.cursor_glow_warning=str(error)
-        if self.indicator is not None:self.foreground_lost(self.indicator)
+        self.cancel_observer('cursor_glow',expected)
+        with self.state_lock:
+            if self.cursor_glow is not expected:return
+            self.cursor_glow_warning=str(error)
+            indicator=self.indicator
+        if indicator is not None:self.foreground_lost(indicator)
 
     def foreground_lost(self,expected):
-        if self.indicator is not expected or self.state not in ('opening','active'):return
-        self.invalidate()
+        if not self.invalidate(expected_indicator=expected):return
         # Do not do synchronous D-Bus cleanup in the context-signal callback.
         def cleanup():
-            if self.indicator is expected:self.close_backend()
+            self.close_backend(expected_indicator=expected)
         threading.Thread(target=cleanup,daemon=True).start()
 
-    def close_backend(self):
-        glow=self.cursor_glow;self.cursor_glow=None
-        native=self.native_activity;self.native_activity=None
-        self.physical_takeover=False
+    def close_backend(self,expected_native=None,expected_indicator=None):
+        # Callback-owned closures were cancelled by invalidate() already. Do not
+        # touch a potentially newer backend before validating their owner under
+        # the same lock used by desktop_start.
+        if expected_native is None and expected_indicator is None and self.backend:
+            self.backend.cancelled.set()
+        with self.lifecycle_lock:
+            with self.state_lock:
+                if expected_native is not None and self.native_activity is not expected_native:return
+                if expected_indicator is not None and self.indicator is not expected_indicator:return
+            self._close_backend_owned()
+
+    def _close_backend_owned(self):
+        with self.state_lock:
+            self.owner_cancel_events.clear()
+            glow=self.cursor_glow;self.cursor_glow=None
+            native=self.native_activity;self.native_activity=None
+            indicator=self.indicator;self.indicator=None
+            self.physical_takeover=False
         # Cancel immediately and destroy/release virtual input before waiting for
         # observer process cleanup. Never leave held input behind an admin worker.
         if self.backend:self.backend.cancelled.set();self.backend.close();self.backend.pointer_position=None
@@ -852,13 +899,14 @@ class Server:
             try:native.close()
             except Exception:self.physical_takeover_warning='Native observer closure unconfirmed; portal closure attempted.'
             self.native_activity_last=native.status()
-        if self.indicator:self.indicator.close();self.indicator=None
+        if indicator:indicator.close()
         if glow is not None:
             try:glow.close()
             except Exception as error:
                 self.cursor_glow_warning=str(error);self.cursor_glow_pending=glow
             self.cursor_glow_last=glow.status()
-        self.target_record=None;self.window_record=None;self.close_target_provider();self.state='closed'
+        self.target_record=None;self.window_record=None;self.close_target_provider()
+        with self.state_lock:self.state='closed'
 
     def ensure_backend(self):
         self.guard()
@@ -948,6 +996,12 @@ class Server:
         return [text(dict(self.status(),window_observation=observation,pixel_size=[w,h],capture=getattr(self.backend,'capture_info',{}),transaction=getattr(self.backend,'transaction_info',{}),coordinate_rule='x_logical=x_pixel*logical_width/pixel_width; likewise y')),image(png)]
 
     def call(self,name,args):
+        if name=='desktop_start':
+            with self.lifecycle_lock:
+                return self._call_owned(name,args)
+        return self._call_owned(name,args)
+
+    def _call_owned(self,name,args):
         if name not in {t['name'] for t in tools()}:raise ValueError('Unknown tool')
         if not isinstance(args,dict):raise ValueError('Arguments must be an object')
         if name=='desktop_status':return [text(self.status())]
@@ -964,7 +1018,18 @@ class Server:
             if type(glow) is not bool:raise ValueError('cursor_glow must be boolean')
             self.ensure_backend()
             if not self.backend.status().get('active'):
-                self.state='opening';self.target_record=None
+                with self.state_lock:
+                    previous_owned=(self.native_activity is not None or self.indicator is not None or
+                        self.cursor_glow is not None or self.target_provider is not None or
+                        self.state in ('active','closing'))
+                    if not previous_owned:
+                        # Never clear an event captured by an old observer. Its
+                        # late callback cannot cancel this replacement session.
+                        self.backend.cancelled=threading.Event()
+                        self.state='opening';self.target_record=None
+                if previous_owned:
+                    self.invalidate();self.close_backend()
+                    raise RuntimeError('Previous session resources required cleanup; call desktop_start again for a new consent session')
                 try:
                     if getattr(self.backend,'requires_window_guard',False) and self.indicator is None:self.preflight_context()
                     if physical:
@@ -1174,6 +1239,13 @@ class StdioTransport:
                     if not isinstance(params,dict):raise ValueError('Params must be an object')
                     rid=request.get('id')
                     if rid is not None and (not isinstance(rid,(str,int)) or isinstance(rid,bool)):raise ValueError('Invalid request ID')
+                    if rid is not None:
+                        with self.token_lock:duplicate=rid in self.tokens
+                        if duplicate:
+                            # No status shortcut, close, input or token mutation
+                            # is permitted for a duplicate in-flight request ID.
+                            self.pending.put(({'_protocol_error':'Duplicate pending request ID','id':rid},threading.Event()))
+                            continue
                     if request['method']=='notifications/cancelled':self.interrupt(params.get('requestId'));continue
                     if request['method']=='tools/call':
                         if not isinstance(params.get('name'),str) or not isinstance(params.get('arguments',{}),dict):raise ValueError('Invalid tool arguments')
@@ -1204,7 +1276,8 @@ class StdioTransport:
                 if item is None:break
                 request,token=item;params=request.get('params') or {}
                 try:
-                    if '_parse_error' in request:response={'jsonrpc':'2.0','id':request.get('id'),'error':{'code':-32700,'message':request['_parse_error']}}
+                    if '_protocol_error' in request:response={'jsonrpc':'2.0','id':request.get('id'),'error':{'code':-32600,'message':request['_protocol_error']}}
+                    elif '_parse_error' in request:response={'jsonrpc':'2.0','id':request.get('id'),'error':{'code':-32700,'message':request['_parse_error']}}
                     else:
                         self.server.cancel_token=token;self.server.request_epoch=request.get('_generation')
                         if self.disconnected.is_set() and request.get('method')=='tools/call' and params.get('name') not in ('desktop_status','desktop_close'):token.set()
@@ -1216,7 +1289,9 @@ class StdioTransport:
                 except (BrokenPipeError,OSError):self.disconnected.set();self.interrupt(all_requests=True);break
                 finally:
                     self.server.cancel_token=None;self.server.request_epoch=None
-                    with self.token_lock:self.tokens.pop(request.get('id'),None)
+                    with self.token_lock:
+                        rid=request.get('id')
+                        if self.tokens.get(rid) is token:self.tokens.pop(rid,None)
         finally:
             self.writer_stop.set();self.disconnected.set();self.interrupt(all_requests=True);self.server.shutdown()
             self.startup_writer.join(timeout=.2)

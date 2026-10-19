@@ -1,5 +1,9 @@
 # Validation
 
+## Fresh 0.8.4 audit
+
+See [SCENARIO_AUDIT.md](SCENARIO_AUDIT.md) for the current scenario inventory, reproduced defects, fixes and release blockers. Historical counts below describe their respective builds. No current physical typing or held-button drag acceptance is claimed.
+
 ## 0.8.0 native helper candidate
 
 The replacement uses a separately installed administrator-authorized native helper, not the failed Clutter input filter. The 204-test isolated suite and real five-tool loader passed before adding four release-evidence tests; those four targeted tests pass. Native C collector, session watcher and confinement fixtures compile and pass separately with an extracted local GCC toolchain. Unix-socket fixture tests need a host run when the sandbox disallows socket binding. No real devices are opened by those fixtures.
