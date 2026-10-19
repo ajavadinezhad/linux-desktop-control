@@ -1,4 +1,4 @@
-# Optional native activity helper — 0.8.1
+# Optional native activity helper — 0.8.3 candidate
 
 This helper stops a consented GNOME desktop session when activity arrives from
 the covered kernel input devices, including activity in the same window. It is
@@ -36,7 +36,7 @@ not promised. GNOME's sharing indicator remains an independent stop.
 The client sends HB every 0.2 seconds and the helper replies ALIVE. A one-second
 heartbeat deadline and absolute 120-second lease bound monitoring. Session
 changes, topology changes, channel failure, requester death, or expiry end it.
-There is no automatic restart, lease extension, or resume after quiet input.
+There is no automatic restart or lease extension. Only the explicitly negotiated retained-sharing mode below may resume after fresh quiet.
 
 ## Reviewable installation package
 
@@ -115,3 +115,19 @@ fixture. It distinguishes clock metadata, zero relative records, and each
 pending queue class; verifies raw-descriptor closure before the combined report;
 and retains armed cancellation for key, relative, absolute, switch and metadata
 records. It opens no input device and does not establish live physical coverage.
+
+
+## Optional persistent mouse-motion yield (package 0.8.2)
+
+Historical helper package 0.8.2 was installed and reviewed; installed package 0.8.3 now supersedes it. The persistent motion-yield path is tested offline but has no live acceptance yet. Default protocol behavior is unchanged. An explicitly retained-sharing controller negotiates `MODEYIELD`/`MODEYIELD_OK` before calibration; calibration and ARM remain mandatory. Thereafter only covered nonzero EV_REL REL_X/REL_Y yields. All buttons/keys, wheel/other axes, EV_ABS, metadata/switch/unknown activity, held state and faults remain terminal.
+
+The helper keeps observing and emits bounded `YIELDED_<epoch>` and `QUIET_<epoch>` tokens. After 1500 ms quiet, released input and empty boundary queues, `RESUME_<epoch>` is rechecked and acknowledged as `ARMED_<epoch>`. New motion invalidates quiet; epochs are bounded 1–64. Stale or invalid requests fail closed. No raw codes, values, coordinates or device identities are exported. The heartbeat, session/topology guards, privilege drop, confinement and original 120-second lease continue unchanged; pause/resume never renews authority.
+
+The desktop controller separately invalidates work, releases virtual input and suspends capture. Automatic one-time return requires explicit pointer_motion_return opt-in and unchanged consent/mapping/foreground plus a saved confirmed point; it is not implemented by the privileged helper and never replays an action. Manual pause stays manual despite later motion/quiet. See [the complete controller contract](../docs/RETAINED_SHARING.md).
+
+
+## Strict coverage negotiation (package 0.8.3 candidate)
+
+New retained-sharing controllers require MODEYIELD2/MODEYIELD2_OK before calibration and never fall back. Strict mode requires a fresh streamed nonzero REL_X/REL_Y event from a verified pointer source in addition to keyboard credit and the existing released/quiet boundary. Held/button/absolute/other-axis evidence alone cannot establish that route; resynchronization clears strict credit. The legacy broad category diagnostic bits are not proof of the additional requirement. Package 0.8.3 is installed and its reviewed payload matches, but strict relative delivery and automatic return have no live acceptance.
+
+The third installed 0.8.8 trial missed human-confirmed mouse movement despite calibration success; the old broad-calibration/yield-route mismatch is reproduced offline. The stricter contract prevents weak activation but does not repair delivery, identify the user's particular mouse or establish universal coverage. Device permissions, raw-event privacy, privilege drop and the original lease are unchanged. No grab probes or calibration bypasses are introduced. See [strict coverage evidence](../docs/STRICT_RELATIVE_COVERAGE.md).

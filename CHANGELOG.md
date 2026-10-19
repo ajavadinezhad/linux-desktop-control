@@ -1,5 +1,19 @@
 # Changes
 
+## 0.8.9 candidate
+
+- Verification: 378 Python tests, 14 native fixtures, the real seven-tool loader/schema check and skill validation pass; live automatic return remains blocked/unverified.
+
+- Require MODEYIELD2/strict acknowledgement for retained sharing and fresh streamed nonzero REL_X/REL_Y calibration credit before activation. Held/button/absolute/other-axis evidence alone no longer suffices; resynchronization clears strict credit. No legacy negotiation fallback.
+- Reproduce the prior false-coverage gap offline and record the human-confirmed 0.8.8 live motion-detection failure. This prevents weak activation, not missing event delivery. Candidate is not installed; live automatic return remains blocked/unverified. No new permissions or grab probes.
+
+## 0.8.8 candidate
+
+- Add explicit retained-sharing pause/resume, independent operation cancellation, raw virtual-input release and capture suspension without reopening the portal. New generations discard queued actions and old observation tokens. Default behavior remains close.
+- Optional native-protected mouse return yields only on covered nonzero REL_X/REL_Y. After 1.5 seconds of observed quiet and an epoch-bound resume handshake, return once to the last confirmed point in unchanged foreground/mapping, verify arrival, and capture freshly. Never replay input or reclaim focus.
+- Helper package 0.8.2 negotiates persistent motion/quiet/resume tokens; raw event privacy and the original 120-second lease remain unchanged. Keys/buttons/wheel/ABS/unknown activity and terminal session/device/privacy failures still close.
+- 376 Python tests pass, including fake-channel native-controller-to-production-pointer-return integration. Candidate automatic return and persistent native motion observation remain unverified live.
+
 ## 0.8.0
 
 - Accept known kernel output/configuration feedback without treating it as human activity; preserve unknown/lost-stream refusal and add distinct drain failure codes.

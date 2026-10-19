@@ -27,6 +27,9 @@ class NativeFailure(RuntimeError):
         super().__init__(message)
         self.reason=reason if reason in TERMINAL_REASONS else 'protocol-invalid'
 
+class PointerYielded(RuntimeError):
+    """A newer physical pointer epoch superseded this bounded resume."""
+
 
 def validate_helper():
     """Accept only the fixed executable and root-owned nonwritable ancestors."""
@@ -50,7 +53,8 @@ def peer_credentials(connection):
 class Controller:
     def __init__(self, active, on_activity, on_fault, runtime_dir=None,
                  launcher=subprocess.Popen, validator=validate_helper,
-                 credentials=peer_credentials, startup_timeout=60, notice=None):
+                 credentials=peer_credentials, startup_timeout=60, notice=None,
+                 retain_sharing=False, on_yield=None, on_quiet=None):
         # Dependency injections are for isolated tests, never model tool arguments.
         self.active = active
         self.on_activity = on_activity
@@ -97,6 +101,13 @@ class Controller:
         self.calibration_late_result = False
         self.calibration_resets = 0
         self.activity_kind = None
+        if type(retain_sharing) is not bool:raise ValueError('retain_sharing must be boolean')
+        self.retain_sharing=retain_sharing
+        self.on_yield=on_yield
+        self.on_quiet=on_quiet
+        self.yield_condition=threading.Condition(threading.RLock())
+        self.yield_epoch=0;self.quiet_epoch=None;self.yielded=False
+        self.resume_pending=None;self.resume_ack=None
 
     def _send(self, token):
         payload = (token + '\n').encode('ascii')
@@ -191,6 +202,8 @@ class Controller:
                     code = None
                 raise NativeFailure('helper-fault' if readiness in (None,'FAULT') else 'protocol-invalid','Native observer did not become ready')
             self.helper_ready_at_monotonic=time.monotonic()
+            if self.retain_sharing:
+                self._negotiate_yield()
             self._send('CALIBRATE')
             calibrating=self._read(1)
             if calibrating != 'CALIBRATING':
@@ -402,6 +415,9 @@ class Controller:
             self.close()
 
     def _consume(self,message):
+        if isinstance(message,str) and message.startswith(('YIELDED_','QUIET_','ARMED_')):
+            self._consume_yield(message)
+            return False
         kinds={'ACTIVITY':'unspecified','ACTIVITY_KEY':'key','ACTIVITY_POINTER':'pointer',
                'ACTIVITY_SWITCH':'switch','ACTIVITY_METADATA':'metadata','ACTIVITY_HELD':'held'}
         if message in kinds:
@@ -415,6 +431,82 @@ class Controller:
         elif message is not None:
             raise NativeFailure('protocol-invalid','Native observer invalid response')
         return False
+
+    def _negotiate_yield(self):
+        deadline=time.monotonic()+1
+        # Version 2 proves calibration observed the same primary relative
+        # source class that can later yield; legacy category/held evidence is
+        # insufficient for retained pointer observation.
+        self._send('MODEYIELD2')
+        if self._read(max(0,deadline-time.monotonic()))!='MODEYIELD2_OK':
+            raise NativeFailure('protocol-invalid','Native helper lacks strict retained pointer coverage')
+        if time.monotonic()>=deadline or not self._yield_authorized():
+            raise NativeFailure('session-ended','Native observer authorization ended')
+
+    def _yield_authorized(self):
+        lease=self.helper_ready_at_monotonic
+        return (not self.stop.is_set() and not self.closed and self.active() and
+                lease is not None and time.monotonic()-lease<120)
+
+    def is_current_yield(self,epoch,quiet=False):
+        with self.yield_condition:
+            return (type(epoch) is int and self.retain_sharing and self.yielded and
+                    self.yield_epoch==epoch and (not quiet or self.quiet_epoch==epoch) and
+                    self._yield_authorized())
+
+    def _consume_yield(self,message):
+        kind,number=message.split('_',1)
+        if (not self.retain_sharing or not number.isascii() or not number.isdigit() or
+                number.startswith('0') or not 1<=int(number)<=64):
+            raise NativeFailure('protocol-invalid','Native pointer epoch invalid')
+        epoch=int(number);callback=None
+        with self.yield_condition:
+            if not self._yield_authorized():
+                raise NativeFailure('session-ended','Native pointer authorization ended')
+            if kind=='YIELDED':
+                if epoch!=self.yield_epoch+1:raise NativeFailure('protocol-invalid','Native pointer epoch out of order')
+                self.yield_epoch=epoch;self.yielded=True;self.quiet_epoch=None
+                self.ready=False;self.resume_ack=None
+                callback=self.on_yield
+            elif kind=='QUIET':
+                if not self.yielded or epoch!=self.yield_epoch or self.quiet_epoch is not None:
+                    raise NativeFailure('protocol-invalid','Native quiet epoch invalid')
+                self.quiet_epoch=epoch;callback=self.on_quiet
+            elif kind=='ARMED':
+                pending=self.resume_pending
+                if (pending is None or pending[0]!=epoch or epoch!=self.yield_epoch or
+                        not self.yielded or self.quiet_epoch!=epoch or time.monotonic()>=pending[1]):
+                    raise NativeFailure('protocol-invalid','Native resume acknowledgement invalid')
+                self.resume_ack=epoch;self.yielded=False;self.quiet_epoch=None;self.ready=True
+            self.last_peer=time.monotonic()
+            self.yield_condition.notify_all()
+        if callback is not None:callback(self,epoch)
+
+    def resume_from_pause(self,expected_epoch,timeout=1):
+        if threading.current_thread() is self.thread:
+            raise NativeFailure('protocol-invalid','Native monitor cannot wait for its own acknowledgement')
+        if isinstance(timeout,bool) or not isinstance(timeout,(int,float)) or not 0<timeout<=1:
+            raise ValueError('Native resume timeout must be bounded')
+        deadline=time.monotonic()+timeout
+        try:
+            with self.yield_condition:
+                if not self.is_current_yield(expected_epoch,quiet=True) or self.resume_pending is not None:
+                    raise NativeFailure('protocol-invalid','Native pointer resume is stale or busy')
+                self.resume_pending=(expected_epoch,deadline);self.resume_ack=None
+                self._send('RESUME_'+str(expected_epoch))
+                while True:
+                    if not self._yield_authorized():raise NativeFailure('session-ended','Native pointer authorization ended')
+                    if time.monotonic()>=deadline:raise NativeFailure('helper-fault','Native pointer resume acknowledgement expired')
+                    if self.yield_epoch!=expected_epoch:raise PointerYielded('Native pointer moved during resume')
+                    if self.resume_ack==expected_epoch and self.ready and not self.yielded:return expected_epoch
+                    self.yield_condition.wait(min(.02,max(0,deadline-time.monotonic())))
+        except PointerYielded:
+            raise
+        except Exception:
+            self._notify(error='Native pointer resume failed; desktop must close',reason='protocol-invalid')
+            raise
+        finally:
+            with self.yield_condition:self.resume_pending=None;self.yield_condition.notify_all()
 
     def _drain_final(self):
         # The authenticated helper may notify then immediately close/exit. Read
@@ -458,6 +550,9 @@ class Controller:
         lease_start=self.helper_ready_at_monotonic or self.armed_at_monotonic
         lease_elapsed=None if lease_start is None else max(0,(self.ended_at_monotonic or time.monotonic())-lease_start)
         return {'active': self.ready and not self.stop.is_set(), 'supported': self.ready,
+                'observer_alive':self.calibration_verified and not self.stop.is_set() and not self.closed,
+                'yielded':self.yielded,'yield_epoch':self.yield_epoch,'quiet_epoch':self.quiet_epoch,
+                'retain_sharing':self.retain_sharing,
                 'human_provenance': False, 'raw_device_fds': False,
                 'error': self.error, 'cleanup_warning': self.cleanup_warning,
                 'terminal_reason':self.terminal_reason,'helper_exit_code':self.helper_exit_code,
@@ -480,6 +575,7 @@ class Controller:
         with self.close_lock:
             self.stop.set()
             self.ready = False
+        with self.yield_condition:self.yield_condition.notify_all()
         self._close_notice()
         # Socket shutdown wakes an independent reader before any join.
         connection = self.connection

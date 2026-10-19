@@ -33,7 +33,7 @@ class Tests(unittest.TestCase):
         self.assertEqual(p.returncode,0,p.stderr)
         replies=list(map(json.loads,p.stdout.splitlines()))
         self.assertEqual(len(replies),3)
-        self.assertEqual(len(replies[1]['result']['tools']),5)
+        self.assertEqual(len(replies[1]['result']['tools']),7)
         self.assertFalse(json.loads(replies[2]['result']['content'][0]['text'])['active'])
     def test_image_content_and_scaling(self):
         s=m.Server(Fake)

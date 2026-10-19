@@ -19,7 +19,7 @@ class PhysicalGuardTests(unittest.TestCase):
    def close(self):events.append('portal-close');self.held=[];super().close()
   s=m.Server(Backend);bridge=Bridge(events)
   class Native:
-   def __init__(self,active,on_activity,on_fault,notice=None):self.notice=notice;self.active=active;self.on_activity=on_activity;self.on_fault=on_fault;self.ready=False;self.closed=False
+   def __init__(self,active,on_activity,on_fault,notice=None,retain_sharing=False,on_yield=None,on_quiet=None):self.retain_sharing=retain_sharing;self.on_yield=on_yield;self.on_quiet=on_quiet;self.notice=notice;self.active=active;self.on_activity=on_activity;self.on_fault=on_fault;self.ready=False;self.closed=False
    def start(self):
     self.assert_owned=s.native_activity is self;events.append('native-arm');assert self.active() and self.assert_owned
     if reject:raise RuntimeError('administrator authorization denied')
