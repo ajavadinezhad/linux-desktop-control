@@ -54,7 +54,10 @@ class WindowBackend(Fake):
  def action(self,a):self.actions+=1;self.window_guard.check();self.transaction_info={'input_events_attempted':1};self.bridge.value.update(window_id='foreign',epoch=11);self.window_guard.check()
 class WindowServerTests(unittest.TestCase):
  def make(self):
-  b=Bridge();s=m.Server(WindowBackend);s.indicator=b;s.call('desktop_start',{});s.backend.bridge=b;return s,b
+  b=Bridge();s=m.Server(WindowBackend)
+  s.preflight_context=lambda:b
+  s.show_indicator=lambda:s.own_observer('indicator',b)
+  s.call('desktop_start',{});s.backend.bridge=b;return s,b
  def test_mid_batch_loss_closes_and_invalidates_queue_without_retry(self):
   s,b=self.make();token=s.window_record['id'];old=s.generation
   result=s.handle({'id':1,'method':'tools/call','params':{'name':'desktop_action','arguments':{'window_observation_id':token,'action':{'type':'click','x':2,'y':2}}}})

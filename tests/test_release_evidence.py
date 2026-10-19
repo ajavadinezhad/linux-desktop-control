@@ -38,7 +38,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
         d.call = failed
         self.assertTrue(d.release())
         status = d.status()
-        self.assertEqual(status['held_input_count'], 0)
+        self.assertEqual(status['held_input_count'], 1)
         self.assertEqual(status['input_release'], {'attempted': 1, 'confirmed': 0, 'failed': 1})
         self.assertIn('release and portal close failed', status['cleanup_warning'])
         self.assertFalse(status['portal_closed_confirmed'])

@@ -56,7 +56,7 @@ def serve(lease,theme,owner,input_fd=0,output=None,alive=owner_alive):
 class Controller:
     def __init__(self,theme,state_dir,theme_root,active,on_failure=None,launcher=subprocess.Popen,python='/usr/bin/python3'):
         self.args=[python,str(Path(__file__).resolve()),'--theme',theme,'--state',str(state_dir),'--root',str(theme_root),'--owner',str(os.getpid())]
-        self.active=active;self.failure=on_failure or (lambda error:None);self.launcher=launcher;self.process=None;self.thread=None;self.stop=threading.Event();self.error=None;self.lock=threading.Lock();self.restored=None;self.closed=False;self.recovery_attempted=False;self.recovery_lock=threading.Lock()
+        self.active=active;self.failure=on_failure or (lambda error:None);self.launcher=launcher;self.process=None;self.thread=None;self.stop=threading.Event();self.error=None;self.lock=threading.Lock();self.restored=None;self.closed=False;self.recovery_attempted=False;self.recovery_lock=threading.Lock();self.lifecycle=threading.RLock()
     def _readline(self,process,timeout):
         # Worker emits bounded single writes. Read raw bytes to avoid buffered read-ahead.
         result=b'';deadline=time.monotonic()+timeout
@@ -73,16 +73,25 @@ class Controller:
             payload=(json.dumps(message)+'\n').encode()
             if not select.select([],[self.process.stdin],[],.5)[1]:raise RuntimeError('cursor watchdog command timed out')
             if os.write(self.process.stdin.fileno(),payload)!=len(payload):raise RuntimeError('cursor watchdog command incomplete')
-    def start(self):
-        if self.process is not None:raise RuntimeError('cursor controller already started')
+    def _require_activation(self):
+        if self.closed or self.stop.is_set():raise RuntimeError('cursor activation cancelled')
         if not self.active():raise RuntimeError('cursor activation requires active authorization')
-        self.process=self.launcher(self.args,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,bufsize=0)
-        try:
-            os.set_blocking(self.process.stdin.fileno(),False)
-            if self._readline(self.process,4)!={'ready':True}:raise RuntimeError('cursor watchdog not ready')
-            self.thread=threading.Thread(target=self._heartbeat,daemon=True,name='cursor-glow-heartbeat');self.thread.start();return self
-        except BaseException:
-            self.close();raise
+        if self.closed or self.stop.is_set():raise RuntimeError('cursor activation cancelled')
+    def start(self):
+        # Serialize child ownership/readiness with cleanup. close() signals stop
+        # before taking this lock, so a pending readiness response cannot revive
+        # a cancelled controller or race cleanup for the same stdout response.
+        with self.lifecycle:
+            if self.process is not None:raise RuntimeError('cursor controller already started')
+            self._require_activation()
+            self.process=self.launcher(self.args,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,bufsize=0)
+            try:
+                os.set_blocking(self.process.stdin.fileno(),False)
+                if self._readline(self.process,4)!={'ready':True}:raise RuntimeError('cursor watchdog not ready')
+                self._require_activation()
+                self.thread=threading.Thread(target=self._heartbeat,daemon=True,name='cursor-glow-heartbeat');self.thread.start();return self
+            except BaseException:
+                self.close();raise
     def _heartbeat(self):
         try:
             while not self.stop.wait(.2):
@@ -110,10 +119,14 @@ class Controller:
         running=self.process is not None and self.process.poll() is None
         return {'active':running and self.restored is not True,'worker_running':running,'restoration_pending':self.stop.is_set() and self.restored is not True,'error':self.error,'restored':self.restored}
     def close(self):
-        if self.closed:return
         self.stop.set()
+        with self.lifecycle:
+            self._close_locked()
+    def _close_locked(self):
+        if self.closed:return
         if self.thread is not None and self.thread is not threading.current_thread():self.thread.join(timeout=5)
-        if self.process is None:return
+        if self.process is None:
+            self.closed=True;self.restored=True;return
         try:
             if self.process.poll() is None:
                 try:self._send({'command':'close'})
