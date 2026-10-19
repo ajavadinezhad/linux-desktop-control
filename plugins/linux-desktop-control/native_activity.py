@@ -110,6 +110,9 @@ class Controller:
         self.yield_condition=threading.Condition(threading.RLock())
         self.yield_epoch=0;self.quiet_epoch=None;self.yielded=False
         self.resume_pending=None;self.resume_ack=None
+        self.post_arm_verified=False;self.post_arm_state='not-started';self.post_arm_deadline_monotonic=None
+        self.post_arm_gate=False
+        self.notice_phase='calibration'
 
     def _send(self, token):
         payload = (token + '\n').encode('ascii')
@@ -150,6 +153,7 @@ class Controller:
     def start(self):
         try:return self._start()
         except BaseException as error:
+            if self.post_arm_gate:self.post_arm_state='failed'
             self.terminal_reason=(error.reason if isinstance(error,NativeFailure) else 'helper-fault')
             self.error='Native activity observer startup failed'
             if not self.calibration_verified:self.calibration_state='failed'
@@ -246,20 +250,64 @@ class Controller:
                 self.armed_at_monotonic = self.last_peer
                 self.calibration_verified=True
                 self.calibration_state='verified'
-                self.ready = True
+                self.post_arm_gate=self.retain_sharing
+                self.post_arm_state='waiting-motion' if self.retain_sharing else 'not-started'
+                self.post_arm_deadline_monotonic=time.monotonic()+30 if self.retain_sharing else None
+                self.ready = not self.retain_sharing
                 self.thread = threading.Thread(target=self._monitor, daemon=True, name='native-activity-observer')
                 self.thread.start()
+            if self.retain_sharing:self._wait_post_arm()
             return self
         except BaseException:
             self.close()
             raise
 
-    def _show_notice(self,reset=False):
+    def _wait_post_arm(self):
+        # The monitor is the sole reader after ARM. This gate never authorizes
+        # capture/input from initial calibration or an old quiet token.
+        self._show_notice(phase='post-arm-pointer')
+        with self.yield_condition:
+            while True:
+                now=time.monotonic()
+                if (not self._yield_authorized() or self.notified or
+                        now>=self.post_arm_deadline_monotonic):
+                    self.post_arm_state='failed'
+                    raise NativeFailure('helper-fault','Post-arm mouse readiness was not verified')
+                if self.yielded and self.quiet_epoch==self.yield_epoch:
+                    epoch=self.yield_epoch
+                    self.post_arm_state='resuming'
+                    break
+                self.yield_condition.wait(min(.02,self.post_arm_deadline_monotonic-now))
+        self._close_notice()
+        if self.notice_active or self.notice_delivery_unknown:
+            raise NativeFailure('helper-fault','Post-arm notification closure unconfirmed')
+        remaining=self.post_arm_deadline_monotonic-time.monotonic()
+        if remaining<=0 or not self._yield_authorized() or self.notified:
+            raise NativeFailure('helper-fault','Post-arm mouse readiness expired')
+        self.resume_from_pause(epoch,timeout=min(1,remaining))
+        with self.close_lock:
+            with self.yield_condition:
+                if (not self._yield_authorized() or self.notified or
+                        time.monotonic()>=self.post_arm_deadline_monotonic or self.yielded or
+                        self.resume_ack!=epoch or self.yield_epoch!=epoch):
+                    self.post_arm_state='failed'
+                    raise NativeFailure('helper-fault','Post-arm mouse readiness expired')
+                self.post_arm_verified=True;self.post_arm_state='verified'
+                self.post_arm_gate=False;self.ready=True
+
+    def _show_notice(self,reset=False,phase=None):
         if self.notice is None:return
         if self.stop.is_set() or not self.active():raise NativeFailure('session-ended','Calibration notification authorization ended')
+        new_phase=phase or 'calibration'
+        if new_phase!=self.notice_phase and (self.notice_open or self.notice_active or self.notice_delivery_unknown):
+            raise NativeFailure('helper-fault','Previous notification closure unconfirmed')
+        new_notice=not self.notice_open and not self.notice_active and not self.notice_delivery_unknown
+        self.notice_phase=new_phase
         self.notice_requested=True;self.notice_open=True;self.notice_delivery_unknown=True
         try:
-            self.notice.show(reset=reset)
+            if new_notice:self.notice_close_attempts=0
+            if phase is None:self.notice.show(reset=reset)
+            else:self.notice.show(reset=reset,phase=phase)
             status=self.notice.status()
             self.notice_acknowledged=status.get('request_acknowledged') is True
             self.notice_active=status.get('request_active') is True
@@ -432,6 +480,7 @@ class Controller:
         if self.notified or self.stop.is_set():
             return
         self.notified = True
+        if self.post_arm_gate:self.post_arm_state='failed'
         self.ready = False
         self.error = error
         self.terminal_reason='activity' if activity else reason
@@ -475,8 +524,12 @@ class Controller:
             raise NativeFailure('session-ended','Native observer authorization ended')
 
     def _yield_authorized(self):
+        # Authorization callbacks may revoke/close reentrantly; their returned
+        # value cannot resurrect a stopped owner or renew the original lease.
+        if self.stop.is_set() or self.closed:return False
+        authorized=self.active()
         lease=self.helper_ready_at_monotonic
-        return (not self.stop.is_set() and not self.closed and self.active() and
+        return (authorized and not self.stop.is_set() and not self.closed and
                 lease is not None and time.monotonic()-lease<120)
 
     def is_current_yield(self,epoch,quiet=False):
@@ -494,21 +547,25 @@ class Controller:
         with self.yield_condition:
             if not self._yield_authorized():
                 raise NativeFailure('session-ended','Native pointer authorization ended')
+            if self.post_arm_gate and time.monotonic()>=self.post_arm_deadline_monotonic:
+                raise NativeFailure('helper-fault','Post-arm mouse readiness expired')
             if kind=='YIELDED':
                 if epoch!=self.yield_epoch+1:raise NativeFailure('protocol-invalid','Native pointer epoch out of order')
                 self.yield_epoch=epoch;self.yielded=True;self.quiet_epoch=None
                 self.ready=False;self.resume_ack=None
-                callback=self.on_yield
+                if self.post_arm_gate:self.post_arm_state='waiting-quiet'
+                else:callback=self.on_yield
             elif kind=='QUIET':
                 if not self.yielded or epoch!=self.yield_epoch or self.quiet_epoch is not None:
                     raise NativeFailure('protocol-invalid','Native quiet epoch invalid')
-                self.quiet_epoch=epoch;callback=self.on_quiet
+                self.quiet_epoch=epoch
+                if not self.post_arm_gate:callback=self.on_quiet
             elif kind=='ARMED':
                 pending=self.resume_pending
                 if (pending is None or pending[0]!=epoch or epoch!=self.yield_epoch or
                         not self.yielded or self.quiet_epoch!=epoch or time.monotonic()>=pending[1]):
                     raise NativeFailure('protocol-invalid','Native resume acknowledgement invalid')
-                self.resume_ack=epoch;self.yielded=False;self.quiet_epoch=None;self.ready=True
+                self.resume_ack=epoch;self.yielded=False;self.quiet_epoch=None;self.ready=not self.post_arm_gate
             self.last_peer=time.monotonic()
             self.yield_condition.notify_all()
         if callback is not None:callback(self,epoch)
@@ -529,7 +586,7 @@ class Controller:
                     if not self._yield_authorized():raise NativeFailure('session-ended','Native pointer authorization ended')
                     if time.monotonic()>=deadline:raise NativeFailure('helper-fault','Native pointer resume acknowledgement expired')
                     if self.yield_epoch!=expected_epoch:raise PointerYielded('Native pointer moved during resume')
-                    if self.resume_ack==expected_epoch and self.ready and not self.yielded:return expected_epoch
+                    if self.resume_ack==expected_epoch and (self.ready or self.post_arm_gate) and not self.yielded:return expected_epoch
                     self.yield_condition.wait(min(.02,max(0,deadline-time.monotonic())))
         except PointerYielded:
             raise
@@ -584,6 +641,8 @@ class Controller:
                 'observer_alive':self.calibration_verified and not self.stop.is_set() and not self.closed,
                 'yielded':self.yielded,'yield_epoch':self.yield_epoch,'quiet_epoch':self.quiet_epoch,
                 'retain_sharing':self.retain_sharing,
+                'post_arm_verified':self.post_arm_verified,'post_arm_state':self.post_arm_state,
+                'post_arm_remaining_seconds':None if self.post_arm_deadline_monotonic is None else max(0,int(self.post_arm_deadline_monotonic-time.monotonic())),
                 'human_provenance': False, 'raw_device_fds': False,
                 'error': self.error, 'cleanup_warning': self.cleanup_warning,
                 'terminal_reason':self.terminal_reason,'helper_exit_code':self.helper_exit_code,

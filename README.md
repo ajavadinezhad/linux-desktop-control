@@ -1,6 +1,6 @@
 # Linux Desktop Control
 
-Candidate version **0.8.10** is a private local MCP integration using GNOME Wayland's public desktop portal. It is an independent project, not an official OpenAI product.
+Candidate version **0.8.11** is a private local MCP integration using GNOME Wayland's public desktop portal. It is an independent project, not an official OpenAI product.
 
 Seven tools: `desktop_start`, `desktop_observe`, `desktop_action`, `desktop_status`, `desktop_pause`, `desktop_resume`, `desktop_close`. The final tool releases session resources. Each new session needs personal GNOME monitor/keyboard/pointer consent. GNOME's native sharing control remains available independently.
 
@@ -8,7 +8,11 @@ The read-only GNOME observer extension displays **Mouse is being controlled by C
 
 Guarded input requires the updated read-only foreground observer (protocol 2); status/cleanup tools remain available without an active observer. `indicator_warning` explicitly reports an unavailable label. Loading a newly installed GNOME extension can require a manual logout/login; the installer never restarts the session. The historical 0.7.1 trial ended safely before browser acceptance; later live 0.7.5 evidence is linked below.
 
-## Diagnostic-only candidate
+## Post-ARM readiness candidate
+
+Candidate 0.8.11 keeps helper package 0.8.4 unchanged. Retained MODEYIELD2 startup no longer advertises readiness after initial ARM alone: a separate 30-second mouse-only YIELDED/QUIET/RESUME/ARMED exchange must pass, with the fixed notice closed, before capture/input. Read-only startup status distinguishes the stage and exposes a coarse remaining budget. The notice says not to press keys or mouse buttons because native observation is already armed. Default close-policy startup is unchanged. This fixes false readiness, not missing event delivery; plugin 0.8.11 is installed with unchanged helper 0.8.4, and live mouse return remains unresolved. See [post-ARM readiness](docs/POST_ARM_READINESS.md).
+
+## Prior diagnostic-only baseline
 
 Candidate 0.8.10/helper 0.8.4 adds four optional terminal booleans showing whether strict relative calibration, a primary record after ARM, an eligible relative record after ARM and a sent yield token were observed. They are exported only after raw descriptors close and cannot enable control. Optional reads never delay cancellation callbacks; missing detail, including normal close, is valid. Plugin 0.8.10/helper 0.8.4 are installed and reviewed files match. Strict MODEYIELD2 activation remains unchanged. USB/Bluetooth hardware type alone does not establish delivery. This is diagnostic evidence, not an event-delivery fix or live automatic-return acceptance. See [terminal stream evidence](docs/STREAM_COVERAGE_DIAGNOSTICS.md).
 
@@ -49,3 +53,6 @@ Optional `desktop_start(physical_takeover=true)` requires a separately installed
 
 
 A fresh actual 0.8.10 provider verified the expected build, matching disk sources and all seven tools with sharing closed and zero held input; the installed helper hash matches. No new sharing or live event-delivery trial was performed, and the root cause remains unresolved.
+
+
+A fresh actual 0.8.11 provider verified build `d9365aaf2ec194b81bb855405f8737bbb3a2e813779550309bc88fd17acf0eb9`, matching disk sources and all seven tools, with sharing closed, zero held input and capture/input disabled. All 411 Python tests, 16 native fixtures, loader/schema discovery and skill validation pass. No new live trial was performed; mouse-event delivery and automatic return remain unresolved.

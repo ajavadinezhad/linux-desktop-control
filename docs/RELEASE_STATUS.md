@@ -1,9 +1,15 @@
-# Private review status — 0.8.10 candidate
+# Private review status — 0.8.11 candidate
 
 Prior installed baseline: 0.8.7;333 automated tests passed. Live scaled targeting, human-confirmed same-window typing interruption and human-confirmed drag interruption with button release have scoped acceptance on this host. Typing used native held-input detection; dragging used the pointer-endpoint guard. Native pointer-only detection remains unverified. Sharing is closed with zero held input. Source remains private and reuse licensing is deferred.
 
 
-## Current candidate: terminal-only stream evidence
+## Current candidate: post-ARM readiness gate
+
+Private candidate plugin 0.8.11 is installed; the helper remains unchanged at 0.8.4, with no helper installation or permission change. Reviewed runtime files match canonical source. Retained MODEYIELD2 sessions keep native ready/capture/input false after initial ARM until a separate bounded mouse-only YIELDED/QUIET/RESUME/ARMED exchange and known notice closure succeed. Default close-policy startup is unchanged. Read-only startup snapshots distinguish calibration from post-ARM stages and show only coarse remaining seconds. The server additionally refuses missing/false proof before finish_start, around startup capture and before image publication.
+
+The fixed allowlisted notice has no actions, app activation or arbitrary text. It requests only mouse movement followed by stillness; keys/buttons remain terminal after ARM. Unknown delivery/closure, cancellation, stale epochs, timeout, new activity at activation, owner/session loss and all existing privacy guards refuse startup. No helper reinstall, permission change, GNOME extension reload or new live trial is part of this candidate. This prevents false READY, not the unresolved mouse-event delivery cause. See [post-ARM readiness](POST_ARM_READINESS.md). Frozen verification passes all 411 Python tests, 16 native fixtures, the real seven-tool 0.8.11 loader/schema check and skill validation. These are offline checks; no new physical delivery or live automatic-return acceptance is inferred.
+
+## Prior installed baseline: terminal-only stream evidence
 
 Diagnostic-only plugin 0.8.10/helper package 0.8.4 is installed. Administrator-approved helper installation and the registered-marketplace plugin update succeeded; all 14 plugin files match canonical source, and the helper package/payload matches. Existing foreground extension, cursor assets and desktop settings were not changed. Version 0.8.9/helper 0.8.3 remains the historical strict-activation baseline. Event delivery and live mouse return are still unresolved; a USB/Bluetooth description does not establish source delivery. No new live trial, device permission, ACL, group, grab probe, strict-coverage relaxation or activation fallback is part of this update.
 
@@ -124,3 +130,6 @@ Human timing confirmation: the human confirmed physical mouse movement while the
 
 
 A fresh actual 0.8.10 provider verified the expected build, matching disk sources and all seven tools with sharing closed and zero held input; the installed helper hash matches. No new sharing or live event-delivery trial was performed, and the root cause remains unresolved.
+
+
+A fresh actual 0.8.11 provider verified build `d9365aaf2ec194b81bb855405f8737bbb3a2e813779550309bc88fd17acf0eb9`, matching disk sources and all seven tools, with sharing closed, zero held input and capture/input disabled. All 411 Python tests, 16 native fixtures, loader/schema discovery and skill validation pass. No new live trial was performed; mouse-event delivery and automatic return remain unresolved.

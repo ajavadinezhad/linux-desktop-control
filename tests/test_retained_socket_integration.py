@@ -20,7 +20,7 @@ class YieldBroker(native.FakeBroker):
             peer=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
             self.connection=peer;peer.settimeout(3);peer.connect(self.args[3])
             stream=peer.makefile('rb');peer.sendall(b'READY\n')
-            for expected,response in [('MODEYIELD2',self.mode_ack),('CALIBRATE',b'CALIBRATING\n'+(b'CALIBRATED\n' if self.coverage else b'')),('ARM',b'ARMED\n')]:
+            for expected,response in [('MODEYIELD2',self.mode_ack),('CALIBRATE',b'CALIBRATING\n'+(b'CALIBRATED\n' if self.coverage else b'')),('ARM',b'ARMED\nYIELDED_1\nQUIET_1\n')]:
                 while True:
                     command=stream.readline().decode().strip();self.commands.append(command)
                     if command=='HB':peer.sendall(b'ALIVE\n');continue
@@ -34,8 +34,8 @@ class YieldBroker(native.FakeBroker):
                 if command=='HB':
                     peer.sendall(b'ALIVE\n')
                     if self.trigger.is_set() and not sent:
-                        peer.sendall(b'YIELDED_1\nQUIET_1\n');sent=True
-                elif command=='RESUME_1':peer.sendall(b'ARMED_1\n')
+                        peer.sendall(b'YIELDED_2\nQUIET_2\n');sent=True
+                elif command in ('RESUME_1','RESUME_2'):peer.sendall(('ARMED_'+command.split('_')[1]+'\n').encode())
                 else:return
             stream.close()
         except OSError as error:self.error=type(error).__name__
@@ -92,7 +92,7 @@ class RetainedSocketIntegrationTests(unittest.TestCase):
                 motions=[event for event in backend.events if event[1]=='NotifyPointerMotion']
                 self.assertEqual(len(motions),1);self.assertEqual(motions[0][-1][-2:],(-40.,-30.))
                 self.assertFalse(any(event[1] in ('NotifyPointerButton','NotifyKeyboardKeysym','NotifyPointerAxisDiscrete') for event in backend.events))
-                self.assertEqual(backend.captures,1);self.assertEqual(brokers[0].commands.count('RESUME_1'),1)
+                self.assertEqual(backend.captures,1);self.assertEqual(brokers[0].commands.count('RESUME_1'),1);self.assertEqual(brokers[0].commands.count('RESUME_2'),1)
                 self.assertTrue(controller.status()['active']);self.assertTrue(controller.status()['observer_alive'])
                 self.assertFalse(server.return_after_quiet(controller,1));self.assertEqual(len(motions),1)
             finally:server.close_backend()

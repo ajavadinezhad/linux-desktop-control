@@ -106,3 +106,13 @@ The real seven-tool 0.8.10 loader/schema check, skill validator and package insp
 
 
 A fresh actual 0.8.10 provider verified the expected build, matching disk sources and all seven tools with sharing closed and zero held input; the installed helper hash matches. No new sharing or live event-delivery trial was performed, and the root cause remains unresolved.
+
+
+## Post-ARM readiness candidate 0.8.11 / unchanged helper 0.8.4
+
+Retained MODEYIELD2 startup now remains unready after initial ARM. A distinct 30-second mouse-only armed-path YIELDED/QUIET/RESUME/ARMED challenge and resolved fixed notice must precede capture/input. Snapshots expose an allowlisted stage, separate verified flag and coarse remaining budget without backend queries or authority mutation. Default close-policy startup and helper bytes are unchanged.
+
+Offline coverage includes fixed content/phase allowlisting, uncertain notice ownership and separate bounded close budgets, expired cue budgets, missing/false readiness proof, source activity before/during capture and before publication, suppressed normal startup callbacks, actual fake-peer armed-path exchange, cancellation and reentrant owner/session closure. This is a false-readiness repair; physical event delivery and live automatic return remain unresolved. No helper install, permission change, grab probe or live sharing trial is performed. Frozen verification passes all 411 Python tests, 16 native fixtures, the real seven-tool 0.8.11 loader/schema check and skill validation. Native helper package/bytes remain unchanged at 0.8.4. See [gate contract](POST_ARM_READINESS.md).
+
+
+A fresh actual 0.8.11 provider verified build `d9365aaf2ec194b81bb855405f8737bbb3a2e813779550309bc88fd17acf0eb9`, matching disk sources and all seven tools, with sharing closed, zero held input and capture/input disabled. All 411 Python tests, 16 native fixtures, loader/schema discovery and skill validation pass. No new live trial was performed; mouse-event delivery and automatic return remain unresolved.
