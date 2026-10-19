@@ -30,3 +30,12 @@ Final verification: **304 Python tests and eight native fixture tests pass**. Th
 Calibration establishes at least one source in each category, not every enumerated device. An exclusive evdev grab can suppress primary records; held-state polling can miss a complete tap between samples and cannot detect button-free relative motion on a grabbed pointer. Kernel activity is not proof of human provenance. No atomic input arbitration, zero-event race, universal app support or hard end-to-end cancellation latency is claimed.
 
 A release claiming universal physical takeover is blocked by these limits and by the unpassed host typing/drag tests.
+
+
+## Diagnostic update 0.8.5
+
+The latest primary-display 0.8.4 trial detected both challenged input categories but timed out waiting for quiet. The human confirmed full release and hands off. The final held state was false. No task capture/input occurred; portal closure was confirmed with zero held virtual input and no cleanup warning. This does not identify the cause or establish takeover acceptance.
+
+Version 0.8.5 adds fixed coarse terminal idle diagnostics; helper package 0.8.1 appends a backward-compatible report after closing raw descriptors. No keys, coordinates, device identities or exact event timestamps are exported. Calibration, classifiers, timing and armed cancellation requirements are unchanged. Isolated fixtures reproduce metadata-only and pending-queue quiet blockers, without establishing the live cause.
+
+Verification: 309 Python tests, nine native fixtures and the five-tool loader check pass. Plugin 0.8.5 and helper 0.8.1 are installed. Fresh actual provider reports matching disk sources, closed sharing, capture/input disabled and zero held input. Installed helper/policy bytes match the reviewed package. Live same-window typing and held-button dragging takeover remain unverified; public distribution remains blocked. Source remains private and reuse licensing is deferred.

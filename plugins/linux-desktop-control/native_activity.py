@@ -90,6 +90,8 @@ class Controller:
         self.helper_ready_at_monotonic = None
         self.calibration_verified = False
         self.calibration_state = 'not-started'
+        self.calibration_idle_evidence = None
+        self.calibration_idle_report_kind = 'not-requested'
         self.calibration_evidence = None
         self.calibration_report_kind = 'not-requested'
         self.calibration_late_result = False
@@ -308,7 +310,9 @@ class Controller:
 
     def _request_calibration_report(self):
         # Terminal diagnostics only. Export locally chosen enum labels, never
-        # helper-controlled text; eight literal bits are the only accepted data.
+        # helper-controlled text. Optional idle detail uses fixed local enums.
+        self.calibration_idle_evidence=None
+        self.calibration_idle_report_kind='not-requested'
         if self.calibration_state!='waiting' or self.calibration_verified or self.ready:
             self.calibration_report_kind='request-skipped'
             return
@@ -345,12 +349,41 @@ class Controller:
                 elif len(message)==17 and message.startswith('CAL_DIAG_') and all(bit in '01' for bit in message[9:]):
                     self.calibration_evidence={name:bit=='1' for name,bit in zip(names,message[9:])}
                     self.calibration_report_kind='received'
+                    self._read_calibration_idle_report(deadline)
                 else:self.calibration_report_kind='malformed'
                 return
         except NativeFailure as error:
             self.calibration_report_kind='transport-closed' if error.reason=='transport-closed' else 'malformed'
         except OSError:self.calibration_report_kind='transport-closed'
         except (RuntimeError,ValueError):self.calibration_report_kind='read-failed'
+
+    def _read_calibration_idle_report(self,deadline):
+        # The helper appends this optional line in the same terminal write as
+        # CAL_DIAG. A legacy helper need not provide it. Never change base-report
+        # success, extend its deadline, or treat diagnostic detail as authority.
+        remaining=deadline-time.monotonic()
+        if remaining<=0:
+            self.calibration_idle_report_kind='timeout';return
+        try:message=self._read(min(.05,remaining))
+        except (NativeFailure,OSError,RuntimeError,ValueError,StopIteration):
+            self.calibration_idle_report_kind='unavailable';return
+        if time.monotonic()>deadline:
+            self.calibration_idle_report_kind='timeout';return
+        if message is None:
+            self.calibration_idle_report_kind='missing';return
+        kinds={'N':'none','H':'held','K':'key-button','R':'relative-motion','Z':'zero-relative',
+               'A':'absolute','S':'switch','C':'clock-metadata','M':'other-metadata'}
+        ages={'N':'none','R':'recent','S':'settled'}
+        reasons={'M':'missing-category','H':'held','R':'recent-activity','Q':'queue-pending','Y':'ready'}
+        if (not isinstance(message,str) or len(message)!=15 or not message.startswith('CAL_IDLE_') or
+                message[9] not in kinds or message[10] not in ages or message[11] not in reasons or
+                any(bit not in '01' for bit in message[12:])):
+            self.calibration_idle_report_kind='malformed';return
+        self.calibration_idle_evidence={'last_activity_kind':kinds[message[9]],
+            'last_activity_age':ages[message[10]],'quiet_reason':reasons[message[11]],
+            'input_queue_pending':message[12]=='1','topology_pending':message[13]=='1',
+            'owner_pending':message[14]=='1'}
+        self.calibration_idle_report_kind='received'
 
     def _notify(self, activity=False, error=None, reason='helper-fault'):
         if self.notified or self.stop.is_set():
@@ -434,6 +467,8 @@ class Controller:
                 'calibration_verified':self.calibration_verified,'calibration_state':self.calibration_state,
                 'calibration_evidence':self.calibration_evidence,
                 'calibration_report_kind':self.calibration_report_kind,
+                'calibration_idle_evidence':self.calibration_idle_evidence,
+                'calibration_idle_report_kind':self.calibration_idle_report_kind,
                 'calibration_late_result':self.calibration_late_result,
                 'calibration_resets':self.calibration_resets,'activity_kind':self.activity_kind,
                 'calibration_notice':{'requested':self.notice_requested,'request_acknowledged':self.notice_acknowledged,'request_active':self.notice_active,'delivery_unknown':self.notice_delivery_unknown,'visibility_verified':False,'warning':self.notice_warning},

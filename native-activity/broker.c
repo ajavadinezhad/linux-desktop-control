@@ -44,6 +44,9 @@ static unsigned calibration_reset_rounds;
 static struct {
     bool stream_record, query_success, held_seen, held_last, quiet_blocked, stale_timestamp;
 } calibration_diag;
+/* Terminal-only coarse diagnostics; never exported while observing input. */
+static char calibration_last_kind = 'N', calibration_quiet_reason = 'M';
+static bool calibration_pending_input, calibration_pending_topology, calibration_pending_owner;
 static long long heartbeat, arm_time, session_time;
 static char control_line[16];
 static size_t control_used;
@@ -124,6 +127,18 @@ static void calibration_note(unsigned categories, long long current) {
     calibration_seen |= categories;
     calibration_last_activity = current;
 }
+static char calibration_event_kind(const struct input_event *event) {
+    if (event->type == EV_KEY) return 'K';
+    if (event->type == EV_REL) return event->value ? 'R' : 'Z';
+    if (event->type == EV_ABS) return 'A';
+    if (event->type == EV_SW) return 'S';
+    if (event->type == EV_MSC && event->code == MSC_TIMESTAMP) return 'C';
+    return 'M';
+}
+static void calibration_note_kind(unsigned categories, long long current, char kind) {
+    if (calibrating && !calibration_reset_pending) calibration_last_kind = kind;
+    calibration_note(categories, current);
+}
 /* Drain with a strict bound: an unbounded producer must not starve control. */
 static int drain(int fd) {
     unsigned consumed = 0, attempts = 0;
@@ -178,7 +193,7 @@ static int drain(int fd) {
                     long long current = now_ms();
                     if (current < 0 || stamp > current + 1000) { collector_phase = 45; return -1; }
                     if (stamp > calibration_time)
-                        calibration_note(event_category(fd - 4, &event), current);
+                        calibration_note_kind(event_category(fd - 4, &event), current, calibration_event_kind(&event));
                 }
                 /* Consent/authentication activity before ARM grants no input and
                  * is discarded. ARM separately requires every key released. */
@@ -207,7 +222,7 @@ static int held_state(void) {
             if (code >= BTN_MISC) categories |= device_categories[i] & CATEGORY_POINTER;
         }
         if (any) {
-            calibration_note(categories, now_ms());
+            calibration_note_kind(categories, now_ms(), 'H');
             held = true;
         }
     }
@@ -219,6 +234,8 @@ static int held_state(void) {
 }
 static int calibration_tick(long long current) {
     if (!calibrating) return 0;
+    calibration_pending_input = calibration_pending_topology = calibration_pending_owner = false;
+    calibration_quiet_reason = 'M';
     int held = held_state();
     if (held < 0 || current < 0) return -1;
     if (calibration_reset_pending) {
@@ -237,9 +254,11 @@ static int calibration_tick(long long current) {
         calibration_time = calibration_last_activity = now_ms();
         if (calibration_time < 0) return -1;
         calibration_reset_pending = false;
+        calibration_last_kind = 'N';
         calibration_diag.quiet_blocked = false;
         return send(CONTROL, "CALIBRATION_RESET\n", 18, MSG_NOSIGNAL | MSG_DONTWAIT) == 18 ? 0 : -1;
     }
+    calibration_quiet_reason = held ? 'H' : calibration_seen != (CATEGORY_KEYBOARD | CATEGORY_POINTER) ? 'M' : current - calibration_last_activity < CALIBRATION_QUIET_MS ? 'R' : 'Y';
     calibration_diag.quiet_blocked = !held &&
         calibration_seen == (CATEGORY_KEYBOARD | CATEGORY_POINTER) &&
         current - calibration_last_activity < CALIBRATION_QUIET_MS;
@@ -250,7 +269,13 @@ static int calibration_tick(long long current) {
         boundary[i] = (struct pollfd){4 + i, POLLIN, 0};
     int pending = poll(boundary, device_count + 2, 0);
     if (pending < 0) return -1;
-    if (pending) { calibration_diag.quiet_blocked = true; return 0; }
+    if (pending) {
+        calibration_quiet_reason = 'Q';
+        for (int i = 0; i < device_count; ++i) calibration_pending_input |= boundary[i].revents != 0;
+        calibration_pending_topology = boundary[device_count].revents != 0;
+        calibration_pending_owner = boundary[device_count + 1].revents != 0;
+        calibration_diag.quiet_blocked = true; return 0;
+    }
 #ifdef LDC_NATIVE_WATCH
     if (!session_watch_ok()) return -1;
 #endif
@@ -265,7 +290,7 @@ static int command(const char *line) {
     if (!strcmp(line, "REPORT")) {
         collector_phase = 28;
         if (armed || (!calibrating && !calibrated)) return -1;
-        char response[] = "CAL_DIAG_00000000\n";
+        char response[] = "CAL_DIAG_00000000\nCAL_IDLE_NNM000\n";
         bool bits[8] = {
             (calibration_seen & CATEGORY_KEYBOARD) != 0,
             (calibration_seen & CATEGORY_POINTER) != 0,
@@ -274,6 +299,12 @@ static int command(const char *line) {
             calibration_diag.quiet_blocked, calibration_diag.stale_timestamp
         };
         for (unsigned i = 0; i < 8; ++i) response[9 + i] = bits[i] ? '1' : '0';
+        response[27] = calibration_last_kind;
+        response[28] = calibration_last_kind == 'N' ? 'N' : current - calibration_last_activity < CALIBRATION_QUIET_MS ? 'R' : 'S';
+        response[29] = calibration_quiet_reason;
+        response[30] = calibration_pending_input ? '1' : '0';
+        response[31] = calibration_pending_topology ? '1' : '0';
+        response[32] = calibration_pending_owner ? '1' : '0';
         collector_phase = 27;
         if (report(response)) return -1;
         calibrating = calibrated = false;
@@ -291,6 +322,8 @@ static int command(const char *line) {
         calibration_reset_rounds = 0;
         memset(calibration_resync, 0, sizeof calibration_resync);
         memset(&calibration_diag, 0, sizeof calibration_diag);
+        calibration_last_kind = 'N'; calibration_quiet_reason = 'M';
+        calibration_pending_input = calibration_pending_topology = calibration_pending_owner = false;
         calibration_time = calibration_last_activity = now_ms();
         if (calibration_time < 0) return -1;
         calibrating = true;

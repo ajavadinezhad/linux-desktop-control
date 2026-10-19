@@ -1,4 +1,4 @@
-# Optional native activity helper — 0.8.0
+# Optional native activity helper — 0.8.1
 
 This helper stops a consented GNOME desktop session when activity arrives from
 the covered kernel input devices, including activity in the same window. It is
@@ -82,3 +82,36 @@ Before arming, a delayed clock-switch loss marker may trigger bounded resynchron
 Calibration accepts fresh absolute pointer-source samples because those same source records cause cancellation once armed. This proves source delivery, not actual changed position, button delivery, or human identity. The pre-arm quiet period is1.5seconds; afterARM there is no grace. Terminal activity category is only key/button, pointer, switch, metadata or held-state, with no raw codes or coordinates.
 
 The backend can request a passive readiness notice from the existing GNOME notification service after portal consent and CALIBRATING. It uses fixed text, no actions or service activation, and bounded local calls. Requested visibility is not proof of display. An acknowledged or uncertain notice must be resolved before ARM; failed or unknown closure refuses control. This status UI does not capture the desktop or launch/focus a task application.
+
+
+Terminal quiet diagnostics (helper package 0.8.1)
+
+REPORT still closes every raw input descriptor before exporting anything. Its
+first line remains the unchanged `CAL_DIAG_` plus eight literal bits. It appends
+`CAL_IDLE_<kind><age><reason><input><topology><owner>\n` in the same single
+34-byte report. Old controllers may consume only the first line. Neither line
+establishes calibration success or permits ARM.
+
+The fixed kind alphabet is N none, H held, K key/button, R nonzero relative,
+Z zero relative, A absolute, S switch, C clock metadata, M other metadata.
+Age is N none, R recent (less than the existing 1500 ms quiet requirement), or
+S settled. Reason is M missing category, H held, R recent activity, Q queued
+boundary, or Y ready. The final three literal bits identify pending input,
+topology and owner queues at the last quiet check. These are cached coarse
+states, not event logs; no key codes, values, coordinates, source identities,
+counts or timestamps are exported. Clock metadata classification inspects only
+the fixed event type/code internally. Relative classification inspects zero
+versus nonzero internally; that value is never exported.
+
+The added fields do not change quiet, calibration, source selection, ARM or
+armed cancellation behavior. Metadata and zero relative records still prevent
+quiet. They explain conservative refusal rather than filter it. A pending
+queue can produce the same old quiet-blocked bit as recent metadata. The eight
+old bits alone cannot distinguish those causes. A last-kind diagnostic does
+not prove a human action or identify which physical device caused activity.
+
+`test_quiet_diagnostics.py` includes the production collector in a synthetic
+fixture. It distinguishes clock metadata, zero relative records, and each
+pending queue class; verifies raw-descriptor closure before the combined report;
+and retains armed cancellation for key, relative, absolute, switch and metadata
+records. It opens no input device and does not establish live physical coverage.

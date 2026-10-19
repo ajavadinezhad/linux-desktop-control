@@ -1,4 +1,4 @@
-# Private review status — 0.8.4 candidate
+# Private review status — 0.8.5 candidate
 
 The 0.7.6 same-window typing acceptance failed: the human confirmed a key during typing, but 1719 characters completed before the 15-second deadline. The Clutter filter path is not used by the new backend. Dragging was not run on that failed detector.
 
@@ -37,3 +37,12 @@ A fresh actual tool provider confirmed0.8.3 build862986851f00064dac6c657d99053a7
 The fresh 0.8.4 audit repaired focus metadata injection, late/cancelled ARM acceptance, loss of unresolved held-input tracking, overlapping cleanup and stale observer callbacks, cursor startup cancellation, duplicate pending request cancellation ownership, and restart admission with old resources attached. Session cancellation events are renewed per consent session; callbacks can stop their own session before waiting on response locks, without cancelling a replacement. The complete 304-test Python suite, eight native fixtures and the real five-tool loader pass. The installed native binary matches its existing 0.8.0 package. Version 0.8.4 is installed. These fixes do not convert the failed/unverified physical typing and drag tests into passes; see SCENARIO_AUDIT.md for scope and release blockers.
 
 Live 0.8.4 progress: keyboard and pointer category calibration passed, the native helper armed, and a fresh screenshot was inspected. One intentional Super transition completed. The selected display was the 3440×1440 screen at horizontal offset 1920; GNOME overview was fenced to the primary 1920×1200 display at origin 0. With no safe target intersection, the operator closed sharing before any application launch, click or text. Cleanup confirmed portal closure, no warning, zero held input and helper exit 0. This establishes a successful category-calibration/startup trial, not same-window typing/drag interruption. Earlier wording equating the chat display with the primary monitor was incorrect on this layout. The next live setup must keep the launcher and test application on the selected primary display rather than broaden the safety bounds.
+
+
+## Diagnostic update 0.8.5
+
+The latest primary-display 0.8.4 trial detected both challenged input categories but timed out waiting for quiet. The human confirmed full release and hands off. The final held state was false. No task capture/input occurred; portal closure was confirmed with zero held virtual input and no cleanup warning. This does not identify the cause or establish takeover acceptance.
+
+Version 0.8.5 adds fixed coarse terminal idle diagnostics; helper package 0.8.1 appends a backward-compatible report after closing raw descriptors. No keys, coordinates, device identities or exact event timestamps are exported. Calibration, classifiers, timing and armed cancellation requirements are unchanged. Isolated fixtures reproduce metadata-only and pending-queue quiet blockers, without establishing the live cause.
+
+Verification: 309 Python tests, nine native fixtures and the five-tool loader check pass. Plugin 0.8.5 and helper 0.8.1 are installed. Fresh actual provider reports matching disk sources, closed sharing, capture/input disabled and zero held input. Installed helper/policy bytes match the reviewed package. Live same-window typing and held-button dragging takeover remain unverified; public distribution remains blocked. Source remains private and reuse licensing is deferred.

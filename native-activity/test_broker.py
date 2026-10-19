@@ -103,6 +103,7 @@ int main(void) {
     assert(write(control[1],"HB\n",3)==3);line(control[1],"ALIVE\n");
     assert(write(control[1],"REPORT\n",7)==7);
     line(control[1],"CAL_DIAG_10110000\n");
+    line(control[1],"CAL_IDLE_KRM000\n");
     signal(SIGPIPE,SIG_IGN);
     assert(write(stream[1],&event,sizeof event)==-1 && errno==EPIPE);
     int status;assert(waitpid(child,&status,0)==child);assert(WIFEXITED(status)&&WEXITSTATUS(status)==0);
@@ -135,7 +136,7 @@ int main(void) {
 static int fixture_held_fd = -1, fixture_query_error, fixture_queries, fixture_code = KEY_MAX;
 static int fixture_quiet, fixture_capture;
 static int fixture_fill_budget;
-static char fixture_reply[32];
+static char fixture_reply[128];
 static ssize_t fixture_read(int fd, void *data, size_t size) {
     if (fixture_fill_budget) {
         assert(size % sizeof(struct input_event) == 0);
@@ -387,14 +388,14 @@ int main(void) {
     device_count = 0; calibration_seen = 0;
     memset(&calibration_diag, 0, sizeof calibration_diag);
     assert(command("REPORT") == 3);
-    assert(strcmp(fixture_reply, "CAL_DIAG_00000000\n") == 0);
-    assert(strlen(fixture_reply) == 18); assert(!calibrated && !calibrating);
+    assert(strncmp(fixture_reply, "CAL_DIAG_00000000\n", 18) == 0);
+    assert(strlen(fixture_reply) == 34); assert(!calibrated && !calibrating);
     assert(command("REPORT") == -1); assert(command("ARM") == -1);
     assert(collector_phase == 28);
     calibrating = false; calibrated = true;
     assert(command("REPORT") == 3); /* CALIBRATED raced controller timeout */
     assert(!calibrated && !calibrating);
-    assert(strcmp(fixture_reply, "CAL_DIAG_00000000\n") == 0);
+    assert(strncmp(fixture_reply, "CAL_DIAG_00000000\n", 18) == 0);
     assert(command("ARM") == -1);
     calibrating = true; armed = true; assert(command("REPORT") == -1); armed = false;
     assert(collector_phase == 28);
@@ -411,7 +412,7 @@ int main(void) {
     assert(dup2(terminal_pipe[0], 7) == 7);
     close(terminal_pipe[0]); close(terminal_pipe[1]); device_count = 1;
     assert(command("REPORT") == 3);
-    assert(strcmp(fixture_reply, "CAL_DIAG_11111011\n") == 0);
+    assert(strncmp(fixture_reply, "CAL_DIAG_11111011\n", 18) == 0);
     assert(fcntl(7, F_GETFD) == -1 && errno == EBADF);
     assert(!calibrated && !calibrating); assert(command("ARM") == -1);
     assert(pipe(terminal_pipe)==0);assert(dup2(terminal_pipe[0],7)==7);
