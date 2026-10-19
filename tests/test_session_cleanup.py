@@ -3,7 +3,7 @@ from test_control import m,Fake
 import test_control
 class SessionCleanupTests(unittest.TestCase):
  def test_core_discovery_and_start_require_no_extension(self):
-  self.assertEqual({t['name'] for t in m.tools()},{'desktop_start','desktop_observe','desktop_action','desktop_status','desktop_close'})
+  self.assertEqual({t['name'] for t in m.tools()},{'desktop_start','desktop_observe','desktop_action','desktop_status','desktop_close','desktop_pause','desktop_resume'})
   s=m.Server(Fake);s.call('desktop_start',{});self.assertTrue(s.status()['active']);s.call('desktop_close',{});self.assertFalse(s.status()['active'])
  def test_portal_closes_before_capture_teardown_even_when_pipeline_fails(self):
   d=test_control.Tests.backend(self);d.fd=None;d.closed_sub=None;order=[];orig=d.call

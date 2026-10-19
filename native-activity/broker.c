@@ -32,6 +32,12 @@ static int collector_phase;
 #include "confinement.h"
 #endif
 static bool armed;
+static bool pointer_yield_mode, pointer_yielded, pointer_quiet;
+static bool pointer_strict_coverage, calibration_pointer_stream;
+static unsigned pointer_epoch;
+static long long pointer_last_motion;
+#define POINTER_YIELD_MAX_EPOCH 64
+#define POINTER_QUIET_MS 1500
 static const char *stream_activity_message;
 enum { CATEGORY_KEYBOARD = 1, CATEGORY_POINTER = 2 };
 /* Filled only by the verified opener, not accepted from the requester. */
@@ -139,6 +145,26 @@ static void calibration_note_kind(unsigned categories, long long current, char k
     if (calibrating && !calibration_reset_pending) calibration_last_kind = kind;
     calibration_note(categories, current);
 }
+static int pointer_token(const char *prefix) {
+    char message[32];
+    int length = snprintf(message, sizeof message, "%s_%u\n", prefix, pointer_epoch);
+    if (length <= 0 || (size_t)length >= sizeof message) return -1;
+    return send(CONTROL, message, (size_t)length, MSG_NOSIGNAL | MSG_DONTWAIT) == length ? 0 : -1;
+}
+static bool positional_mouse_motion(int device, const struct input_event *event) {
+    return device >= 0 && device < device_count &&
+        (device_categories[device] & CATEGORY_POINTER) && event->type == EV_REL &&
+        (event->code == REL_X || event->code == REL_Y) && event->value != 0;
+}
+static int pointer_motion(long long current) {
+    if (!pointer_yielded || pointer_quiet) {
+        if (++pointer_epoch > POINTER_YIELD_MAX_EPOCH) return -1;
+        pointer_yielded = true; pointer_quiet = false;
+        if (pointer_token("YIELDED")) return -1;
+    }
+    pointer_last_motion = current;
+    return 0;
+}
 /* Drain with a strict bound: an unbounded producer must not starve control. */
 static int drain(int fd) {
     unsigned consumed = 0, attempts = 0;
@@ -169,6 +195,7 @@ static int drain(int fd) {
                 calibration_reset_pending = true;
                 calibration_resync[device] = true;
                 calibration_seen = 0;
+                calibration_pointer_stream = false;
                 continue;
             }
             if (calibrating && !armed && fd >= 4 && fd < 4 + device_count && calibration_resync[fd - 4]) {
@@ -184,6 +211,10 @@ static int drain(int fd) {
                 if (armed) {
                     long long stamp = (long long)event.time.tv_sec * 1000 + event.time.tv_usec / 1000;
                     if (stamp < arm_time || stamp > now_ms() + 1000) { collector_phase = 45; return -1; }
+                    if (pointer_yield_mode && positional_mouse_motion(fd - 4, &event)) {
+                        if (pointer_motion(now_ms())) return -1;
+                        continue;
+                    }
                     stream_activity_message = activity_message(&event);
                     return 1;
                 }
@@ -192,8 +223,11 @@ static int drain(int fd) {
                     long long stamp = (long long)event.time.tv_sec * 1000 + event.time.tv_usec / 1000;
                     long long current = now_ms();
                     if (current < 0 || stamp > current + 1000) { collector_phase = 45; return -1; }
-                    if (stamp > calibration_time)
+                    if (stamp > calibration_time) {
+                        if (!calibration_reset_pending && positional_mouse_motion(fd - 4, &event))
+                            calibration_pointer_stream = true;
                         calibration_note_kind(event_category(fd - 4, &event), current, calibration_event_kind(&event));
+                    }
                 }
                 /* Consent/authentication activity before ARM grants no input and
                  * is discarded. ARM separately requires every key released. */
@@ -251,6 +285,7 @@ static int calibration_tick(long long current) {
         if (!session_watch_ok()) return -1;
 #endif
         calibration_seen = 0;
+        calibration_pointer_stream = false;
         calibration_time = calibration_last_activity = now_ms();
         if (calibration_time < 0) return -1;
         calibration_reset_pending = false;
@@ -258,12 +293,12 @@ static int calibration_tick(long long current) {
         calibration_diag.quiet_blocked = false;
         return send(CONTROL, "CALIBRATION_RESET\n", 18, MSG_NOSIGNAL | MSG_DONTWAIT) == 18 ? 0 : -1;
     }
-    calibration_quiet_reason = held ? 'H' : calibration_seen != (CATEGORY_KEYBOARD | CATEGORY_POINTER) ? 'M' : current - calibration_last_activity < CALIBRATION_QUIET_MS ? 'R' : 'Y';
+    bool missing = calibration_seen != (CATEGORY_KEYBOARD | CATEGORY_POINTER) || (pointer_strict_coverage && !calibration_pointer_stream);
+    calibration_quiet_reason = held ? 'H' : missing ? 'M' : current - calibration_last_activity < CALIBRATION_QUIET_MS ? 'R' : 'Y';
     calibration_diag.quiet_blocked = !held &&
         calibration_seen == (CATEGORY_KEYBOARD | CATEGORY_POINTER) &&
         current - calibration_last_activity < CALIBRATION_QUIET_MS;
-    if (held || calibration_seen != (CATEGORY_KEYBOARD | CATEGORY_POINTER) ||
-        current - calibration_last_activity < CALIBRATION_QUIET_MS) return 0;
+    if (held || missing || current - calibration_last_activity < CALIBRATION_QUIET_MS) return 0;
     struct pollfd boundary[MAX_DEVICES + 2];
     for (int i = 0; i < device_count + 2; ++i)
         boundary[i] = (struct pollfd){4 + i, POLLIN, 0};
@@ -282,10 +317,65 @@ static int calibration_tick(long long current) {
     calibrating = false; calibrated = true;
     return send(CONTROL, "CALIBRATED\n", 11, MSG_NOSIGNAL | MSG_DONTWAIT) == 11 ? 0 : -1;
 }
+static int pointer_boundary(void) {
+    if (held_state() != 0) return -1;
+    struct pollfd boundary[MAX_DEVICES + 2];
+    for (int i = 0; i < device_count + 2; ++i)
+        boundary[i] = (struct pollfd){4 + i, POLLIN, 0};
+    if (poll(boundary, device_count + 2, 0) != 0) return -1;
+#ifdef LDC_NATIVE_WATCH
+    if (!session_watch_ok()) return -1;
+#endif
+    return 0;
+}
+static int pointer_yield_tick(long long current) {
+    if (!pointer_yielded || pointer_quiet) return 0;
+    if (current < pointer_last_motion) return -1;
+    if (current - pointer_last_motion < POINTER_QUIET_MS) return 0;
+    /* A busy source is not proof of quiet. Main loop drains it first. */
+    if (held_state() != 0) return -1;
+    struct pollfd boundary[MAX_DEVICES + 2];
+    for (int i = 0; i < device_count + 2; ++i)
+        boundary[i] = (struct pollfd){4 + i, POLLIN, 0};
+    int pending = poll(boundary, device_count + 2, 0);
+    if (pending < 0) return -1;
+    if (pending) return 0;
+#ifdef LDC_NATIVE_WATCH
+    if (!session_watch_ok()) return -1;
+#endif
+    pointer_quiet = true;
+    return pointer_token("QUIET");
+}
 static int command(const char *line) {
     long long current = now_ms();
     if (current < 0) return -1;
     if (!strcmp(line, "CLOSE")) return 2;
+    if (!strcmp(line, "MODEYIELD") || !strcmp(line, "MODEYIELD2")) {
+        if (pointer_yield_mode || armed || calibrating || calibrated) return -1;
+        pointer_yield_mode = true;
+        pointer_strict_coverage = !strcmp(line, "MODEYIELD2");
+        const char *reply = pointer_strict_coverage ? "MODEYIELD2_OK\n" : "MODEYIELD_OK\n";
+        size_t length = strlen(reply);
+        return send(CONTROL,reply,length,MSG_NOSIGNAL | MSG_DONTWAIT) == (ssize_t)length ? 0 : -1;
+    }
+    if (!strncmp(line, "RESUME_", 7)) {
+        const char *epoch = line + 7; unsigned value = 0;
+        if (!*epoch || *epoch == '0') return -1;
+        for (const char *p = epoch; *p; ++p) {
+            if (*p < '0' || *p > '9' || value > POINTER_YIELD_MAX_EPOCH) return -1;
+            value = value * 10 + (unsigned)(*p - '0');
+        }
+        if (!pointer_yield_mode || !armed || !pointer_yielded || !pointer_quiet || value != pointer_epoch) return -1;
+        if (expiry_phase(current, heartbeat, session_time)) return -1;
+        /* No queued input is discarded to manufacture a successful resume. */
+        if (pointer_boundary()) return -1;
+        /* Snapshot/session queries may cross either existing deadline. */
+        long long resumed_at = now_ms();
+        if (expiry_phase(resumed_at, heartbeat, session_time)) return -1;
+        pointer_yielded = pointer_quiet = false;
+        arm_time = resumed_at;
+        return pointer_token("ARMED");
+    }
     if (!strcmp(line, "FAULT")) return -1; /* opener topology/session loss */
     if (!strcmp(line, "REPORT")) {
         collector_phase = 28;
@@ -318,6 +408,7 @@ static int command(const char *line) {
         for (int i = 0; i < device_count; ++i) if (drain(4 + i)) return -1;
         if (held_state() != 0) return -1;
         calibration_seen = 0;
+        calibration_pointer_stream = false;
         calibration_reset_pending = false;
         calibration_reset_rounds = 0;
         memset(calibration_resync, 0, sizeof calibration_resync);
@@ -330,7 +421,8 @@ static int command(const char *line) {
         return send(CONTROL, "CALIBRATING\n", 12, MSG_NOSIGNAL | MSG_DONTWAIT) == 12 ? 0 : -1;
     }
     if (!strcmp(line, "ARM")) {
-        if (armed || calibrating || calibration_reset_pending || !calibrated) return -1;
+        if (armed || calibrating || calibration_reset_pending || !calibrated ||
+            (pointer_strict_coverage && !calibration_pointer_stream)) return -1;
         for (int i = 0; i < device_count; ++i) if (calibration_resync[i]) return -1;
 #ifdef LDC_NATIVE_WATCH
         if (!session_watch_ok()) return -1;
@@ -371,7 +463,7 @@ static int feed_control(const char *data, size_t length) {
             int result = command(control_line);
             if (result) return result;
         } else {
-            if (c < 'A' || c > 'Z' || control_used >= sizeof control_line - 1) return -1;
+            if (!((c >= 'A' && c <= 'Z') || c == '_' || (c >= '0' && c <= '9')) || control_used >= sizeof control_line - 1) return -1;
             control_line[control_used++] = (char)c;
         }
     }
@@ -496,6 +588,7 @@ int main(int argc, char **argv) {
         }
         collector_phase = 30;
         if (calibration_tick(now_ms())) return fail();
+        if (pointer_yield_tick(now_ms())) return fail();
         collector_phase = 29;
         if (fds[0].revents & (POLLERR | POLLHUP | POLLNVAL)) return fail();
         if (fds[0].revents & POLLIN) {

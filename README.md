@@ -1,8 +1,8 @@
 # Linux Desktop Control
 
-Version **0.8.0** is a private local MCP integration using GNOME Wayland's public desktop portal. It is an independent project, not an official OpenAI product.
+Candidate version **0.8.9** is a private local MCP integration using GNOME Wayland's public desktop portal. It is an independent project, not an official OpenAI product.
 
-Five tools: `desktop_start`, `desktop_observe`, `desktop_action`, `desktop_status`, `desktop_close`. The final tool releases session resources. Each new session needs personal GNOME monitor/keyboard/pointer consent. GNOME's native sharing control remains available independently.
+Seven tools: `desktop_start`, `desktop_observe`, `desktop_action`, `desktop_status`, `desktop_pause`, `desktop_resume`, `desktop_close`. The final tool releases session resources. Each new session needs personal GNOME monitor/keyboard/pointer consent. GNOME's native sharing control remains available independently.
 
 The read-only GNOME observer extension displays **Mouse is being controlled by ChatGPT** below the pointer while the assistant session is active. It is passive, non-focusable and untracked by the Shell input-region/workarea manager. It disappears on closure, disconnection, lease expiry or disable. It never moves or hides the cursor, injects input or registers shortcuts. The backend never enables the failed extension input-filter candidate. Optional native activity monitoring is described below. An optional opt-in changes the actual Xcursor pixels to a glow theme for the active session; it temporarily affects the desktop-wide cursor preference and custom application cursors may ignore it. A separate watchdog restores the original preference on cleanup or owner loss and preserves a later user choice. It draws no ring or duplicate cursor. See [cursor glow](docs/CURSOR_GLOW.md).
 
@@ -20,11 +20,19 @@ After uncertain input, obtain and inspect `desktop_observe` and pass its recover
 
 Call `desktop_close` on completion or error and check `portal_closed_confirmed` and `cleanup_warning`. Cancellation, client disconnection, process termination and idle expiry also close the session. Portal closure is attempted before bounded capture teardown. Blocking OS calls can still delay cleanup; use GNOME's native sharing control if closure cannot be confirmed. The portal does not reliably distinguish human from synthetic input. With default settings, moving the physical mouse alone is not an automatic cancellation signal.
 
+## Retained sharing and mouse return
+
+Default interruptions still close sharing. With explicit authorization, start a new native-protected session with `physical_takeover=true`, `interruption_policy="retain-sharing"`, and `pointer_motion_return=true`. Covered nonzero relative mouse motion pauses input, releases virtual held input and stops backend capture while preserving the existing portal consent. After 1.5 seconds of observed quiet, the backend can make one verified relative return to the last confirmed assistant point in the same foreground and monitor layout, then take a fresh screenshot. It never replays the interrupted action or queued work.
+
+A missing confirmed point, changed foreground or pointer outside the shared monitor keeps control paused. `desktop_pause` provides a manual pause under retained-sharing policy; `desktop_resume(pause_id=...)` requires the current status token and returns a fresh image and new observation tokens. Inspect a new `desktop_observe` result after automatic return before deciding the next action. Keys, buttons, wheel/absolute/unknown activity, native faults, endpoint mismatch, lock, privacy Stop, revocation, topology changes, disconnection and expiry remain terminal. Only covered `REL_X`/`REL_Y` motion yields; this is not universal pointer support or human-provenance proof. The original 120-second native lease is never extended.
+
+Installed 0.8.8/helper 0.8.2 failed the third live mouse-return trial: the human confirmed movement, but no native motion yield arrived. Candidate 0.8.9/helper 0.8.3 requires strict streamed REL_X/REL_Y calibration through MODEYIELD2 before activation. This prevents weaker activation; it does not repair event delivery. Plugin 0.8.9/helper 0.8.3 are installed and reviewed runtime files match. A fresh actual 0.8.9 provider reports the expected build, matching disk sources, seven tools, closed sharing and zero held input. Live automatic return remains failed/unresolved pending event-delivery evidence. See [strict coverage](docs/STRICT_RELATIVE_COVERAGE.md). See [retained-sharing contract](docs/RETAINED_SHARING.md).
+
 ## Verify
 
 [Live 0.7.5 evidence](docs/LIVE_0_7_5.md) records the native dialog save/reopen workflow, actual themed glow/restoration and a human-confirmed Alt+Tab during a guarded wait.
 
-`/usr/bin/python3 -m unittest discover -s tests` checks input validation, release/cancellation/disconnect behavior, fresh capture recovery, target identity and uncertain-input reconciliation without sharing. `python3 tests/check_loader.py` checks the real app loader and all five schemas in a temporary Codex home. The indicator bridge has isolated transport tests; current live outcomes and remaining acceptance gaps are documented in docs/RELEASE_STATUS.md. Do not run a headless GNOME compositor on a live user manager: it can change activation display settings even with a private D-Bus bus. Use a separate test environment for graphical tests.
+`/usr/bin/python3 -m unittest discover -s tests` checks input validation, release/cancellation/disconnect behavior, fresh capture recovery, target identity and uncertain-input reconciliation without sharing. `python3 tests/check_loader.py` checks the real app loader and all seven schemas in a temporary Codex home. The indicator bridge has isolated transport tests; current live outcomes and remaining acceptance gaps are documented in docs/RELEASE_STATUS.md. Do not run a headless GNOME compositor on a live user manager: it can change activation display settings even with a private D-Bus bus. Use a separate test environment for graphical tests.
 
 Source remains private; reuse licensing is deferred. No compensation or distribution terms are assigned. See docs/LICENSING_REVIEW.md.
 
