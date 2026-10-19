@@ -1,9 +1,15 @@
-# Private review status — 0.8.11 candidate
+# Private review status — 0.8.12 installed
 
 Prior installed baseline: 0.8.7;333 automated tests passed. Live scaled targeting, human-confirmed same-window typing interruption and human-confirmed drag interruption with button release have scoped acceptance on this host. Typing used native held-input detection; dragging used the pointer-endpoint guard. Native pointer-only detection remains unverified. Sharing is closed with zero held input. Source remains private and reuse licensing is deferred.
 
 
-## Current candidate: post-ARM readiness gate
+## Current candidate: bounded authorization-release settling
+
+Plugin 0.8.12/helper 0.8.5 are installed successfully; all 14 reviewed plugin files match canonical source. The frozen full suite passed 419 Python tests in 19.613 seconds and 18 native fixtures in 15.478 seconds. Loader/schema discovery exposes all seven tools and skill validation passes. A synthetic auth-held CALIBRATE fixture reproduced READY/MODEYIELD2 acknowledgement followed by FAULT exit146. The helper now waits at most five seconds for released input plus clean primary/topology/owner queues before fresh CALIBRATING. The adapter waits at most six seconds, maintaining heartbeat, cancellation, authority and the original lease. No challenge notice, calibration credit, capture or input is allowed during `settling`. Strict relative calibration and retained post-ARM readiness are unchanged.
+
+This is a bounded startup-race fix, not proof of the unique previous live failure or a mouse-delivery repair. Live event delivery and automatic cursor return remain unresolved. No new live trial is included. See [settling scope](CALIBRATION_RELEASE_SETTLING.md).
+
+## Prior installed baseline: post-ARM readiness gate
 
 Private candidate plugin 0.8.11 is installed; the helper remains unchanged at 0.8.4, with no helper installation or permission change. Reviewed runtime files match canonical source. Retained MODEYIELD2 sessions keep native ready/capture/input false after initial ARM until a separate bounded mouse-only YIELDED/QUIET/RESUME/ARMED exchange and known notice closure succeed. Default close-policy startup is unchanged. Read-only startup snapshots distinguish calibration from post-ARM stages and show only coarse remaining seconds. The server additionally refuses missing/false proof before finish_start, around startup capture and before image publication.
 
@@ -133,3 +139,5 @@ A fresh actual 0.8.10 provider verified the expected build, matching disk source
 
 
 A fresh actual 0.8.11 provider verified build `d9365aaf2ec194b81bb855405f8737bbb3a2e813779550309bc88fd17acf0eb9`, matching disk sources and all seven tools, with sharing closed, zero held input and capture/input disabled. All 411 Python tests, 16 native fixtures, loader/schema discovery and skill validation pass. No new live trial was performed; mouse-event delivery and automatic return remain unresolved.
+
+A fresh actual 0.8.12 provider verified build `cd15c911aab846b0e04cbdddd8b845bddd7439211b779bd9dd492ebd58c7b249`, matching disk sources and all seven tools, with the portal closed, zero held input and capture/input disabled. Installed helper 0.8.5 binary and policy hashes match the reviewed package. This read-only verification is not live event-delivery or automatic-return acceptance; no new sharing trial was performed.

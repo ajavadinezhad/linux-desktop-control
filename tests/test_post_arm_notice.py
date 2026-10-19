@@ -106,4 +106,11 @@ class PostArmSnapshotTests(unittest.TestCase):
   s.physical_takeover=False;s.backend.operation_cancelled=m.threading.Event();s.backend.operation_cancelled.set()
   self.assertFalse(s.status()['input_allowed']);self.assertEqual(s.state,'active')
 
+ def test_settling_is_distinct_and_never_authorizes_challenge_or_control(self):
+  s=self.server(calibration_state='settling',calibration_verified=False,post_arm_state='not-started',notice_phase='calibration',notice_requested=False,notice_acknowledged=False,notice_active=False)
+  snapshot=s.startup_status_snapshot();native=snapshot['native_activity']
+  self.assertEqual(native['calibration_state'],'settling');self.assertFalse(native['calibration_verified']);self.assertFalse(native['post_arm_verified'])
+  self.assertFalse(native['calibration_notice']['requested']);self.assertFalse(native['calibration_notice']['request_acknowledged'])
+  self.assertFalse(snapshot['active']);self.assertFalse(snapshot['capture_allowed']);self.assertFalse(snapshot['input_allowed']);self.assertEqual(s.state,'opening')
+
 if __name__=='__main__':unittest.main()

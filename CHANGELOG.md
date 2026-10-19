@@ -1,5 +1,14 @@
 # Changes
 
+## 0.8.12 — bounded authorization-release settling
+
+- Installed plugin 0.8.12/helper 0.8.5; all 14 reviewed plugin files match. Frozen verification passes 419 Python tests, 18 native fixtures, seven-tool loader/schema discovery and skill validation. No new live trial.
+
+- Helper 0.8.5 waits at most five seconds for held authorization input to release and source queues to drain before CALIBRATING. Drained authorization events grant no calibration credit.
+- The controller waits at most six seconds with heartbeat, cancellation and original-lease checks; read-only startup status exposes `settling` without capture/input or challenge notice.
+- Strict MODEYIELD2 calibration and retained post-ARM readiness remain unchanged. This fixes a reproduced startup race, not the unresolved live event-delivery cause or automatic-return behavior.
+
+
 ## 0.8.11 candidate
 
 - Frozen offline verification: 411 Python tests, 16 native fixtures, real seven-tool loader/schema discovery and skill validation pass; this is not physical delivery acceptance.

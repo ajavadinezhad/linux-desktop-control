@@ -43,7 +43,9 @@ static const char *stream_activity_message;
 enum { CATEGORY_KEYBOARD = 1, CATEGORY_POINTER = 2 };
 /* Filled only by the verified opener, not accepted from the requester. */
 static unsigned device_categories[MAX_DEVICES];
-static bool calibrating, calibrated;
+static bool calibrating, calibrated, calibration_release_pending;
+static long long calibration_release_deadline;
+#define CALIBRATION_RELEASE_MS 5000
 static unsigned calibration_seen;
 static long long calibration_time, calibration_last_activity;
 static bool calibration_resync[MAX_DEVICES], calibration_reset_pending;
@@ -329,6 +331,45 @@ static int calibration_tick(long long current) {
     calibrating = false; calibrated = true;
     return send(CONTROL, "CALIBRATED\n", 11, MSG_NOSIGNAL | MSG_DONTWAIT) == 11 ? 0 : -1;
 }
+static int calibration_begin(void) {
+    calibration_release_pending = false;
+    calibration_seen = 0;
+    calibration_pointer_stream = false;
+    calibration_reset_pending = false;
+    calibration_reset_rounds = 0;
+    memset(calibration_resync, 0, sizeof calibration_resync);
+    memset(&calibration_diag, 0, sizeof calibration_diag);
+    calibration_last_kind = 'N'; calibration_quiet_reason = 'M';
+    calibration_pending_input = calibration_pending_topology = calibration_pending_owner = false;
+    calibration_time = calibration_last_activity = now_ms();
+    if (calibration_time < 0) return -1;
+    calibrating = true;
+    return send(CONTROL, "CALIBRATING\n", 12, MSG_NOSIGNAL | MSG_DONTWAIT) == 12 ? 0 : -1;
+}
+static int calibration_release_tick(long long current) {
+    if (!calibration_release_pending) return 0;
+    if (current < 0 || current >= calibration_release_deadline) { collector_phase = 48; return -1; }
+    /* Authentication gestures are drained while calibration is still false;
+     * neither their streamed records nor held snapshots earn challenge credit. */
+    for (int i = 0; i < device_count; ++i) if (drain(4 + i)) return -1;
+    int held = held_state();
+    if (held < 0) { collector_phase = 49; return -1; }
+    if (held) return 0;
+    struct pollfd boundary[MAX_DEVICES + 2];
+    for (int i = 0; i < device_count + 2; ++i)
+        boundary[i] = (struct pollfd){4 + i, POLLIN, 0};
+    int pending = poll(boundary, device_count + 2, 0);
+    if (pending < 0) return -1;
+    if (pending) return 0;
+#ifdef LDC_NATIVE_WATCH
+    if (!session_watch_ok()) { collector_phase = 20; return -1; }
+#endif
+    current = now_ms();
+    if (current < 0 || current >= calibration_release_deadline) { collector_phase = 48; return -1; }
+    int expired = expiry_phase(current, heartbeat, session_time);
+    if (expired) { collector_phase = expired; return -1; }
+    return calibration_begin();
+}
 static int pointer_boundary(void) {
     if (held_state() != 0) return -1;
     struct pollfd boundary[MAX_DEVICES + 2];
@@ -363,7 +404,7 @@ static int command(const char *line) {
     if (current < 0) return -1;
     if (!strcmp(line, "CLOSE")) return 2;
     if (!strcmp(line, "MODEYIELD") || !strcmp(line, "MODEYIELD2")) {
-        if (pointer_yield_mode || armed || calibrating || calibrated) return -1;
+        if (pointer_yield_mode || armed || calibrating || calibrated || calibration_release_pending) return -1;
         pointer_yield_mode = true;
         pointer_strict_coverage = !strcmp(line, "MODEYIELD2");
         const char *reply = pointer_strict_coverage ? "MODEYIELD2_OK\n" : "MODEYIELD_OK\n";
@@ -413,27 +454,14 @@ static int command(const char *line) {
         return 3; /* terminal report already closed every source descriptor */
     }
     if (!strcmp(line, "CALIBRATE")) {
-        if (armed || calibrating || calibrated) return -1;
-#ifdef LDC_NATIVE_WATCH
-        if (!session_watch_ok()) return -1;
-#endif
-        for (int i = 0; i < device_count; ++i) if (drain(4 + i)) return -1;
-        if (held_state() != 0) return -1;
-        calibration_seen = 0;
-        calibration_pointer_stream = false;
-        calibration_reset_pending = false;
-        calibration_reset_rounds = 0;
-        memset(calibration_resync, 0, sizeof calibration_resync);
-        memset(&calibration_diag, 0, sizeof calibration_diag);
-        calibration_last_kind = 'N'; calibration_quiet_reason = 'M';
-        calibration_pending_input = calibration_pending_topology = calibration_pending_owner = false;
-        calibration_time = calibration_last_activity = now_ms();
-        if (calibration_time < 0) return -1;
-        calibrating = true;
-        return send(CONTROL, "CALIBRATING\n", 12, MSG_NOSIGNAL | MSG_DONTWAIT) == 12 ? 0 : -1;
+        if (armed || calibrating || calibrated || calibration_release_pending) return -1;
+        calibration_release_pending = true;
+        calibration_release_deadline = current + CALIBRATION_RELEASE_MS;
+        return calibration_release_tick(current);
+
     }
     if (!strcmp(line, "ARM")) {
-        if (armed || calibrating || calibration_reset_pending || !calibrated ||
+        if (armed || calibrating || calibration_release_pending || calibration_reset_pending || !calibrated ||
             (pointer_strict_coverage && !calibration_pointer_stream)) return -1;
         for (int i = 0; i < device_count; ++i) if (calibration_resync[i]) return -1;
 #ifdef LDC_NATIVE_WATCH
@@ -564,6 +592,7 @@ int main(int argc, char **argv) {
         int expired = expiry_phase(current, heartbeat, session_time);
         if (expired) { collector_phase = expired; return fail(); }
         collector_phase = 30;
+        if (calibration_release_tick(current)) return fail();
         if (calibration_tick(current)) return fail();
         if (armed) {
             collector_phase = 31;
@@ -599,6 +628,7 @@ int main(int argc, char **argv) {
             }
         }
         collector_phase = 30;
+        if (calibration_release_tick(now_ms())) return fail();
         if (calibration_tick(now_ms())) return fail();
         if (pointer_yield_tick(now_ms())) return fail();
         collector_phase = 29;
