@@ -1,4 +1,4 @@
-# Private review status — 0.8.5 candidate
+# Private review status — 0.8.6 candidate
 
 The 0.7.6 same-window typing acceptance failed: the human confirmed a key during typing, but 1719 characters completed before the 15-second deadline. The Clutter filter path is not used by the new backend. Dragging was not run on that failed detector.
 
@@ -46,3 +46,13 @@ The latest primary-display 0.8.4 trial detected both challenged input categories
 Version 0.8.5 adds fixed coarse terminal idle diagnostics; helper package 0.8.1 appends a backward-compatible report after closing raw descriptors. No keys, coordinates, device identities or exact event timestamps are exported. Calibration, classifiers, timing and armed cancellation requirements are unchanged. Isolated fixtures reproduce metadata-only and pending-queue quiet blockers, without establishing the live cause.
 
 Verification: 309 Python tests, nine native fixtures and the five-tool loader check pass. Plugin 0.8.5 and helper 0.8.1 are installed. Fresh actual provider reports matching disk sources, closed sharing, capture/input disabled and zero held input. Installed helper/policy bytes match the reviewed package. Live same-window typing and held-button dragging takeover remain unverified; public distribution remains blocked. Source remains private and reuse licensing is deferred.
+
+
+The installed 0.8.5 live trial successfully calibrated both categories, acknowledged ARM and returned an inspected primary-display screenshot (logical1920x1200, pixels3840x2400). A guarded Super transition reached primary overview. A single observed click did not activate the intended editor card; the subsequent foreground frame remained on the other monitor. A pointer endpoint estimate came from a resized preview and is not precise evidence of a scaling defect. The portal contract specifies logical coordinates, matching the current sender. Work stopped before any text or drag; explicit closure confirmed zero held input, no release failures, no cleanup warning and helper exit0. Calibration now has successful live evidence; typing and held-button drag takeover remain unverified. Detailed local evidence: release/LIVE_0_8_5_STARTUP.json (outside the source repository).
+
+
+## Endpoint safety candidate 0.8.6
+
+Pointer dispatch no longer counts as observed arrival. The backend requires two fresh compositor endpoint samples before click/button or scroll effects, after moves, and along held-button drag paths. Missing/invalid/mismatched endpoints cancel without coordinate compensation or replay; held virtual input is released. The 350ms acceptance budget is checked around observer reads; it is not a hard wall-time bound on an in-flight D-Bus call. This adds protection against the observed targeting mismatch but does not fix or establish scaled-display mapping. Status exposes validated stream geometry for the next consented diagnostic. Independent source cross-review found no blocking defect. No new live acceptance is inferred.
+
+Verification of the endpoint safety update: all320 Python regression tests and the real five-tool loader check pass. Version0.8.6 is installed. The native helper remains0.8.1; its nine native fixtures were already passed with no subsequent native code changes. Scaled pointer mapping and real same-window typing/held-button dragging remain open.

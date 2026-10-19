@@ -196,6 +196,11 @@ class FullTransitionTests(unittest.TestCase):
   d.requires_window_guard=True;d.props={'position':(0,0)};d.pipeline=None;d.fd=None;d.closed_sub=None;d.capture=lambda:Fake.capture(d)
   d.status=lambda:{'active':not d.cancelled.is_set() and d.session is not None,'portal_closed_confirmed':getattr(d,'portal_closed',False)}
   d.keysym=lambda key:{'Ctrl':0xffe3,'Shift':0xffe1,'Super':0xffeb,'Return':0xff0d}.get(key,ord(key[0]))
+  original_call=d.call
+  def compositor_call(iface,method,sig,args,**kw):
+   original_call(iface,method,sig,args,**kw)
+   if method=='NotifyPointerMotionAbsolute':b.value['pointer']=list(args[-2:])
+  d.call=compositor_call
   b.value['pointer']=[10,10];s.backend=d;return s,b,d
  def action(self,s,action):
   q={'id':1,'method':'tools/call','params':{'name':'desktop_action','arguments':{'window_observation_id':s.window_record['id'],'focus_transition':True,'action':action}}}

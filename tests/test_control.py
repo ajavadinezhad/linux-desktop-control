@@ -51,7 +51,13 @@ class Tests(unittest.TestCase):
         d=object.__new__(m.Desktop)
         d.lock=threading.RLock(); d.cancelled=threading.Event(); d.session='/test'
         d.node=1;d.width=1920;d.height=1080;d.held=[];d.events=[]
-        d.call=lambda *args,**kw:d.events.append(args)
+        d.observed_pointer=(0.,0.)
+        def compositor_call(*args,**kw):
+            d.events.append(args)
+            if args[1]=='NotifyPointerMotionAbsolute':
+                d.observed_pointer=tuple(args[3][-2:])
+        d.call=compositor_call
+        d.pointer_reader=lambda:d.observed_pointer
         return d
     def test_invalid_numeric_and_key_inputs_emit_no_events(self):
         actions=[{'type':'click','x':1,'y':1,'count':True},
@@ -68,8 +74,9 @@ class Tests(unittest.TestCase):
     def test_drag_releases_after_interruption(self):
         d=self.backend()
         def interrupted_wait(t):
-            d.cancelled.set()
-            raise RuntimeError('closed')
+            if d.held:
+                d.cancelled.set()
+                raise RuntimeError('closed')
         d.wait_interruptibly=interrupted_wait
         with self.assertRaises(RuntimeError): d.action({'type':'drag','path':[[1,1],[20,20]]})
         self.assertFalse(d.held)
@@ -178,7 +185,7 @@ class ReliabilityTests(unittest.TestCase):
         self.assertEqual(d.transaction_info['failed_step'],2)
     def test_smooth_move_has_intermediate_points_and_exact_endpoint(self):
         d=self.backend();d.pointer_position=(10,10);points=[]
-        d.position=lambda x,y:points.append((x,y));d.wait_interruptibly=lambda t:None
+        d.position=lambda x,y:points.append((x,y));d.pointer_reader=lambda:points[-1] if points else (10,10);d.wait_interruptibly=lambda t:None
         d.move_to(100,70,.25)
         self.assertGreater(len(points),5)
         self.assertEqual(points[-1],(100,70))
@@ -195,7 +202,7 @@ class ReliabilityTests(unittest.TestCase):
         d=self.backend();d.pointer_position=(999,999);seen=[]
         d._primitive=lambda a:seen.append(d.pointer_position)
         d.action({'type':'move','x':10,'y':10})
-        self.assertEqual(seen,[None])
+        self.assertEqual(seen,[(0.,0.)])
     def test_wheel_steps_must_be_integer_and_bounded(self):
         d=self.backend()
         for delta in (1.2,51):
@@ -245,7 +252,7 @@ if __name__=='__main__':unittest.main()
 class FreshPointerTests(unittest.TestCase):
  def test_first_move_uses_current_pointer_and_respects_elapsed_time(self):
   from unittest.mock import patch
-  d=Tests().backend();d.pointer_reader=lambda:(100,100);clock=[0.];d.wait_interruptibly=lambda seconds:clock.__setitem__(0,clock[0]+seconds)
+  d=Tests().backend();d.observed_pointer=(100.,100.);clock=[0.];d.wait_interruptibly=lambda seconds:clock.__setitem__(0,clock[0]+seconds)
   with patch.object(m.time,'monotonic',side_effect=lambda:clock[0]):d.action({'type':'move','x':200,'y':100,'seconds':.1})
   points=[e[-1][-2:] for e in d.events if e[1]=='NotifyPointerMotionAbsolute']
   self.assertEqual(points[0],(100.,100.));self.assertEqual(points[-1],(200.,100.));self.assertGreater(len(points),3)
