@@ -8,6 +8,10 @@ The read-only GNOME observer extension displays **Mouse is being controlled by C
 
 Guarded input requires the updated read-only foreground observer (protocol 2); status/cleanup tools remain available without an active observer. `indicator_warning` explicitly reports an unavailable label. Loading a newly installed GNOME extension can require a manual logout/login; the installer never restarts the session. The historical 0.7.1 trial ended safely before browser acceptance; later live 0.7.5 evidence is linked below.
 
+## Current live acceptance — 2026-10-19
+
+Installed 0.8.12/helper 0.8.5 passed a scoped, human-confirmed mouse test on the current host: native motion paused automation while retaining sharing, quiet triggered one return to the confirmed assistant cursor point, and a fresh image verified the unchanged scratch foreground. No click, key or interrupted action was replayed. Sharing closed cleanly. Earlier failed trials remain historical evidence; their unique cause is not established. This does not establish coverage across devices or applications. See [current release status](docs/RELEASE_STATUS.md) and [beta acceptance matrix](docs/BETA_ACCEPTANCE.md). Older candidate notes below describe their state at the time.
+
 ## Authorization-release settling candidate
 
 Installed plugin 0.8.12/helper 0.8.5 bounds a reproduced startup race: authorization input still held when CALIBRATE arrives is drained without credit, with at most five seconds to reach a released, clean boundary. The controller allows six seconds for the actual CALIBRATING acknowledgement while maintaining cancellation, heartbeat and the original lease. Startup `settling` grants no cue, calibration credit, capture or input. Strict relative calibration and the separate post-ARM gate remain unchanged. This repairs startup fragility; missing live mouse delivery and automatic return remain unresolved. See [authorization-release settling](docs/CALIBRATION_RELEASE_SETTLING.md).
