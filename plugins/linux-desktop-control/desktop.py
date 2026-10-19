@@ -17,12 +17,15 @@ import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import Gio, GLib, Gst
 
-VERSION = '0.8.5'
+VERSION = '0.8.6'
 # Freeze identity at module load: old providers must never report a new disk build.
 _build_spec = importlib.util.spec_from_file_location('_desktop_runtime_build', os.path.join(os.path.dirname(__file__), 'runtime_build.py'))
 _runtime_build = importlib.util.module_from_spec(_build_spec)
 _build_spec.loader.exec_module(_runtime_build)
 SERVER_BUILD = _runtime_build.fingerprint(os.path.dirname(__file__))
+_stream_spec = importlib.util.spec_from_file_location('_desktop_stream_metadata', os.path.join(os.path.dirname(__file__), 'stream_metadata.py'))
+_stream_metadata = importlib.util.module_from_spec(_stream_spec)
+_stream_spec.loader.exec_module(_stream_metadata)
 
 def require_current_runtime():
     try:
@@ -187,6 +190,7 @@ class Desktop:
                 'monitor': self.monitor_geometry(),
                 'pid': os.getpid(), 'idle_timeout_seconds': 300,
                 'logical_size': [getattr(self,'width',0), getattr(self,'height',0)],
+                'stream_geometry': _stream_metadata.diagnostic_stream_metadata(getattr(self,'props',{})),
                 'held_input_count':len(getattr(self,'held',[])),
                 'input_release':dict(getattr(self,'release_counts',{'attempted':0,'confirmed':0,'failed':0})),
 
@@ -282,12 +286,39 @@ class Desktop:
         if not all(map(math.isfinite, (x,y))) or not (0 <= x < self.width and 0 <= y < self.height):
             raise ValueError('Position outside logical_size of selected monitor')
         self.notify('NotifyPointerMotionAbsolute', 'udd', self.node, x, y)
-        self.pointer_position=(x,y)
+
+    def confirm_pointer_endpoint(self,x,y):
+        # Dispatch success is not endpoint evidence. Require two independent
+        # compositor snapshots; never infer position from emitted motion events.
+        reader=getattr(self,'pointer_reader',None)
+        if not callable(reader):
+            self.cancelled.set()
+            raise RuntimeError('Fresh compositor pointer observation unavailable; pointer effect refused')
+        deadline=time.monotonic()+.35
+        matched=0
+        while True:
+            self.check()
+            observed=reader()
+            self.check()
+            if (not isinstance(observed,(tuple,list)) or len(observed)!=2 or
+                    not all(isinstance(v,(int,float)) and not isinstance(v,bool) and math.isfinite(v) for v in observed) or
+                    not (0<=observed[0]<self.width and 0<=observed[1]<self.height)):
+                self.cancelled.set()
+                raise RuntimeError('Invalid compositor pointer observation; pointer effect refused')
+            if time.monotonic()>deadline:
+                self.cancelled.set()
+                raise RuntimeError('Pointer endpoint did not match the requested logical point; no retry')
+            matched=matched+1 if abs(observed[0]-x)<=1 and abs(observed[1]-y)<=1 else 0
+            if matched>=2:
+                self.pointer_position=tuple(observed)
+                return
+            self.wait_interruptibly(.016)
 
     def move_to(self,x,y,seconds=.25):
         start=getattr(self,'pointer_position',None)
         if start is None or seconds==0:
             self.position(x,y)
+            self.confirm_pointer_endpoint(x,y)
             return
         deadline=time.monotonic()+seconds
         while True:
@@ -297,6 +328,7 @@ class Desktop:
             self.position(start[0]+(x-start[0])*blend,start[1]+(y-start[1])*blend)
             if t>=1:break
             self.wait_interruptibly(min(.016,max(0,deadline-time.monotonic())))
+        self.confirm_pointer_endpoint(x,y)
 
     def state(self, kind, code, down):
         method = 'NotifyKeyboardKeysym' if kind == 'key' else 'NotifyPointerButton'
@@ -500,11 +532,17 @@ class Desktop:
                     count = int(a.get('count',1))
                     if count not in (1,2,3): raise ValueError('count must be 1..3')
                     for _ in range(count):
+                        self.confirm_pointer_endpoint(a['x'],a['y'])
                         self.state('button',button,True)
                         self.wait_interruptibly(.04)
                         self.state('button',button,False)
                         self.wait_interruptibly(.07)
                 elif kind == 'scroll':
+                    endpoint=(a['x'],a['y']) if 'x' in a else getattr(self,'pointer_position',None)
+                    if endpoint is None:
+                        self.cancelled.set()
+                        raise RuntimeError('Scroll endpoint unavailable; pointer effect refused')
+                    self.confirm_pointer_endpoint(*endpoint)
                     dx, dy = float(a.get('dx',0)), float(a.get('dy',0))
                     if not all(map(math.isfinite,(dx,dy))) or max(abs(dx),abs(dy)) > 2000:
                         raise ValueError('Scroll deltas must be finite and <=2000')
@@ -534,9 +572,11 @@ class Desktop:
                         if not all(isinstance(v,(float,int)) and math.isfinite(v) for v in (x,y)) or not (0<=x<self.width and 0<=y<self.height):
                             raise ValueError('Invalid drag point')
                     self.position(*path[0])
+                    self.confirm_pointer_endpoint(*path[0])
                     self.state('button',272,True)
                     for point in path[1:]:
                         self.position(*point)
+                        self.confirm_pointer_endpoint(*point)
                         self.wait_interruptibly(.02)
                     self.state('button',272,False)
                 elif kind == 'wait':
