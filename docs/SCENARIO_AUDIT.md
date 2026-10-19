@@ -20,10 +20,10 @@ Final verification: **304 Python tests and eight native fixture tests pass**. Th
 
 ## Live acceptance still required
 
-1. Both physical keyboard and pointer categories must calibrate on this host. Latest successful-source diagnostic saw pointer activity but no keyboard activity. The most recent attempt timed out at GNOME consent, before calibration.
+1. Both keyboard and pointer categories calibrated successfully in one consented 0.8.4 trial, followed by ARM and a fresh screenshot. This establishes those challenged source categories at that moment, not every device or reliable takeover. Earlier missing-keyboard evidence remains historical.
 2. A physical key during same-window automated typing must cancel the remaining batch and confirm release/closure. Previous live typing failed; it is not converted into a pass by this audit.
 3. Physical activity during a held-button drag must cancel remaining movement and confirm release/closure.
-4. Real multi-monitor/mixed-DPI behavior remains unverified; coordinate contracts alone do not validate host display compatibility.
+4. A real two-monitor setup exposed a setup limitation: GNOME overview is fenced to the primary display while the shared chat display was secondary. Control was closed before clicking/typing. Select the actual primary launcher display for the next test; do not expand bounds to bypass the guard. Broader multi-monitor/mixed-DPI behavior remains unverified.
 
 ## Explicit coverage limits
 
