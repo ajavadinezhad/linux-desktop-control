@@ -141,3 +141,13 @@ Helper package 0.8.4 is installed and its reviewed payload matches. MODEYIELD2, 
 
 
 A fresh actual 0.8.10 provider verified the expected build, matching disk sources and all seven tools with sharing closed and zero held input; the installed helper hash matches. No new sharing or live event-delivery trial was performed, and the root cause remains unresolved.
+
+
+## Controller post-ARM gate (plugin 0.8.11 candidate; helper unchanged)
+
+The helper remains installed package 0.8.4. The controller alone adds a retained MODEYIELD2 startup gate: after initial ARM it keeps ready false while requesting a fixed mouse-only notice and waiting at most 30 seconds for actual YIELDED/QUIET, then an epoch-matched RESUME/ARMED acknowledgement. The known notice must be closed before activation; unknown closure remains terminal. Initial calibration and the original helper lease still apply. Default close-policy startup is unchanged.
+
+This does not repair source delivery or establish physical provenance. No new helper installation, permission/group/ACL change or grab probe is needed. Plugin 0.8.11 is installed with the same helper 0.8.4; live acceptance is unresolved. See [controller readiness contract](../docs/POST_ARM_READINESS.md).
+
+
+A fresh actual 0.8.11 provider verified build `d9365aaf2ec194b81bb855405f8737bbb3a2e813779550309bc88fd17acf0eb9`, matching disk sources and all seven tools, with sharing closed, zero held input and capture/input disabled. All 411 Python tests, 16 native fixtures, loader/schema discovery and skill validation pass. No new live trial was performed; mouse-event delivery and automatic return remain unresolved.

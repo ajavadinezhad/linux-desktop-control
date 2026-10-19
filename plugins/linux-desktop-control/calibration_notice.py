@@ -1,7 +1,7 @@
 """Passive, fixed-text calibration notice. Importing performs no GI/UI work.
 
-The caller must establish portal consent and CALIBRATING before show(), and
-close before ARM or cleanup. A Notify acknowledgement never proves visibility.
+The caller must establish portal consent and the matching readiness stage
+before show(), then close before activation or cleanup. A Notify acknowledgement never proves visibility.
 Injected call(method, signature, arguments, timeout_ms) must return unpacked
 D-Bus response tuples. No application is launched or activated by this module.
 """
@@ -14,6 +14,9 @@ class CalibrationNotice:
     SUMMARY = 'Desktop control calibration'
     BODY = 'Press and release Shift, move the mouse, then keep your hands still.'
     RESET_BODY = 'Again: press and release Shift, move the mouse, then keep your hands still.'
+    POST_ARM_SUMMARY = 'Desktop control mouse readiness'
+    POST_ARM_BODY = 'Move the mouse briefly, then keep your hands still. Do not press any keys or mouse buttons.'
+    PHASES = ('calibration', 'post-arm-pointer')
     UNAVAILABLE = 'Calibration notice unavailable; follow the chat instructions.'
     CLOSE_WARNING = 'Calibration notice closure could not be confirmed.'
     DELIVERY_WARNING = 'Calibration notice delivery is uncertain; closure cannot be confirmed.'
@@ -25,6 +28,7 @@ class CalibrationNotice:
         self._acknowledged = False
         self._warning = None
         self._delivery_unknown = False
+        self._phase = None
 
     def _release_connection(self):
         connection, self._connection = self._connection, None
@@ -72,16 +76,24 @@ class CalibrationNotice:
         finally:
             timer.cancel()
 
-    def show(self, reset=False):
+    def show(self, reset=False, phase='calibration'):
         if type(reset) is not bool:
             raise ValueError('reset must be boolean')
+        if type(phase) is not str or phase not in self.PHASES:
+            raise ValueError('Unknown readiness notice phase')
+        if phase=='post-arm-pointer' and reset:
+            raise ValueError('Mouse readiness phase does not support reset')
         if self._delivery_unknown:
             self._warning = self.DELIVERY_WARNING
             return False  # Never create another unidentified notice.
+        if phase != self._phase:self._acknowledged = False
+        self._phase = phase
+        summary=self.POST_ARM_SUMMARY if phase=='post-arm-pointer' else self.SUMMARY
+        body=self.POST_ARM_BODY if phase=='post-arm-pointer' else (self.RESET_BODY if reset else self.BODY)
         try:
             reply = self._call('Notify', '(susssasa{sv}i)', (
-                'Desktop control', self._id or 0, '', self.SUMMARY,
-                self.RESET_BODY if reset else self.BODY, [], {}, 30000), 500)
+                'Desktop control', self._id or 0, '', summary,
+                body, [], {}, 30000), 500)
             if (not isinstance(reply, (tuple, list)) or len(reply) != 1 or
                     type(reply[0]) is not int or not 0 < reply[0] <= 0xffffffff):
                 raise RuntimeError('Notification response invalid')
@@ -117,6 +129,7 @@ class CalibrationNotice:
 
     def status(self):
         return {
+            'phase': self._phase,
             'request_acknowledged': self._acknowledged,
             'request_active': self._id is not None,
             'visible_verified': False,

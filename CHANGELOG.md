@@ -1,5 +1,13 @@
 # Changes
 
+## 0.8.11 candidate
+
+- Frozen offline verification: 411 Python tests, 16 native fixtures, real seven-tool loader/schema discovery and skill validation pass; this is not physical delivery acceptance.
+
+- Retained MODEYIELD2 startup requires a separate post-ARM mouse-only YIELDED/QUIET/RESUME/ARMED exchange, bounded by its original 30-second budget and helper lease, before ready/capture/input. Default close policy and helper 0.8.4 remain unchanged.
+- Add fixed allowlisted mouse-only notice, distinct startup stage/verified flag/coarse remaining seconds, per-known-notice bounded cleanup and explicit startup capture/publication checks. No arbitrary notification text/actions, activation or new permissions.
+- Prevent false READY; event-delivery cause and live automatic return remain unresolved. Plugin is installed; no live trial or helper reinstall.
+
 ## 0.8.10 candidate
 
 - Frozen verification: 385 Python tests and 15 native fixtures pass. This is not live event-delivery acceptance.

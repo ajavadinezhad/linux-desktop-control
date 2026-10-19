@@ -17,7 +17,7 @@ import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import Gio, GLib, Gst
 
-VERSION = '0.8.10'
+VERSION = '0.8.11'
 # Freeze identity at module load: old providers must never report a new disk build.
 _build_spec = importlib.util.spec_from_file_location('_desktop_runtime_build', os.path.join(os.path.dirname(__file__), 'runtime_build.py'))
 _runtime_build = importlib.util.module_from_spec(_build_spec)
@@ -841,8 +841,11 @@ class Server:
         raw=self.backend.status() if self.backend else {'active':False,'portal_closed_confirmed':True}
         raw.setdefault('held_input_count',0)
         raw.setdefault('input_release',{'attempted':0,'confirmed':0,'failed':0})
-        active=bool(raw.get('active')) and self.state=='active'
-        if not active and self.state=='active':self.state='closed'
+        native=self.native_activity.status() if self.native_activity is not None else (self.native_activity_last or {'active':False,'supported':False,'raw_device_fds':False})
+        operation=getattr(self.backend,'operation_cancelled',None)
+        active=bool(raw.get('active')) and self.state=='active' and not (operation is not None and operation.is_set())
+        if self.physical_takeover and native.get('active') is not True:active=False
+        if not raw.get('active') and self.state=='active':self.state='closed'
         try:disk_match=_runtime_build.fingerprint(os.path.dirname(__file__))==SERVER_BUILD
         except Exception:disk_match=False
         result=dict(raw,server_version=VERSION,server_build=SERVER_BUILD,server_disk_match=disk_match,active=active,session_state=self.state,
@@ -853,7 +856,6 @@ class Server:
             recovery=self.recovery.snapshot(),fresh_observation_required=not active or self.recovery.inspection_required)
         if not active:result['logical_size']=[0,0]
         if self.target_cleanup_warning:result['accessibility_cleanup_warning']=self.target_cleanup_warning
-        native=self.native_activity.status() if self.native_activity is not None else (self.native_activity_last or {'active':False,'supported':False,'raw_device_fds':False})
         result['native_activity']=native
         result['physical_takeover']={'enabled':self.physical_takeover and native.get('active') is True,'classification':'native-device-source-activity','human_provenance':False}
         if self.physical_takeover_warning:result['physical_takeover_warning']=self.physical_takeover_warning
@@ -1069,14 +1071,32 @@ class Server:
         try:
             if self.state!='opening':return None
             controller=self.native_activity
-            native={'active':False,'calibration_state':'not-started','calibration_verified':False}
+            native={'active':False,'calibration_state':'not-started','calibration_verified':False,
+                'post_arm_required':False,'post_arm_state':'not-started','post_arm_verified':False,
+                'post_arm_remaining_seconds':None,'readiness_stage':'calibration'}
             if controller is not None:
                 state=getattr(controller,'calibration_state','not-started')
                 native['calibration_state']=state if state in ('not-started','waiting','challenge-seen','verified','failed') else 'not-started'
+                native['calibration_verified']=state=='verified' and getattr(controller,'calibration_verified',False) is True
                 native['calibration_resets']=min(2,max(0,getattr(controller,'calibration_resets',0)))
+                required=getattr(controller,'retain_sharing',False) is True
+                phase=getattr(controller,'post_arm_state','not-started')
+                phases=('not-started','waiting-motion','waiting-quiet','resuming','verified','failed')
+                phase=phase if isinstance(phase,str) and phase in phases else 'not-started'
+                native['post_arm_required']=required
+                native['post_arm_state']=phase
+                native['post_arm_verified']=required and phase=='verified' and getattr(controller,'post_arm_verified',False) is True
+                native['readiness_stage']='ready' if native['post_arm_verified'] else ('post-arm-pointer' if required and phase!='not-started' else 'calibration')
+                deadline=getattr(controller,'post_arm_deadline_monotonic',None)
+                if required and phase in ('waiting-motion','waiting-quiet','resuming') and type(deadline) in (int,float) and math.isfinite(deadline):
+                    native['post_arm_remaining_seconds']=min(30,max(0,math.ceil(deadline-time.monotonic())))
+                notice_phase=getattr(controller,'notice_phase','calibration')
+                if notice_phase not in ('calibration','post-arm-pointer'):notice_phase=None
                 native['calibration_notice']={'requested':getattr(controller,'notice_requested',False) is True,
+                    'phase':notice_phase,
                     'request_acknowledged':getattr(controller,'notice_acknowledged',False) is True,
                     'request_active':getattr(controller,'notice_active',False) is True,
+                    'delivery_unknown':getattr(controller,'notice_delivery_unknown',False) is True,
                     'visibility_verified':False}
             return {'server_version':VERSION,'server_build':SERVER_BUILD,
                 'session_state':'opening','active':False,'capture_allowed':False,'input_allowed':False,
@@ -1107,6 +1127,12 @@ class Server:
         spec=importlib.util.spec_from_file_location('desktop_calibration_notice',path)
         module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
 
+    def require_native_ready(self):
+        status=self.native_activity.status() if self.native_activity is not None else {}
+        if status.get('active') is not True:raise RuntimeError('Native activity observer did not arm')
+        if self.interruption_policy=='retain-sharing' and (status.get('post_arm_verified') is not True or status.get('post_arm_state')!='verified'):
+            raise RuntimeError('Post-ARM mouse readiness is unverified; capture and input refused')
+
     def enable_physical_guard(self):
         if self.native_activity is not None:raise RuntimeError('Native activity observer already owned')
         self.guard(('opening','active'))
@@ -1122,7 +1148,7 @@ class Server:
         # Publish ownership atomically with callback invalidation checks.
         self.own_observer('native_activity',controller)
         controller.start()
-        if controller.status().get('active') is not True:raise RuntimeError('Native activity observer did not arm')
+        self.require_native_ready()
         self.guard(('opening','active'))
         self.require_runtime()
         self.physical_takeover=True;self.physical_takeover_warning=None
@@ -1315,7 +1341,10 @@ class Server:
             before=(self.stable_transition_context(deadline) if transition_settle else self.read_window_context()) if required else None
             if expected_window is not None and self.window_guard_module().WindowGuard.signature(before)!=expected_window:raise RuntimeError('Foreground changed after input; session must close')
             self.require_runtime()
-            self.guard(allowed);png=self.backend.capture();self.guard(allowed)
+            self.guard(allowed)
+            if self.state=='opening' and self.physical_takeover:self.require_native_ready()
+            png=self.backend.capture();self.guard(allowed)
+            if self.state=='opening' and self.physical_takeover:self.require_native_ready()
             after=self.read_window_context(max(0,deadline-time.monotonic()) if transition_settle else 0) if required else None
             if not required or self.window_guard_module().WindowGuard.signature(before)==self.window_guard_module().WindowGuard.signature(after):break
             # Only the already-authorized single transition may settle across a
@@ -1324,6 +1353,7 @@ class Server:
             if not transition_settle or attempts>=2 or time.monotonic()>=deadline:raise RuntimeError('Foreground changed while capturing; no image is published')
         with self.state_lock:
             self.guard(allowed)
+            if self.state=='opening' and self.physical_takeover:self.require_native_ready()
             operation=getattr(self.backend,'operation_cancelled',None)
             if operation is not None and operation.is_set():raise RetainedPause('Capture discarded by pause')
             self.state='active'
@@ -1397,6 +1427,7 @@ class Server:
                             self.backend.wait_interruptibly(.2)
                             self.read_window_context(2)
                         self.require_runtime()
+                        self.require_native_ready()
                         self.backend.finish_start()
                     else:
                         self.backend.start();self.show_indicator()
@@ -1540,6 +1571,10 @@ class Server:
     def fence_response(self,request,response):
         content=(response or {}).get('result',{}).get('content',[])
         if any(c.get('type')=='image' for c in content):
+            if request.get('params',{}).get('name')=='desktop_start' and self.physical_takeover:
+                try:self.require_native_ready()
+                except Exception:
+                    return {'jsonrpc':'2.0','id':request.get('id'),'result':self.error_result('Native readiness changed before startup image publication','desktop_start')}
             if self.interruption_policy=='retain-sharing' and self.state in ('pausing','paused'):
                 return {'jsonrpc':'2.0','id':request.get('id'),'result':self.error_result(RetainedPause('Screenshot discarded by pause; no image published'),request.get('params',{}).get('name'))}
             if getattr(self.backend,'requires_window_guard',False):
@@ -1549,10 +1584,10 @@ class Server:
                     name=request.get('params',{}).get('name');self.recovery.observation_id=None
                     if name=='desktop_action':self.recovery.finish(getattr(self.backend,'transaction_info',{}),failed=True)
                     return {'jsonrpc':'2.0','id':request.get('id'),'result':self.error_result('Screenshot invalidated by foreground change; no image published',name)}
-            if request.get('_generation',self.generation)!=self.generation or self.state!='active' or (self.cancel_token and self.cancel_token.is_set()) or (self.backend and self.backend.cancelled.is_set()):
+            if request.get('_generation',self.generation)!=self.generation or self.state!='active' or (self.cancel_token and self.cancel_token.is_set()) or (self.backend and self.backend.cancelled.is_set()) or (getattr(self.backend,'operation_cancelled',None) is not None and self.backend.operation_cancelled.is_set()):
                 name=request.get('params',{}).get('name');self.recovery.observation_id=None;self.target_record=None;self.window_record=None
                 if name=='desktop_action':self.recovery.finish(getattr(self.backend,'transaction_info',{}),failed=True)
-                return {'jsonrpc':'2.0','id':request.get('id'),'result':self.error_result(RetainedPause('Screenshot invalidated by pause; no image published') if self.interruption_policy=='retain-sharing' and self.state in ('pausing','paused') else 'Screenshot invalidated by session closure; no image published',name)}
+                return {'jsonrpc':'2.0','id':request.get('id'),'result':self.error_result(RetainedPause('Screenshot invalidated by pause; no image published') if self.interruption_policy=='retain-sharing' and (self.state in ('pausing','paused') or (getattr(self.backend,'operation_cancelled',None) is not None and self.backend.operation_cancelled.is_set())) else 'Screenshot invalidated by session closure; no image published',name)}
             if getattr(self.backend,'requires_window_guard',False):
                 bridge=self.indicator
                 guard=self.window_guard_module().WindowGuard(bridge,self.window_record['context'],lambda:self.foreground_lost(bridge))
