@@ -1,9 +1,15 @@
-# Private review status — 0.8.9 candidate
+# Private review status — 0.8.10 candidate
 
 Prior installed baseline: 0.8.7;333 automated tests passed. Live scaled targeting, human-confirmed same-window typing interruption and human-confirmed drag interruption with button release have scoped acceptance on this host. Typing used native held-input detection; dragging used the pointer-endpoint guard. Native pointer-only detection remains unverified. Sharing is closed with zero held input. Source remains private and reuse licensing is deferred.
 
 
-## Current candidate: strict relative-motion calibration
+## Current candidate: terminal-only stream evidence
+
+Diagnostic-only plugin 0.8.10/helper package 0.8.4 is installed. Administrator-approved helper installation and the registered-marketplace plugin update succeeded; all 14 plugin files match canonical source, and the helper package/payload matches. Existing foreground extension, cursor assets and desktop settings were not changed. Version 0.8.9/helper 0.8.3 remains the historical strict-activation baseline. Event delivery and live mouse return are still unresolved; a USB/Bluetooth description does not establish source delivery. No new live trial, device permission, ACL, group, grab probe, strict-coverage relaxation or activation fallback is part of this update.
+
+Four optional booleans identify strict calibration credit, any primary record after ARM, eligible relative motion after ARM, and successful YIELDED send. The helper closes raw/lifecycle descriptors before export. The controller runs terminal stop callbacks before a bounded optional read; malformed/missing/late evidence never changes readiness, calibration or the first terminal outcome. Normal CLOSE is best effort: absent detail is valid and an undeliverable optional report does not turn clean helper exit into failure. See [evidence contract and tests](STREAM_COVERAGE_DIAGNOSTICS.md). Frozen verification passes all 385 Python tests and 15 native fixtures. The real seven-tool 0.8.10 loader/schema check, skill validator and package inspection also pass. The package contains exactly two root-owned payloads, no maintainer scripts/service/setuid or permission changes. Reviewed runtime build: `19becab28323df44b67620a0eaae135b3a4a7afa2db4b46350c206c0e53e7a24`. Helper package SHA-256: `6900ec6cfe2f9a6bd003395dde97062a2893daefe2fcdc6f3da0f5bcbc2ce459`. No live result is inferred.
+
+## Prior installed candidate: strict relative-motion calibration
 
 Private candidate plugin 0.8.9/helper package 0.8.3 is installed. Administrator-approved helper installation and the registered-marketplace plugin update succeeded; reviewed runtime files matched. No extension/theme reinstallation or desktop preference change was performed. A fresh actual provider verified version 0.8.9, the expected reviewed build, matching disk sources and seven tools with sharing closed and zero held input. Helper package and payload hashes match 0.8.3. Live mouse event delivery and automatic return remain failed/unresolved; no new live sharing trial was performed. The third installed 0.8.8 trial reached calibration/ARM and the assistant endpoint but observed no native yield before lease expiry. The human later confirmed mouse movement. This is a live mouse-motion coverage failure, with clean portal closure and no held virtual input; it is not automatic-return acceptance.
 
@@ -115,3 +121,6 @@ The native helper did not report pointer activity first; its terminal reason was
 
 
 Human timing confirmation: the human confirmed physical mouse movement while the scratch selection was still growing. This establishes a scoped same-window drag interruption by the endpoint guard with a confirmed virtual-button release. Together with confirmed typing interruption, the requested same-window typing and dragging scenarios have both demonstrated stop-and-cleanup behavior on this host. The mechanisms differ: typing was interrupted by native held-input activity; dragging was interrupted by endpoint mismatch. Native pointer-activity-only cancellation, universal devices/apps, a hard stop-latency bound and final post-stop rendering remain unverified. This is a private candidate with scoped acceptance, not a universal readiness claim.
+
+
+A fresh actual 0.8.10 provider verified the expected build, matching disk sources and all seven tools with sharing closed and zero held input; the installed helper hash matches. No new sharing or live event-delivery trial was performed, and the root cause remains unresolved.

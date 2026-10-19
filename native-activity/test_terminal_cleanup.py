@@ -14,6 +14,7 @@ class TerminalCleanupTests(unittest.TestCase):
 #define _GNU_SOURCE
 #include <systemd/sd-bus.h>
 #include <unistd.h>
+#include <string.h>
 #include <sys/socket.h>
 static int closed_fds[16], closed_count, teardown, processed, reported;
 static int fake_close(int fd){closed_fds[closed_count++]=fd;return 0;}
@@ -26,6 +27,7 @@ static int fake_is_open(sd_bus *b){(void)b;processed++;return 1;}
 static ssize_t fake_send(int fd,const void *p,size_t n,int flags){
  (void)p;(void)flags;
  if(fd!=3||closed_count!=5||closed_fds[0]!=4||closed_fds[1]!=5||closed_fds[2]!=6||closed_fds[3]!=7||closed_fds[4]!=9)return -1;
+ if(n!=23||memcmp(p,"ACTIVITY\nOBS_DIAG_0000\n",23))return -1;
  reported++;return (ssize_t)n;
 }
 #define close fake_close

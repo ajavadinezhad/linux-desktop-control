@@ -1,4 +1,4 @@
-# Optional native activity helper — 0.8.3 candidate
+# Optional native activity helper — 0.8.4 candidate
 
 This helper stops a consented GNOME desktop session when activity arrives from
 the covered kernel input devices, including activity in the same window. It is
@@ -131,3 +131,13 @@ The desktop controller separately invalidates work, releases virtual input and s
 New retained-sharing controllers require MODEYIELD2/MODEYIELD2_OK before calibration and never fall back. Strict mode requires a fresh streamed nonzero REL_X/REL_Y event from a verified pointer source in addition to keyboard credit and the existing released/quiet boundary. Held/button/absolute/other-axis evidence alone cannot establish that route; resynchronization clears strict credit. The legacy broad category diagnostic bits are not proof of the additional requirement. Package 0.8.3 is installed and its reviewed payload matches, but strict relative delivery and automatic return have no live acceptance.
 
 The third installed 0.8.8 trial missed human-confirmed mouse movement despite calibration success; the old broad-calibration/yield-route mismatch is reproduced offline. The stricter contract prevents weak activation but does not repair delivery, identify the user's particular mouse or establish universal coverage. Device permissions, raw-event privacy, privilege drop and the original lease are unchanged. No grab probes or calibration bypasses are introduced. See [strict coverage evidence](../docs/STRICT_RELATIVE_COVERAGE.md).
+
+
+## Terminal-only observation evidence (package 0.8.4 candidate)
+
+The optional fixed OBS_DIAG_4bits line is appended after raw/lifecycle descriptors close. It reports only strict relative calibration credit, any primary record after ARM, eligible relative records after ARM, and successful YIELDED send. It exposes no event contents, coordinates, identities, counts or timestamps. Original CAL_DIAG/CAL_IDLE prefixes remain unchanged. Normal CLOSE sends best effort; unavailable optional evidence does not change clean close. The parser cannot use these booleans as activation authority, and stop callbacks run first.
+
+Helper package 0.8.4 is installed and its reviewed payload matches. MODEYIELD2, its strict calibration route, quiet/held checks, confinement and original lease remain unchanged. Event delivery is unresolved and the update is diagnostic, not a live fix. See [contract and interpretation limits](../docs/STREAM_COVERAGE_DIAGNOSTICS.md).
+
+
+A fresh actual 0.8.10 provider verified the expected build, matching disk sources and all seven tools with sharing closed and zero held input; the installed helper hash matches. No new sharing or live event-delivery trial was performed, and the root cause remains unresolved.
