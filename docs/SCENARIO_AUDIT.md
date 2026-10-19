@@ -63,3 +63,13 @@ Version0.8.7 is installed. Verification:333 Python tests and the five-tool loade
 
 
 Latest installed0.8.7 physical startup trial: pointer calibration credit was observed, keyboard credit was not. Terminal diagnostics reported missing-category, settled relative motion, no held input and no pending input/topology/owner records. This was not an idle-wait blocker. It timed out before mapping construction, capture or task input; no app launch/click/text/drag occurred. Explicit cleanup confirmed closed portal, zero held input and no warning. This does not establish whether the human performed the keyboard challenge, nor a keyboard failure cause. Evidence: adjacent release/LIVE_0_8_7_CALIBRATION_MISSING_KEYBOARD.json. New transport and takeover acceptance remain unverified; no automatic restart.
+
+
+## Live typing takeover — scoped pass
+
+Installed0.8.7 calibrated and armed successfully on primary logical rectangle[0,240,1920,1200], with the DisplayConfig scale2 binding. Guarded relative overview targeting, editor activation and a new unsaved public scratch tab passed; a41-character public cue rendered exactly. No personal document was edited.
+
+A392-character ASCII typing request was interrupted after209 completed characters and423 attempted input events, before its first step completed. The native helper reported activity/held and exited0. No window-loss reason was reported. Explicit cleanup confirmed portal closure, zero held input, one release attempted and confirmed, zero failed releases, and no cleanup warning. The human confirmed a physical letter keypress while text was still growing. This is a scoped successful same-window typing interruption, not universal device coverage or a measured hard stop bound. Final text rendering was not inspected after closure; no replay occurred. Adjacent release evidence:LIVE_0_8_7_TYPING_NATIVE_STOP.json. Held-button drag acceptance is still pending.
+
+
+The first drag startup timed out before capture/input or a virtual button press. The live operator identified a caller-orchestration defect: the initial asynchronous desktop_start wrapper yielded after the default30seconds, so status polling and the human cue arrived near the calibration deadline. No actual drag occurred and a release count inherited from the typing session is not new drag evidence. Explicit cleanup confirmed portal closure, zero held input and no warning. The next explicitly authorized trial must yield desktop_start after one second, promptly poll the independent startup-status lane, and relay waiting/acknowledged readiness immediately; no backend calibration requirement is weakened. Evidence:adjacent release/LIVE_0_8_7_DRAG_CALIBRATION_TIMEOUT.json.
