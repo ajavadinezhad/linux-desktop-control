@@ -34,6 +34,7 @@ static int collector_phase;
 static bool armed;
 static bool pointer_yield_mode, pointer_yielded, pointer_quiet;
 static bool pointer_strict_coverage, calibration_pointer_stream;
+static bool observation_primary_after_arm, observation_relative_after_arm, observation_yield_sent;
 static unsigned pointer_epoch;
 static long long pointer_last_motion;
 #define POINTER_YIELD_MAX_EPOCH 64
@@ -79,8 +80,15 @@ static void close_devices(void) {
 static int report(const char *message) {
     /* Close every input descriptor before reporting a terminal condition. */
     close_devices();
-    ssize_t n = send(CONTROL, message, strlen(message), MSG_NOSIGNAL | MSG_DONTWAIT);
-    return n == (ssize_t)strlen(message) ? 0 : -1;
+    /* Fixed terminal evidence only; raw descriptors are already gone. Neither
+     * these bits nor successful export establishes input authority. */
+    char payload[128];
+    int length = snprintf(payload, sizeof payload, "%sOBS_DIAG_%u%u%u%u\n", message,
+        calibration_pointer_stream ? 1U : 0U, observation_primary_after_arm ? 1U : 0U,
+        observation_relative_after_arm ? 1U : 0U, observation_yield_sent ? 1U : 0U);
+    if (length <= 0 || (size_t)length >= sizeof payload) return -1;
+    ssize_t n = send(CONTROL, payload, (size_t)length, MSG_NOSIGNAL | MSG_DONTWAIT);
+    return n == length ? 0 : -1;
 }
 static int fail(void) { report("FAULT\n"); return 20 + collector_phase; }
 static int count_arg(const char *text) {
@@ -149,7 +157,9 @@ static int pointer_token(const char *prefix) {
     char message[32];
     int length = snprintf(message, sizeof message, "%s_%u\n", prefix, pointer_epoch);
     if (length <= 0 || (size_t)length >= sizeof message) return -1;
-    return send(CONTROL, message, (size_t)length, MSG_NOSIGNAL | MSG_DONTWAIT) == length ? 0 : -1;
+    if (send(CONTROL, message, (size_t)length, MSG_NOSIGNAL | MSG_DONTWAIT) != length) return -1;
+    if (!strcmp(prefix, "YIELDED")) observation_yield_sent = true;
+    return 0;
 }
 static bool positional_mouse_motion(int device, const struct input_event *event) {
     return device >= 0 && device < device_count &&
@@ -180,6 +190,7 @@ static int drain(int fd) {
         consumed += records;
         for (unsigned record = 0; record < records; ++record) {
             struct input_event event = batch[record];
+            if (armed) observation_primary_after_arm = true;
             if (calibrating) {
                 calibration_diag.stream_record = true;
                 long long stamp = (long long)event.time.tv_sec * 1000 + event.time.tv_usec / 1000;
@@ -211,6 +222,7 @@ static int drain(int fd) {
                 if (armed) {
                     long long stamp = (long long)event.time.tv_sec * 1000 + event.time.tv_usec / 1000;
                     if (stamp < arm_time || stamp > now_ms() + 1000) { collector_phase = 45; return -1; }
+                    if (positional_mouse_motion(fd - 4, &event)) observation_relative_after_arm = true;
                     if (pointer_yield_mode && positional_mouse_motion(fd - 4, &event)) {
                         if (pointer_motion(now_ms())) return -1;
                         continue;
@@ -600,7 +612,7 @@ int main(int argc, char **argv) {
             int result = feed_control(data, (size_t)n);
             if (result < 0) return fail();
             if (result == 3) return 0;
-            if (result == 2) { close_devices(); return 0; }
+            if (result == 2) { (void)report(""); return 0; } /* Optional CLOSE detail is best effort. */
         }
     }
 }

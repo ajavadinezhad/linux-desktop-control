@@ -103,7 +103,7 @@ class PointerYieldTests(unittest.TestCase):
     usleep(200000);line(control[1],"QUIET_1\n");assert(write(control[1],"RESUME_1\n",9)==9);line(control[1],"ARMED_1\n");
     usleep(5000);stamp=now_ms();event.time.tv_sec=stamp/1000;event.time.tv_usec=(stamp%1000)*1000;
     event.type=EV_REL;event.code=REL_WHEEL;assert(write(stream[1],&event,sizeof event)==sizeof event);
-    line(control[1],"ACTIVITY_POINTER\n");
+    line(control[1],"ACTIVITY_POINTER\n");line(control[1],"OBS_DIAG_1111\n");
 '''
         source=source[:begin]+sequence+source[end:]
         with tempfile.TemporaryDirectory(prefix='pointer-yield-loop-') as directory:

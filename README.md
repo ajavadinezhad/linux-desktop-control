@@ -1,12 +1,16 @@
 # Linux Desktop Control
 
-Candidate version **0.8.9** is a private local MCP integration using GNOME Wayland's public desktop portal. It is an independent project, not an official OpenAI product.
+Candidate version **0.8.10** is a private local MCP integration using GNOME Wayland's public desktop portal. It is an independent project, not an official OpenAI product.
 
 Seven tools: `desktop_start`, `desktop_observe`, `desktop_action`, `desktop_status`, `desktop_pause`, `desktop_resume`, `desktop_close`. The final tool releases session resources. Each new session needs personal GNOME monitor/keyboard/pointer consent. GNOME's native sharing control remains available independently.
 
 The read-only GNOME observer extension displays **Mouse is being controlled by ChatGPT** below the pointer while the assistant session is active. It is passive, non-focusable and untracked by the Shell input-region/workarea manager. It disappears on closure, disconnection, lease expiry or disable. It never moves or hides the cursor, injects input or registers shortcuts. The backend never enables the failed extension input-filter candidate. Optional native activity monitoring is described below. An optional opt-in changes the actual Xcursor pixels to a glow theme for the active session; it temporarily affects the desktop-wide cursor preference and custom application cursors may ignore it. A separate watchdog restores the original preference on cleanup or owner loss and preserves a later user choice. It draws no ring or duplicate cursor. See [cursor glow](docs/CURSOR_GLOW.md).
 
 Guarded input requires the updated read-only foreground observer (protocol 2); status/cleanup tools remain available without an active observer. `indicator_warning` explicitly reports an unavailable label. Loading a newly installed GNOME extension can require a manual logout/login; the installer never restarts the session. The historical 0.7.1 trial ended safely before browser acceptance; later live 0.7.5 evidence is linked below.
+
+## Diagnostic-only candidate
+
+Candidate 0.8.10/helper 0.8.4 adds four optional terminal booleans showing whether strict relative calibration, a primary record after ARM, an eligible relative record after ARM and a sent yield token were observed. They are exported only after raw descriptors close and cannot enable control. Optional reads never delay cancellation callbacks; missing detail, including normal close, is valid. Plugin 0.8.10/helper 0.8.4 are installed and reviewed files match. Strict MODEYIELD2 activation remains unchanged. USB/Bluetooth hardware type alone does not establish delivery. This is diagnostic evidence, not an event-delivery fix or live automatic-return acceptance. See [terminal stream evidence](docs/STREAM_COVERAGE_DIAGNOSTICS.md).
 
 ## Install
 
@@ -42,3 +46,6 @@ Do not launch/focus apps through command runners before consent. Start sharing, 
 
 
 Optional `desktop_start(physical_takeover=true)` requires a separately installed root-owned native helper. After personal screen-sharing consent, GNOME asks for administrator authorization before screenshots or virtual input begin. The helper receives kernel keyboard/pointer events internally and reduces them to activity/fault signals; raw event payloads and descriptors are never exported to the assistant or desktop backend. It drops privileges, uses a private authenticated channel and watches session/device lifecycle. Default false launches no native monitor and needs no administrator prompt. This is kernel activity classification, not human attestation or atomic priority over already delivered input. See [native helper](native-activity/README.md) and [live status](docs/RELEASE_STATUS.md).
+
+
+A fresh actual 0.8.10 provider verified the expected build, matching disk sources and all seven tools with sharing closed and zero held input; the installed helper hash matches. No new sharing or live event-delivery trial was performed, and the root cause remains unresolved.

@@ -1,11 +1,18 @@
 # Changes
 
+## 0.8.10 candidate
+
+- Frozen verification: 385 Python tests and 15 native fixtures pass. This is not live event-delivery acceptance.
+
+- Add optional terminal-only OBS_DIAG four-boolean evidence after raw/lifecycle descriptor closure. Preserve original report prefixes and first terminal outcome; callbacks precede bounded best-effort parsing. No raw keys/values/coordinates/identities/counts/timestamps are exported.
+- Normal CLOSE diagnostics may be unavailable; failed optional export does not change successful close. Strict MODEYIELD2 activation and lease/input guards remain unchanged. Diagnostic-only candidate is installed and file-matched, but does not repair event delivery or establish live automatic return. No device permission change or grab probe.
+
 ## 0.8.9 candidate
 
 - Verification: 378 Python tests, 14 native fixtures, the real seven-tool loader/schema check and skill validation pass; live automatic return remains blocked/unverified.
 
 - Require MODEYIELD2/strict acknowledgement for retained sharing and fresh streamed nonzero REL_X/REL_Y calibration credit before activation. Held/button/absolute/other-axis evidence alone no longer suffices; resynchronization clears strict credit. No legacy negotiation fallback.
-- Reproduce the prior false-coverage gap offline and record the human-confirmed 0.8.8 live motion-detection failure. This prevents weak activation, not missing event delivery. Candidate is not installed; live automatic return remains blocked/unverified. No new permissions or grab probes.
+- Reproduce the prior false-coverage gap offline and record the human-confirmed 0.8.8 live motion-detection failure. This prevents weak activation, not missing event delivery. This strict-activation safeguard was subsequently installed; live automatic return remains blocked/unverified. No new permissions or grab probes.
 
 ## 0.8.8 candidate
 

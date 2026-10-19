@@ -101,6 +101,8 @@ class Controller:
         self.calibration_late_result = False
         self.calibration_resets = 0
         self.activity_kind = None
+        self.observation_evidence = None
+        self.observation_report_kind = 'not-requested'
         if type(retain_sharing) is not bool:raise ValueError('retain_sharing must be boolean')
         self.retain_sharing=retain_sharing
         self.on_yield=on_yield
@@ -363,6 +365,8 @@ class Controller:
                     self.calibration_evidence={name:bit=='1' for name,bit in zip(names,message[9:])}
                     self.calibration_report_kind='received'
                     self._read_calibration_idle_report(deadline)
+                    if self.calibration_idle_report_kind=='received':
+                        self._read_observation_report(deadline)
                 else:self.calibration_report_kind='malformed'
                 return
         except NativeFailure as error:
@@ -398,6 +402,32 @@ class Controller:
             'owner_pending':message[14]=='1'}
         self.calibration_idle_report_kind='received'
 
+    def _read_observation_report(self,deadline=None):
+        # Optional postmortem only. The collector emits this after closing raw
+        # descriptors. Cancellation callbacks run first; concurrent teardown
+        # may therefore make detail unavailable without changing the outcome.
+        if self.ready or not (self.notified or self.calibration_report_kind=='received'):
+            self.observation_report_kind='request-skipped';return
+        limit=time.monotonic()+.05
+        if deadline is not None:limit=min(limit,deadline)
+        remaining=limit-time.monotonic()
+        if remaining<=0:
+            self.observation_report_kind='timeout';return
+        try:message=self._read(remaining)
+        except (NativeFailure,OSError,RuntimeError,ValueError,StopIteration):
+            self.observation_report_kind='unavailable';return
+        if time.monotonic()>limit:
+            self.observation_report_kind='timeout';return
+        if message is None:
+            self.observation_report_kind='missing';return
+        if (not isinstance(message,str) or len(message)!=13 or
+                not message.startswith('OBS_DIAG_') or any(bit not in '01' for bit in message[9:])):
+            self.observation_report_kind='malformed';return
+        names=('relative_calibration_seen','primary_record_after_arm',
+               'eligible_relative_after_arm','yielded_token_sent')
+        self.observation_evidence={name:bit=='1' for name,bit in zip(names,message[9:])}
+        self.observation_report_kind='received'
+
     def _notify(self, activity=False, error=None, reason='helper-fault'):
         if self.notified or self.stop.is_set():
             return
@@ -412,7 +442,8 @@ class Controller:
             else:
                 self.on_fault(error or 'Native observer fault')
         finally:
-            self.close()
+            try:self._read_observation_report()
+            finally:self.close()
 
     def _consume(self,message):
         if isinstance(message,str) and message.startswith(('YIELDED_','QUIET_','ARMED_')):
@@ -566,6 +597,8 @@ class Controller:
                 'calibration_idle_report_kind':self.calibration_idle_report_kind,
                 'calibration_late_result':self.calibration_late_result,
                 'calibration_resets':self.calibration_resets,'activity_kind':self.activity_kind,
+                'observation_evidence':self.observation_evidence,
+                'observation_report_kind':self.observation_report_kind,
                 'calibration_notice':{'requested':self.notice_requested,'request_acknowledged':self.notice_acknowledged,'request_active':self.notice_active,'delivery_unknown':self.notice_delivery_unknown,'visibility_verified':False,'warning':self.notice_warning},
                 'lease_remaining_is_estimate':True}
 

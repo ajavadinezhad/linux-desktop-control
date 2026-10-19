@@ -103,7 +103,7 @@ int main(void) {
     assert(write(control[1],"HB\n",3)==3);line(control[1],"ALIVE\n");
     assert(write(control[1],"REPORT\n",7)==7);
     line(control[1],"CAL_DIAG_10110000\n");
-    line(control[1],"CAL_IDLE_KRM000\n");
+    line(control[1],"CAL_IDLE_KRM000\n");line(control[1],"OBS_DIAG_0000\n");
     signal(SIGPIPE,SIG_IGN);
     assert(write(stream[1],&event,sizeof event)==-1 && errno==EPIPE);
     int status;assert(waitpid(child,&status,0)==child);assert(WIFEXITED(status)&&WEXITSTATUS(status)==0);
@@ -389,7 +389,7 @@ int main(void) {
     memset(&calibration_diag, 0, sizeof calibration_diag);
     assert(command("REPORT") == 3);
     assert(strncmp(fixture_reply, "CAL_DIAG_00000000\n", 18) == 0);
-    assert(strlen(fixture_reply) == 34); assert(!calibrated && !calibrating);
+    assert(strlen(fixture_reply) == 48); assert(!calibrated && !calibrating);
     assert(command("REPORT") == -1); assert(command("ARM") == -1);
     assert(collector_phase == 28);
     calibrating = false; calibrated = true;
@@ -418,7 +418,7 @@ int main(void) {
     assert(pipe(terminal_pipe)==0);assert(dup2(terminal_pipe[0],7)==7);
     close(terminal_pipe[0]);close(terminal_pipe[1]);
     assert(report("ACTIVITY_HELD\n")==0);
-    assert(strcmp(fixture_reply,"ACTIVITY_HELD\n")==0);
+    assert(strncmp(fixture_reply,"ACTIVITY_HELD\n",14)==0);
     assert(fcntl(7,F_GETFD)==-1 && errno==EBADF);
     calibrating = true; fixture_capture = 0;
     assert(command("REPORT") == -1); assert(collector_phase == 27);

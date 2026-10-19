@@ -67,8 +67,14 @@ int main(void){
     assert(write(control[1],"HB\n",3)==3);line(control[1],"ALIVE\n");
     for(int i=0;i<14;i++){usleep(100000);assert(write(control[1],"HB\n",3)==3);line(control[1],"ALIVE\n");}
     usleep(200000);line(control[1],"CALIBRATED\n");assert(write(control[1],"ARM\n",4)==4);line(control[1],"ARMED\n");
-    assert(write(control[1],"CLOSE\n",6)==6);usleep(50000);
+    assert(write(control[1],"CLOSE\n",6)==6);line(control[1],"OBS_DIAG_1000\n");usleep(50000);
 '''
-        compile_run(source[:begin]+sequence+source[end:],timeout=8)
+        combined=source[:begin]+sequence+source[end:]
+        compile_run(combined,timeout=8)
+        # An undeliverable optional CLOSE diagnostic must not turn clean close
+        # into failure. Run the production main loop with an EPIPE send fixture.
+        missing=combined.replace('return write(fd,p,n);', 'if(n>=9&&!memcmp(p,"OBS_DIAG_",9)){errno=EPIPE;return -1;}return write(fd,p,n);')
+        missing=missing.replace('line(control[1],"OBS_DIAG_1000\\n");','')
+        compile_run(missing,timeout=8)
 
 if __name__=='__main__':unittest.main()

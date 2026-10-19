@@ -48,9 +48,9 @@ int main(void){
    have_event=1;assert(drain(4)==0);assert(calibration_tick(fixture_now)==0);
    assert(calibration_seen==3);assert(!calibrated);assert(calibration_diag.quiet_blocked);assert(!calibration_diag.held_last);
   }
-  closed_mask=0;assert(command("REPORT")==3);assert(strlen(reply)==34);
+  closed_mask=0;assert(command("REPORT")==3);assert(strlen(reply)==48);
   assert(!strncmp(reply,"CAL_DIAG_11111010\n",18));
-  assert(!strcmp(reply+18,scenario?"CAL_IDLE_ZRR000\n":"CAL_IDLE_CRR000\n"));
+  assert(!strncmp(reply+18,scenario?"CAL_IDLE_ZRR000\n":"CAL_IDLE_CRR000\n",16));
  }
  /* Pure SYN/queued-boundary traffic can produce the same quiet bit, without
   * any recent recognized activity or timer reset. */
@@ -58,7 +58,7 @@ int main(void){
   calibrating=true;calibrated=false;calibration_seen=3;calibration_last_activity=1000;fixture_now=31000;pending=mask;
   assert(calibration_tick(fixture_now)==0);assert(!calibrated);assert(calibration_diag.quiet_blocked);
   closed_mask=0;assert(command("REPORT")==3);
-  assert(!strcmp(reply+18,mask==1?"CAL_IDLE_ZSQ100\n":mask==2?"CAL_IDLE_ZSQ010\n":"CAL_IDLE_ZSQ001\n"));
+  assert(!strncmp(reply+18,mask==1?"CAL_IDLE_ZSQ100\n":mask==2?"CAL_IDLE_ZSQ010\n":"CAL_IDLE_ZSQ001\n",16));
  }
  pending=0;calibrating=true;assert(calibration_tick(fixture_now)==0);assert(calibrated);
  /* Diagnostic classification never changes armed cancellation. */
