@@ -11,8 +11,9 @@ class PointerEndpointTests(unittest.TestCase):
         state={'position':(10,10),'reads':0,'clock':100.0}
         def call(*args,**kwargs):
             backend.events.append(args)
-            if args[1]=='NotifyPointerMotionAbsolute':
-                state['position']=mapping(*args[3][-2:])
+            if args[1]=='NotifyPointerMotion':
+                dx,dy=args[3][-2:]
+                state['position']=mapping(state['position'][0]+dx,state['position'][1]+dy)
         def reader():
             state['reads']+=1
             return state['position']
@@ -32,11 +33,10 @@ class PointerEndpointTests(unittest.TestCase):
             backend.action({'type':'click','x':960,'y':580})
         self.assertEqual(self.buttons(backend),[])
         self.assertTrue(backend.cancelled.is_set())
-        motions=[event for event in backend.events if event[1]=='NotifyPointerMotionAbsolute']
+        motions=[event for event in backend.events if event[1]=='NotifyPointerMotion']
         self.assertTrue(motions)
-        # No corrective second-scale attempt: all dispatch remains on the
-        # original smooth path, whose requested endpoint never exceeds target.
-        self.assertTrue(all(event[3][-2]<=960 and event[3][-1]<=580 for event in motions))
+        # The first mismatching displacement is terminal; no correction follows.
+        self.assertLessEqual(len(motions),2)
 
     def test_delayed_endpoint_requires_two_fresh_matching_reads_before_down(self):
         backend,state=self.make();base=backend.pointer_reader
@@ -81,6 +81,34 @@ class PointerEndpointTests(unittest.TestCase):
         backend.pointer_reader=cancelled
         with self.assertRaises(RuntimeError):backend._primitive({'type':'click','x':100,'y':100})
         self.assertEqual(self.buttons(backend),[])
+
+    def test_mapping_guard_missing_or_changed_emits_no_motion(self):
+        for guard in (None,lambda:(_ for _ in ()).throw(RuntimeError('layout changed'))):
+            backend,state=self.make();backend.mapping_guard=guard
+            with self.assertRaises(RuntimeError):backend.position(100,100)
+            self.assertEqual(backend.events,[])
+            self.assertTrue(backend.cancelled.is_set())
+
+    def test_nonzero_monitor_origin_uses_local_delta_not_global_origin(self):
+        from test_window_guard import g as window_guard
+        backend,state=self.make()
+        context={'available':True,'epoch':1,'window_id':'window','kind':'window',
+                 'rect':[0,240,1920,1200],'pointer':[10,250]}
+        geometry={'x':0,'y':240,'width':1920,'height':1200}
+        original=backend.pointer_reader
+        def reader():
+            local=original();context['pointer']=[local[0],local[1]+240]
+            return window_guard.pointer_local(context,geometry)
+        backend.pointer_reader=reader
+        backend.position(960,580)
+        self.assertEqual(backend.events[0][3][-2:],(950.,570.))
+        self.assertEqual(state['position'],(960.,580.))
+        self.assertEqual(len(backend.events),1)
+
+    def test_pointer_outside_selected_monitor_emits_no_motion(self):
+        backend,state=self.make();backend.pointer_reader=lambda:(-5,10)
+        with self.assertRaises(RuntimeError):backend.position(100,100)
+        self.assertEqual(backend.events,[])
 
 
 if __name__=='__main__':unittest.main()

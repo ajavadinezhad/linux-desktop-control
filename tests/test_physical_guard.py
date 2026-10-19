@@ -83,16 +83,21 @@ class PhysicalGuardTests(unittest.TestCase):
   self.assertEqual(e,[])
 
  def test_desktop_deferred_start_never_opens_pipewire_or_captures(self):
+  from test_monitor_mapping import Bus,state
   d=object.__new__(m.Desktop);d.lock=threading.RLock();d.session=None;d.cancelled=threading.Event();events=[]
   d.close=lambda:setattr(d,'session',None)
-  d.bus=SimpleNamespace(signal_subscribe=lambda *a:1,call_with_unix_fd_list_sync=lambda *a:events.append('pipewire'))
+  mapping_bus=Bus(state(scale=1.,origin=(0,0),size=(1920,1080)))
+  def mapping_call(*args):
+   events.append('mapping-read');return mapping_bus.mapping_call(*args)
+  d.bus=SimpleNamespace(signal_subscribe=lambda *a:1,call_with_unix_fd_list_sync=lambda *a:events.append('pipewire'),mapping_call=mapping_call)
   def request(interface,method,*args):
    events.append(method)
    if method=='CreateSession':return {'session_handle':'/fake'}
-   if method=='Start':return {'devices':3,'streams':[(1,{'logical_size':(1920,1080)})]}
+   if method=='Start':return {'devices':3,'streams':[(1,{'position':(0,0),'logical_size':(1920,1080)})]}
    return {}
   d.request=request;d.finish_start=lambda:events.append('capture-start')
   d.start(defer_capture=True);self.assertNotIn('pipewire',events);self.assertNotIn('capture-start',events);self.assertIn('Start',events)
+  self.assertLess(events.index('Start'),events.index('mapping-read'));self.assertTrue(callable(d.mapping_guard))
 
  def test_notice_never_constructed_before_personal_portal_consent(self):
   s,b,e,_=self.make();s.state='opening';s.ensure_backend()

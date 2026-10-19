@@ -17,7 +17,7 @@ import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import Gio, GLib, Gst
 
-VERSION = '0.8.6'
+VERSION = '0.8.7'
 # Freeze identity at module load: old providers must never report a new disk build.
 _build_spec = importlib.util.spec_from_file_location('_desktop_runtime_build', os.path.join(os.path.dirname(__file__), 'runtime_build.py'))
 _runtime_build = importlib.util.module_from_spec(_build_spec)
@@ -51,6 +51,8 @@ class Desktop:
         self.thread = threading.Thread(target=self.loop.run, daemon=True)
         self.thread.start()
         self.session = None
+        self.monitor_mapping = None
+        self.mapping_guard = None
         self.pipeline = None
         self.fd = None
         self.closed_sub = None
@@ -139,6 +141,16 @@ class Desktop:
                 if not size or min(size) <= 0:
                     raise RuntimeError('Portal omitted valid stream dimensions')
                 self.width, self.height = size
+                self.check()
+                require_current_runtime()
+                spec = importlib.util.spec_from_file_location('_desktop_monitor_mapping', os.path.join(os.path.dirname(__file__), 'monitor_mapping.py'))
+                mapping_module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mapping_module)
+                mapping = mapping_module.MonitorMapping(self.bus,self.props)
+                require_current_runtime()
+                self.check()
+                self.monitor_mapping = mapping
+                self.mapping_guard = mapping.check
                 if not defer_capture:self.finish_start()
                 return self.status()
             except BaseException:
@@ -191,6 +203,8 @@ class Desktop:
                 'pid': os.getpid(), 'idle_timeout_seconds': 300,
                 'logical_size': [getattr(self,'width',0), getattr(self,'height',0)],
                 'stream_geometry': _stream_metadata.diagnostic_stream_metadata(getattr(self,'props',{})),
+                'pointer_transport': 'observed-relative',
+                'monitor_mapping': self.monitor_mapping.status() if getattr(self,'monitor_mapping',None) is not None else None,
                 'held_input_count':len(getattr(self,'held',[])),
                 'input_release':dict(getattr(self,'release_counts',{'attempted':0,'confirmed':0,'failed':0})),
 
@@ -265,6 +279,15 @@ class Desktop:
 
     def notify(self, method, sig, *args):
         self.check()
+        mapping_guard=getattr(self,'mapping_guard',None)
+        if not callable(mapping_guard):
+            self.cancelled.set()
+            raise RuntimeError('Verified monitor mapping unavailable; input refused')
+        try:mapping_guard()
+        except BaseException:
+            self.cancelled.set()
+            raise
+        self.check()
         # Keep the approach and modifiers fenced. The one authorized gesture
         # begins only at its activating press, never at motion or key release.
         activating=(method=='NotifyPointerButton' and args[-1]==1) or (method=='NotifyKeyboardKeysym' and args[-1]==1 and args[0] not in (0xffe1,0xffe2,0xffe3,0xffe4,0xffe9,0xffea))
@@ -281,30 +304,43 @@ class Desktop:
             self.transaction_info['input_events_attempted'] += 1
         self.call(RD, method, '(oa{sv}'+sig+')', (self.session, {}, *args))
 
+    def observe_pointer(self):
+        # Both displacement and endpoint evidence need a current, bound display
+        # layout. A missing guard is a refusal, never an unguarded test mode.
+        guard=getattr(self,'mapping_guard',None)
+        reader=getattr(self,'pointer_reader',None)
+        try:
+            if not callable(guard):raise RuntimeError('Display mapping guard unavailable; pointer effect refused')
+            if not callable(reader):raise RuntimeError('Fresh compositor pointer observation unavailable; pointer effect refused')
+            self.check();guard()
+            observed=reader()
+            self.check();guard()
+            if (not isinstance(observed,(tuple,list)) or len(observed)!=2 or
+                    not all(isinstance(v,(int,float)) and not isinstance(v,bool) and math.isfinite(v) for v in observed) or
+                    not (0<=observed[0]<self.width and 0<=observed[1]<self.height)):
+                raise RuntimeError('Invalid compositor pointer observation; pointer effect refused')
+            return tuple(observed)
+        except BaseException:
+            self.cancelled.set()
+            raise
+
     def position(self, x, y):
         x, y = float(x), float(y)
         if not all(map(math.isfinite, (x,y))) or not (0 <= x < self.width and 0 <= y < self.height):
             raise ValueError('Position outside logical_size of selected monitor')
-        self.notify('NotifyPointerMotionAbsolute', 'udd', self.node, x, y)
+        observed=self.observe_pointer()
+        # Relative motion avoids this GNOME stack's incompatible absolute
+        # stream units. Dispatch once; a mismatch stops without correction.
+        self.notify('NotifyPointerMotion', 'dd', x-observed[0], y-observed[1])
+        self.confirm_pointer_endpoint(x,y)
 
     def confirm_pointer_endpoint(self,x,y):
         # Dispatch success is not endpoint evidence. Require two independent
         # compositor snapshots; never infer position from emitted motion events.
-        reader=getattr(self,'pointer_reader',None)
-        if not callable(reader):
-            self.cancelled.set()
-            raise RuntimeError('Fresh compositor pointer observation unavailable; pointer effect refused')
         deadline=time.monotonic()+.35
         matched=0
         while True:
-            self.check()
-            observed=reader()
-            self.check()
-            if (not isinstance(observed,(tuple,list)) or len(observed)!=2 or
-                    not all(isinstance(v,(int,float)) and not isinstance(v,bool) and math.isfinite(v) for v in observed) or
-                    not (0<=observed[0]<self.width and 0<=observed[1]<self.height)):
-                self.cancelled.set()
-                raise RuntimeError('Invalid compositor pointer observation; pointer effect refused')
+            observed=self.observe_pointer()
             if time.monotonic()>deadline:
                 self.cancelled.set()
                 raise RuntimeError('Pointer endpoint did not match the requested logical point; no retry')
@@ -594,6 +630,8 @@ class Desktop:
     def close(self):
         with self.lock:
             self.cancelled.set()
+            self.mapping_guard=None
+            self.monitor_mapping=None
             # Close virtual devices before capture teardown, which can stall in Gst.
             if self.session:
                 if not getattr(self,'portal_closed',False):

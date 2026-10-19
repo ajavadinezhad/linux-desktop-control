@@ -85,7 +85,7 @@ class TransitionTransportTests(unittest.TestCase):
 
         def call(iface, method, signature, args, **kwargs):
             original_call(iface, method, signature, args, **kwargs)
-            if method == 'NotifyPointerMotionAbsolute' and not entered.is_set():
+            if method == 'NotifyPointerMotion' and not entered.is_set():
                 entered.set()
                 if not release.wait(2):
                     raise RuntimeError('Test queue did not become ready')
