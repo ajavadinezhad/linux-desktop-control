@@ -7,6 +7,7 @@ RUNTIME_FILES = (
     'calibration_notice.py', 'cursor_glow_service.py', 'cursor_theme.py',
     'desktop.py', 'indicator_bridge.py', 'native_activity.py',
     'runtime_build.py', 'target_guard.py', 'window_guard.py',
+    'monitor_mapping.py', 'stream_metadata.py',
 )
 MAX_SOURCE_BYTES = 2 * 1024 * 1024
 

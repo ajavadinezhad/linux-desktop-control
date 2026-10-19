@@ -40,3 +40,12 @@ The portal frontend's `check_position` also validates requested absolute coordin
 The diagnostic-only `stream_metadata.py` allowlists bounded `position`, `size`, `logical_size`, known source-type values, and whether a mapping id exists. It does not export the id, other properties, a scale inference, or control authority. Keeping both size fields distinct will establish which metadata the next consented session actually supplied without guessing their provenance.
 
 Preserve the public logical coordinate system, observation guards and bounds. Establish the transport coordinate contract from explicit, validated metadata or an independently verified backend capability. Do not infer transport scale solely from screenshot dimensions: capture negotiation may resize images. A mismatched or ambiguous mapping must refuse target clicks before their activating press. Any correction needs isolated coverage for scaled, unscaled, nonzero-origin and malformed metadata cases, followed by a fresh consented live check. Same-window physical typing and held-button drag acceptance remain unverified.
+
+
+## Subsequent 0.8.6 metadata-only trial
+
+The actual consented primary-monitor stream supplied `position: [0,240]`, `size: [1920,1200]`, `source_type: 1`, and a mapping id whose presence alone was retained. The diagnostic allowlist contained no `logical_size` property. The nonzero vertical origin differs from the earlier trial; origins must therefore be read afresh rather than assumed.
+
+Physical calibration timed out before ARM. Both report lines were received: keyboard, pointer and any-stream-record flags were false; device query succeeded; the idle reason was `missing-category`, with no held inputs or pending input/topology/owner queue bits. These fields do not establish why physical records were absent. No capture, screenshot, automated input or GUI action occurred, and no mapping or pointer endpoint was tested.
+
+Explicit close confirmed portal closure, zero held input, zero failed releases and no cleanup warning; the helper exited successfully. Sanitized evidence is in `release/LIVE_0_8_6_METADATA.json` beside the source checkout. Same-window physical typing and held-button drag acceptance remain unverified.

@@ -26,7 +26,7 @@ class WindowGuardTests(unittest.TestCase):
  def backend(self):
   d=test_control.Tests.backend(self);d.keysym=lambda key:ord(key[0]);b=Bridge();d.window_guard=g.WindowGuard(b,b.context(),d.cancelled.set);return d,b
  def test_alt_tab_mid_move_typing_drag_and_scroll_cancels_remaining_events_and_releases(self):
-  cases=[('move',{'type':'sequence','steps':[{'type':'click','x':50,'y':50},{'type':'move','x':400,'y':400,'seconds':.15},{'type':'scroll','x':400,'y':400,'dy':1}]},lambda method,args:method=='NotifyPointerMotionAbsolute' and args[-1]>60),('typing',{'type':'text','focus':{'x':50,'y':50},'text':'abc'},lambda method,args:method=='NotifyKeyboardKeysym' and args[-1]==1),('drag',{'type':'drag','path':[[50,50],[60,60],[70,70]]},lambda method,args:method=='NotifyPointerButton' and args[-1]==1),('scroll',{'type':'scroll','x':50,'y':50,'dy':5},lambda method,args:method=='NotifyPointerMotionAbsolute')]
+  cases=[('move',{'type':'sequence','steps':[{'type':'click','x':50,'y':50},{'type':'move','x':400,'y':400,'seconds':.15},{'type':'scroll','x':400,'y':400,'dy':1}]},lambda method,args:method=='NotifyPointerMotion' and sum(abs(v) for v in args[-2:])>10),('typing',{'type':'text','focus':{'x':50,'y':50},'text':'abc'},lambda method,args:method=='NotifyKeyboardKeysym' and args[-1]==1),('drag',{'type':'drag','path':[[50,50],[60,60],[70,70]]},lambda method,args:method=='NotifyPointerButton' and args[-1]==1),('scroll',{'type':'scroll','x':50,'y':50,'dy':5},lambda method,args:method=='NotifyPointerMotion')]
   for name,action,trigger in cases:
    with self.subTest(name=name):
     d,b=self.backend();original=d.call;index=[]
@@ -199,7 +199,7 @@ class FullTransitionTests(unittest.TestCase):
   original_call=d.call
   def compositor_call(iface,method,sig,args,**kw):
    original_call(iface,method,sig,args,**kw)
-   if method=='NotifyPointerMotionAbsolute':b.value['pointer']=list(args[-2:])
+   if method=='NotifyPointerMotion':b.value['pointer']=[b.value['pointer'][0]+args[-2],b.value['pointer'][1]+args[-1]]
   d.call=compositor_call
   b.value['pointer']=[10,10];s.backend=d;return s,b,d
  def action(self,s,action):
@@ -209,7 +209,7 @@ class FullTransitionTests(unittest.TestCase):
   s,b,d=self.make();original=d.call
   def call(iface,method,sig,args,**kw):
    original(iface,method,sig,args,**kw)
-   if method=='NotifyPointerMotionAbsolute':b.value.update(epoch=11,window_id='human-app')
+   if method=='NotifyPointerMotion':b.value.update(epoch=11,window_id='human-app')
   d.call=call;old=s.generation;r=self.action(s,{'type':'click','x':100,'y':100})
   self.assertTrue(r['result']['isError']);self.assertFalse(s.status()['active'])
   self.assertFalse(any(e[1]=='NotifyPointerButton' and e[-1][-1]==1 for e in d.events))

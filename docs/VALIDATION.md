@@ -44,3 +44,14 @@ The installed 0.8.5 live trial successfully calibrated both categories, acknowle
 Pointer dispatch no longer counts as observed arrival. The backend requires two fresh compositor endpoint samples before click/button or scroll effects, after moves, and along held-button drag paths. Missing/invalid/mismatched endpoints cancel without coordinate compensation or replay; held virtual input is released. The 350ms acceptance budget is checked around observer reads; it is not a hard wall-time bound on an in-flight D-Bus call. This adds protection against the observed targeting mismatch but does not fix or establish scaled-display mapping. Status exposes validated stream geometry for the next consented diagnostic. Independent source cross-review found no blocking defect. No new live acceptance is inferred.
 
 Verification of the endpoint safety update: all320 Python regression tests and the real five-tool loader check pass. Version0.8.6 is installed. The native helper remains0.8.1; its nine native fixtures were already passed with no subsequent native code changes. Scaled pointer mapping and real same-window typing/held-button dragging remain open.
+
+
+## Relative transport candidate 0.8.7
+
+The current GNOME absolute-motion path exposes logical stream bounds but divides coordinates by monitor scale downstream. The replacement sends a single relative logical displacement from a freshly observed pointer inside the consented monitor, then requires endpoint confirmation before any further displacement or effect. There is no absolute fallback, coordinate multiplication, clamping, correction retry or cross-monitor approach.
+
+Every consented startup binds the selected stream geometry to GNOME DisplayConfig ownership and the full normalized display state before capture. Each input rechecks that binding. Changed or ambiguous geometry, display ownership/layout/mode/scale changes, physical layout mode, rotation and mirroring refuse input. Scope is logical monitor layout with unrotated, unmirrored outputs. Status remains cached and read-only; raw release cleanup remains available after mapping invalidation. The new runtime modules are included in the frozen source fingerprint.
+
+A separate read-only host check successfully matched primary logical rectangle[0,240,1920,1200] at scale2. This is metadata validation, not live transport or physical takeover acceptance. The most recent0.8.6 trial closed before ARM with no kernel input records despite successful state queries; no task capture/input occurred and explicit cleanup confirmed portal closure, zero held input and no warning. Live relative targeting, same-window typing and held-button dragging remain required.
+
+Version0.8.7 is installed. Verification:333 Python tests and the five-tool loader check pass; native helper0.8.1 is unchanged from its nine passing fixtures. No live relative-transport or takeover acceptance is claimed.

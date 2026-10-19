@@ -51,11 +51,12 @@ class Tests(unittest.TestCase):
         d=object.__new__(m.Desktop)
         d.lock=threading.RLock(); d.cancelled=threading.Event(); d.session='/test'
         d.node=1;d.width=1920;d.height=1080;d.held=[];d.events=[]
-        d.observed_pointer=(0.,0.)
+        d.observed_pointer=(0.,0.);d.mapping_guard=lambda:None
         def compositor_call(*args,**kw):
             d.events.append(args)
-            if args[1]=='NotifyPointerMotionAbsolute':
-                d.observed_pointer=tuple(args[3][-2:])
+            if args[1]=='NotifyPointerMotion':
+                dx,dy=args[3][-2:]
+                d.observed_pointer=(d.observed_pointer[0]+dx,d.observed_pointer[1]+dy)
         d.call=compositor_call
         d.pointer_reader=lambda:d.observed_pointer
         return d
@@ -254,7 +255,10 @@ class FreshPointerTests(unittest.TestCase):
   from unittest.mock import patch
   d=Tests().backend();d.observed_pointer=(100.,100.);clock=[0.];d.wait_interruptibly=lambda seconds:clock.__setitem__(0,clock[0]+seconds)
   with patch.object(m.time,'monotonic',side_effect=lambda:clock[0]):d.action({'type':'move','x':200,'y':100,'seconds':.1})
-  points=[e[-1][-2:] for e in d.events if e[1]=='NotifyPointerMotionAbsolute']
+  deltas=[e[-1][-2:] for e in d.events if e[1]=='NotifyPointerMotion']
+  points=[];position=(100.,100.)
+  for dx,dy in deltas:
+   position=(position[0]+dx,position[1]+dy);points.append(position)
   self.assertEqual(points[0],(100.,100.));self.assertEqual(points[-1],(200.,100.));self.assertGreater(len(points),3)
  def test_unavailable_fresh_pointer_emits_no_input(self):
   d=Tests().backend()

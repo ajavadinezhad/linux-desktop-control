@@ -73,7 +73,7 @@ class NativeInputCutoffTests(unittest.TestCase):
                 self.assertEqual(len(inputs), 1, inputs)
                 self.assertEqual(inputs[0][1], trigger_method)
                 self.assertEqual(inputs[0][-1][-1], 0)  # raw UP after cancellation
-                self.assertFalse(any(event[1] == 'NotifyPointerMotionAbsolute' for event in after))
+                self.assertFalse(any(event[1] == 'NotifyPointerMotion' for event in after))
                 self.assertTrue(desktop.portal_closed)
                 self.assertEqual(desktop.status()['held_input_count'], 0)
                 self.assertEqual(desktop.status()['input_release'], {
