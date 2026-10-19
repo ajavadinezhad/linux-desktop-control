@@ -1,13 +1,25 @@
 # Private review status — 0.8.12 installed
 
+## Current scoped live acceptance — 2026-10-19
+
+On this host, installed plugin 0.8.12/helper 0.8.5 passed initial strict calibration and the separate post-ARM mouse challenge, then captured a fresh image. A first session observed native pointer motion after capture, retained sharing with capture/input disabled, waited for quiet and remained paused because no saved assistant point existed. Explicit resume succeeded; no assistant input was sent in that session.
+
+A subsequent session established a confirmed assistant endpoint. Physical mouse motion produced a retained pause, observed quiet and one automatic return to that saved point, with native rearming, a fresh image and unchanged foreground epoch. The user explicitly confirmed moving the mouse and seeing the return. No interrupted action was replayed, no sharing session restarted and the original lease was not renewed. Both sessions closed cleanly: portal closure confirmed, zero held input, helper exit 0 and no cleanup warnings.
+
+This is scoped acceptance of native motion delivery after ARM/capture and one same-context automatic return on the tested host. It is not universal device/app coverage or proof of human provenance. Earlier failures remain historical evidence; the unique underlying delivery cause has not been proven. The frozen offline suite remains 419 Python tests and 18 native fixtures; no code change accompanies this acceptance update. See [remaining beta matrix](BETA_ACCEPTANCE.md).
+
+Evidence: `LIVE_0_8_12_PRECAPTURE_DELIVERY.json` (local evidence, outside this repository), [saved-point automatic return](../../LIVE_0_8_12_AUTOMATIC_RETURN.json).
+
+## Historical validation and rollout notes
+
 Prior installed baseline: 0.8.7;333 automated tests passed. Live scaled targeting, human-confirmed same-window typing interruption and human-confirmed drag interruption with button release have scoped acceptance on this host. Typing used native held-input detection; dragging used the pointer-endpoint guard. Native pointer-only detection remains unverified. Sharing is closed with zero held input. Source remains private and reuse licensing is deferred.
 
 
-## Current candidate: bounded authorization-release settling
+## Installed startup-race repair: bounded authorization-release settling
 
 Plugin 0.8.12/helper 0.8.5 are installed successfully; all 14 reviewed plugin files match canonical source. The frozen full suite passed 419 Python tests in 19.613 seconds and 18 native fixtures in 15.478 seconds. Loader/schema discovery exposes all seven tools and skill validation passes. A synthetic auth-held CALIBRATE fixture reproduced READY/MODEYIELD2 acknowledgement followed by FAULT exit146. The helper now waits at most five seconds for released input plus clean primary/topology/owner queues before fresh CALIBRATING. The adapter waits at most six seconds, maintaining heartbeat, cancellation, authority and the original lease. No challenge notice, calibration credit, capture or input is allowed during `settling`. Strict relative calibration and retained post-ARM readiness are unchanged.
 
-This is a bounded startup-race fix, not proof of the unique previous live failure or a mouse-delivery repair. Live event delivery and automatic cursor return remain unresolved. No new live trial is included. See [settling scope](CALIBRATION_RELEASE_SETTLING.md).
+This is a bounded startup-race fix, not proof of the unique previous live failure or a mouse-delivery repair. At offline rollout, live event delivery and automatic cursor return remained unresolved; the scoped acceptance above supersedes that live status without identifying the unique prior failure cause. See [settling scope](CALIBRATION_RELEASE_SETTLING.md).
 
 ## Prior installed baseline: post-ARM readiness gate
 

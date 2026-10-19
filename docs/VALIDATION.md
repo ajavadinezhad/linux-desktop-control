@@ -1,5 +1,17 @@
 # Validation
 
+## Current scoped live acceptance — 2026-10-19
+
+On this host, installed plugin 0.8.12/helper 0.8.5 passed initial strict calibration and the separate post-ARM mouse challenge, then captured a fresh image. A first session observed native pointer motion after capture, retained sharing with capture/input disabled, waited for quiet and remained paused because no saved assistant point existed. Explicit resume succeeded; no assistant input was sent in that session.
+
+A subsequent session established a confirmed assistant endpoint. Physical mouse motion produced a retained pause, observed quiet and one automatic return to that saved point, with native rearming, a fresh image and unchanged foreground epoch. The user explicitly confirmed moving the mouse and seeing the return. No interrupted action was replayed, no sharing session restarted and the original lease was not renewed. Both sessions closed cleanly: portal closure confirmed, zero held input, helper exit 0 and no cleanup warnings.
+
+This is scoped acceptance of native motion delivery after ARM/capture and one same-context automatic return on the tested host. It is not universal device/app coverage or proof of human provenance. Earlier failures remain historical evidence; the unique underlying delivery cause has not been proven. The frozen offline suite remains 419 Python tests and 18 native fixtures; no code change accompanies this acceptance update. See [remaining beta matrix](BETA_ACCEPTANCE.md).
+
+Evidence: `LIVE_0_8_12_PRECAPTURE_DELIVERY.json` (local evidence, outside this repository), [saved-point automatic return](../../LIVE_0_8_12_AUTOMATIC_RETURN.json).
+
+## Historical validation by version
+
 ## Fresh 0.8.4 audit
 
 See [SCENARIO_AUDIT.md](SCENARIO_AUDIT.md) for the current scenario inventory, reproduced defects, fixes and release blockers. Historical counts below describe their respective builds. No current physical typing or held-button drag acceptance is claimed.
