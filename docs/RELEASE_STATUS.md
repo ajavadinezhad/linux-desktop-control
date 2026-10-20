@@ -2,7 +2,7 @@
 
 **Preview, GNOME-only:** currently targets GNOME Shell 51 on Wayland. Other platforms are planned and are not yet supported.
 
-Current installed update: plugin **0.8.19**, helper **0.8.7** unchanged. The drawing-only expanded batch and pacing skill pass **463 Python tests**, independent review, and seven-tool loading. All14 installed plugin files match source; read-only runtime verification confirms matching sources, closed sharing and zero held input. Larger-batch live speed improvement remains unmeasured. See [performance](PERFORMANCE.md).
+Current installed update: plugin **0.8.19**, helper **0.8.7** unchanged. The drawing-only expanded batch and pacing skill pass **463 Python tests**, independent review, and seven-tool loading. All14 installed plugin files match source; read-only runtime verification confirms matching sources, closed sharing and zero held input. A recorded larger-batch trial completed and saved a bear, using actual groups of8–10 strokes before capture. Drawing-to-save took about207seconds; raw recording passed full decode. This is not a controlled speed comparison. See [performance](PERFORMANCE.md).
 
 ### Earlier performance checkpoint
 
