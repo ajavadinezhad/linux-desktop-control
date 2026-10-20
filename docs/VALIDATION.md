@@ -1,5 +1,35 @@
 # Validation
 
+## Completed five-slide GUI demo — 2026-10-19
+
+A new presentation was saved at `/home/aj/Documents/ChatGPT-Linux-Desktop-Control-Demo.odp` through the actual observed Impress GUI, without backend deck generation, UNO or clipboard. All five revised slides were inspected at full size for content and fit; the saved ODP XML independently confirms five slides and the revised copy. The saved file was not reopened as a separate acceptance step. No existing personal deck was edited.
+
+The final successful session ran about 206 seconds after ARM, exceeding the old 120-second cap under the acknowledged initial 600-second lease. No renewal occurred; about 381 seconds remained at clean closure. Portal closure was confirmed, held input was zero, warnings were null, helper exit was 0 and capture/input were disabled. This is not a full 600-second expiry test. Current-build physical keyboard, held-drag and emergency Stop repeat checks and broader hardware/app coverage remain pending.
+
+The recording source is 668.25 seconds; the planned 328-second edit removes waits and labels resumed sessions. It must not be described as one continuous uninterrupted workflow. Earlier attempts and safe refusals remain in the local evidence, including an invocation error, a harmless save-dialog path error and endpoint refusal, and an initial calibration timeout. Evidence wrapper: `work/demo-0812/GUI_FIVE_SLIDE_RESULT.json` in the workspace outside the canonical Git source.
+
+## Earlier rollout observations
+
+## Current installed 0.8.15 status — 2026-10-19
+
+Plugin 0.8.15/helper 0.8.6 are installed. All 14 reviewed plugin files match canonical source; a fresh actual provider verified the expected build, matching disk sources and seven tools. Runtime build: `8720a12eb44798062cc88e2a21857f8cebd3ac8ed98870ffab71ad6eddc434b8`. Helper binary SHA256: `c9a711b55244eb0ac6df1515425fb8cbda2aa1232346a96889b740c6e9e70231`; the policy hash is unchanged. Frozen checks passed 438 Python tests in 21.303 seconds, 20 native fixtures in 16.061 seconds and loader/schema validation.
+
+A live session successfully negotiated its initial 600-second limit, passed both calibration/readiness gates, and reached a new blank Impress presentation with about 560 seconds remaining when this status was recorded. This establishes scoped startup negotiation and active use of the selected budget, not a completed ten-minute expiry test or finished slide demo. No existing personal deck was edited. Prior 0.8.14 normalization followed by monitor relocation passed its scoped live check. Longer-lease expiry and a completed demo remain unverified here; existing terminal guards and no-renewal semantics are unchanged.
+
+## Historical validation and preparation
+
+## 0.8.15 initial-duration candidate — full suite pending
+
+Eight new Python tests pass for exact integer range, effective-default preservation until exact acknowledgement, once-only/precalibration negotiation, wrong/late/legacy replies, cancellation/revocation/original expiry, server validation before portal/helper, forwarding and active-session refusal. Two new native fixtures pass for actual collector LEASE_600 handshake before calibration and deterministic default120/selected600 expiry, malformed/out-of-range/order/duplicate/refused renewal and unchanged heartbeat deadline. Existing retained adapter tests (9) pass. Recorder bounded-limit tests (6) pass separately. This candidate is not installed/live accepted. Prior installed 0.8.14 passed 429 Python tests; scoped live normalization+relocation succeeded, not the five-slide demo.
+
+## 0.8.14 normalization candidate — offline only
+
+Five new targeted tests pass: partial-source admission while strict move still refuses; source origin/center/shared-intersection/already-contained refusals; exact non-substitutable Alt+F10 chord; modifier loss and changed activation binding with no F10 and held release; protected/no-op/wrong-window/layout refusal without image; same-window full-source success. Existing move (5), mapping (10) and foreground guard (33) tests pass. Full frozen suite count is pending. Helper/native code is unchanged. No normalization live acceptance is inferred from prior 0.8.13 relocation acceptance.
+
+## 0.8.13 monitor-move candidate — offline only
+
+Frozen behavior suite: 424 Python tests in 20.454 seconds. Five new tests cover canonical chord admission, unambiguous two-monitor direction/source validation, straddling/invalid source frames, changed layout, modifier-stage cancellation and release, arrival identity/full containment, no-arrival/wrong-window refusal with no image, and topology change during capture. Existing guard and mapping tests pass. The unchanged native baseline remains 18 passing fixtures; helper 0.8.5 has no code or permission changes. Prior 0.8.12 had 419 Python tests. No installation or live monitor-move trial is claimed.
+
 ## Current scoped live acceptance — 2026-10-19
 
 On this host, installed plugin 0.8.12/helper 0.8.5 passed initial strict calibration and the separate post-ARM mouse challenge, then captured a fresh image. A first session observed native pointer motion after capture, retained sharing with capture/input disabled, waited for quiet and remained paused because no saved assistant point existed. Explicit resume succeeded; no assistant input was sent in that session.
@@ -8,7 +38,7 @@ A subsequent session established a confirmed assistant endpoint. Physical mouse 
 
 This is scoped acceptance of native motion delivery after ARM/capture and one same-context automatic return on the tested host. It is not universal device/app coverage or proof of human provenance. Earlier failures remain historical evidence; the unique underlying delivery cause has not been proven. The frozen offline suite remains 419 Python tests and 18 native fixtures; no code change accompanies this acceptance update. See [remaining beta matrix](BETA_ACCEPTANCE.md).
 
-Evidence: `LIVE_0_8_12_PRECAPTURE_DELIVERY.json` (local evidence, outside this repository), [saved-point automatic return](../../LIVE_0_8_12_AUTOMATIC_RETURN.json).
+Evidence: `LIVE_0_8_12_PRECAPTURE_DELIVERY.json` (local evidence, outside this repository), `LIVE_0_8_12_AUTOMATIC_RETURN.json` (local evidence, outside this repository).
 
 ## Historical validation by version
 
@@ -134,3 +164,6 @@ A fresh actual 0.8.11 provider verified build `d9365aaf2ec194b81bb855405f8737bbb
 New offline fixtures cover the actual collector mainloop withholding CALIBRATING while authorization input is held, then emitting a fresh cue after release; no drained authorization credit; queued boundary, stale events, duplicate command rejection, five-second timeout, query failure and original 120-second lease refusal. Adapter fixtures cover six-second acknowledgement bounds, heartbeat, silent/dead peer, cancellation, revoked authorization, late/unexpected tokens and lease expiry. The desktop snapshot regression accepts `settling` only as an opening state with no challenge notice, calibration readiness, capture or input. Strict post-ARM readiness remains required. Frozen validation passed 419 Python tests in 19.613 seconds, 18 native fixtures in 15.478 seconds, seven-tool loader/schema discovery and skill validation. Plugin 0.8.12 and helper 0.8.5 installed successfully; all 14 plugin files match canonical source. Helper package SHA256: `571350f65cf0ab0439cea6657a9f04339f4505980827971edd085d1c6743ddd3`. These fixtures do not establish live mouse delivery.
 
 A fresh actual 0.8.12 provider verified build `cd15c911aab846b0e04cbdddd8b845bddd7439211b779bd9dd492ebd58c7b249`, matching disk sources and all seven tools, with the portal closed, zero held input and capture/input disabled. Installed helper 0.8.5 binary and policy hashes match the reviewed package. This read-only verification is not live event-delivery or automatic-return acceptance; no new sharing trial was performed.
+
+
+Installation verification: plugin 0.8.13 is installed, and all 14 reviewed plugin files match canonical source. A fresh actual provider verified the expected build, matching disk sources, all seven tools and the window_move_to_shared schema. Sharing is closed with confirmed portal closure, zero held input and capture/input disabled. The real monitor move has not been tested live. Earlier candidate installation statements above describe the pre-install checkpoint.

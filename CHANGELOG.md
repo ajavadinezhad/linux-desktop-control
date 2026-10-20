@@ -1,5 +1,29 @@
 # Changes
 
+## 0.8.15 installed — validation and scoped live startup
+
+- All 14 reviewed plugin files match; fresh actual provider build/disk/seven-tool verification passed. Helper 0.8.6 binary matches and policy is unchanged.
+- Frozen validation: 438 Python tests (21.303s), 20 native fixtures (16.061s), loader/schema pass.
+- Initial 600-second live lease negotiation and both gates succeeded, reaching a new blank Impress presentation with about 560 seconds remaining. This is not full ten-minute expiry or a completed demo; no existing personal deck was edited.
+
+### Earlier preparation notes
+
+## 0.8.15 candidate — bounded initial native duration
+
+- Select an initial native lease of 120–600 seconds (default120), exactly acknowledged by helper0.8.6 before calibration. Original READY anchor and heartbeat remain unchanged; no active renewal or long-request fallback.
+- Recorder maximum900 seconds, unchanged default120; recording does not grant input authority.
+- New lease Python8/native2 and recorder6 targeted tests pass; full suite pending, not installed/live accepted. Prior14 normalization+relocation is scoped live accepted, not completion of the five-slide demo.
+
+## 0.8.14 candidate — normalize before a separate monitor move
+
+- One dedicated Alt+F10 resize toggle for a partly off-screen focused window on the other of two verified monitors; actual binding stays read only. Requires same identity and full source containment afterward. Existing move remains strict and separate; no retry or maximize-state claim.
+- Five new normalization tests pass; full suite pending. No native/helper change; normalization is not live accepted.
+
+## 0.8.13 candidate — explicit current-window monitor move
+
+- Dedicated opt-in, single Super+Shift+Arrow GUI transition; two verified monitors and unchanged default binding only. Foreground remains fenced through modifiers, then same-window arrival wholly on the shared monitor is required around capture. No retry or unseen-content claim.
+- Frozen behavior suite passes 424 Python tests; native/helper 0.8.5 is unchanged (18-fixture baseline). Not installed or live accepted.
+
 ## 0.8.12 — bounded authorization-release settling
 
 - Installed plugin 0.8.12/helper 0.8.5; all 14 reviewed plugin files match. Frozen verification passes 419 Python tests, 18 native fixtures, seven-tool loader/schema discovery and skill validation. No new live trial.
@@ -84,3 +108,6 @@ The first live 0.7.1 GUI-launch trial closed safely during transient foreground 
 ## 0.7.0
 
 Simplify to five core desktop operations and an optional passive pointer label. Retain consent, input release, cancellation, target guards, fresh-frame checks and uncertain-input recovery. Close virtual input before bounded capture teardown. The system cursor is unchanged; no ring or duplicate cursor is drawn. No live 0.7.0 input test has been performed.
+
+
+Installation verification: plugin 0.8.13 is installed, and all 14 reviewed plugin files match canonical source. A fresh actual provider verified the expected build, matching disk sources, all seven tools and the window_move_to_shared schema. Sharing is closed with confirmed portal closure, zero held input and capture/input disabled. The real monitor move has not been tested live. Earlier candidate installation statements above describe the pre-install checkpoint.

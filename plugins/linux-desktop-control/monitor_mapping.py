@@ -171,3 +171,57 @@ class MonitorMapping:
         return {'supported':not self.failed,'diagnostic':'logical-monitor-bound' if not self.failed else 'monitor-mapping-refused',
                 'logical_rect':list(self.rect) if hasattr(self,'rect') else None,
                 'scale':self.scale if hasattr(self,'scale') else None}
+
+    def _other_window_monitor(self, context):
+        """Read-only two-monitor geometry shared by distinct GUI gestures."""
+        self.check()
+        owner,state=self._read()
+        binding,rect,scale=validate_state(state,self.props)
+        if owner!=self.owner or binding!=self.binding:_fail()
+        state=_unpack(state)
+        if len(state[2])!=2:raise MappingError('Window move requires exactly two unambiguous monitors')
+        dimensions={}
+        for identity,modes,_ in state[1]:
+            active=[mode for mode in modes if mode[6].get('is-current') is True]
+            if len(active)!=1:_fail()
+            dimensions[tuple(identity)]=active[0][1:3]
+        rectangles=[]
+        for x,y,factor,transform,primary,identities,properties in state[2]:
+            w,h=dimensions[tuple(identities[0])]
+            candidate=(x,y,math.floor(w/factor+.5),math.floor(h/factor+.5))
+            validate_state(state,{'position':candidate[:2],'logical_size':candidate[2:]})
+            rectangles.append(candidate)
+        source=next(item for item in rectangles if item!=self.rect)
+        frame=context.get('rect')
+        if context.get('available') is not True or context.get('kind')!='window' or not isinstance(frame,(tuple,list)) or len(frame)!=4 or not all(_number(v) for v in frame):
+            raise MappingError('Current focused window unavailable')
+        if frame[2]<=0 or frame[3]<=0:raise MappingError('Invalid focused window frame')
+        return tuple(source),tuple(frame)
+
+    def window_normalize_source(self, context):
+        source,frame=self._other_window_monitor(context)
+        x,y,w,h=frame;a,b,c,d=source
+        def inside(px,py):return a<=px<a+c and b<=py<b+d
+        # Both the frame origin/titlebar and center must belong to the other
+        # monitor. A straddling/oversized frame is never assigned by guesswork.
+        if a<=x and b<=y and x+w<=a+c and y+h<=b+d:
+            raise MappingError('Focused window already wholly on source; use the separate monitor move')
+        sx,sy,sw,sh=self.rect
+        if max(x,sx)<min(x+w,sx+sw) and max(y,sy)<min(y+h,sy+sh):
+            raise MappingError('Focused window intersects the shared monitor; normalization refused')
+        if not inside(x,y) or not inside(x+w/2,y+h/2):
+            raise MappingError('Focused window origin and center must belong to the other monitor')
+        return source
+
+    def window_move_direction(self, context, direction):
+        source,frame=self._other_window_monitor(context)
+        x,y,w,h=frame;a,b,c,d=source
+        if not (a<=x and b<=y and x+w<=a+c and y+h<=b+d):
+            raise MappingError('Focused window must be wholly on the other monitor')
+        x,y,w,h=source;a,b,c,d=self.rect
+        permitted={'Left':a+c<=x and max(y,b)<min(y+h,b+d),
+                   'Right':x+w<=a and max(y,b)<min(y+h,b+d),
+                   'Up':b+d<=y and max(x,a)<min(x+w,a+c),
+                   'Down':y+h<=b and max(x,a)<min(x+w,a+c)}
+        if permitted.get(direction) is not True:raise MappingError('Requested shortcut does not lead to the shared monitor')
+        return tuple(self.rect)
