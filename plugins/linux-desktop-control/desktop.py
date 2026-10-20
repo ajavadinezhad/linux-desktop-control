@@ -17,7 +17,7 @@ import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import Gio, GLib, Gst
 
-VERSION = '0.8.19'
+VERSION = '0.8.26'
 # Freeze identity at module load: old providers must never report a new disk build.
 _build_spec = importlib.util.spec_from_file_location('_desktop_runtime_build', os.path.join(os.path.dirname(__file__), 'runtime_build.py'))
 _runtime_build = importlib.util.module_from_spec(_build_spec)
@@ -44,6 +44,10 @@ class CaptureTimeout(RuntimeError):pass
 
 class RetainedPause(RuntimeError):
     """An invalidated operation may not turn a retained pause into closure."""
+    pass
+
+class ClickContextPending(RuntimeError):
+    """Only a foreground guard may request bounded physical-click correlation."""
     pass
 
 class Desktop:
@@ -755,9 +759,9 @@ ACTION_SCHEMA['properties']['stroke_batch']={'type':'boolean','default':False,'d
 
 def tools():
     specs=[
-      ('desktop_start','Request personal GNOME consent for one monitor, keyboard and pointer; return a fresh screenshot. Optional cursor_glow temporarily changes the desktop-wide cursor theme and restores it on close.',{'pointer_source':{'type':'string','enum':['mouse','touchpad'],'default':'mouse','description':'Retained native observation source. Touchpad requires physical_takeover and retain-sharing; verified single-finger indirect devices only.'},'session_seconds':{'type':'integer','minimum':120,'maximum':600,'default':120,'description':'Optional initial native-helper lease in seconds, physical_takeover required. Negotiated once before calibration; default120, hard maximum600. No active renewal; Stop and faults remain terminal.'},'physical_takeover':{'type':'boolean','default':False,'description':'Explicit opt-in to a separately installed native activity helper; administrator authorization follows personal GNOME sharing approval. Backend receives only coarse activity/fault notices, never raw input descriptors. Not human-provenance attestation.'},'cursor_glow':{'type':'boolean','description':'Explicit opt-in after explaining desktop-wide theme scope. Applies real themed cursor glow while active; custom app cursors may ignore it.'},'pointer_motion_return':{'type':'boolean','default':False,'description':'With retained sharing and native observation, yield on mouse movement and return once to the last confirmed point after physical quiet in the same app. No action replay.'},'interruption_policy':{'type':'string','enum':['close','retain-sharing'],'default':'close','description':'Opt-in retained consent for explicit pause/resume; physical observer faults remain terminal. No automatic cursor return or replay.'}}),
+      ('desktop_start','Request personal GNOME consent for one monitor, keyboard and pointer; return a fresh screenshot. Optional cursor_glow temporarily changes the desktop-wide cursor theme and restores it on close.',{'context_change_policy':{'type':'string','enum':['close','pause-recover'],'default':'close','description':'Explicit native retained-sharing opt-in: ordinary foreground changes cancel pending work and recover a stable fresh context without replay or focus reclaim. A fresh observation is required before more input; protected UI and faults remain terminal.'},'click_policy':{'type':'string','enum':['close','pause-return'],'default':'close','description':'Explicit native retained-sharing opt-in: ordinary left/right/middle clicks pause, then after released quiet recover from a fresh context; no action replay or forced focus. Keys, scrolling, protected UI and faults remain terminal.'},'allow_permission_wait':{'type':'boolean','default':False,'description':'Explicit native retained-sharing opt-in for trusted GNOME Polkit permission waiting for an already authorized task; human approval only. Requires helper AUTHMODE1 and observer protocol3.'},'startup_verification':{'type':'string','enum':['challenge','passive'],'default':'challenge','description':'Explicit passive supervised mode skips manual calibration and starts monitoring with coverage unverified. Requires native retained sharing and exact helper acknowledgement; automatic return additionally requires real selected-source motion in the current pause. Challenge retains diagnostic keyboard/pointer tests.'},'pointer_source':{'type':'string','enum':['mouse','touchpad'],'default':'mouse','description':'Retained native observation source. Touchpad requires physical_takeover and retain-sharing; verified single-finger indirect devices only.'},'session_seconds':{'type':'integer','minimum':120,'maximum':600,'default':120,'description':'Optional initial native-helper lease in seconds, physical_takeover required. Negotiated once before calibration; default120, hard maximum600. No active renewal; Stop and faults remain terminal.'},'physical_takeover':{'type':'boolean','default':False,'description':'Explicit opt-in to a separately installed native activity helper; administrator authorization follows personal GNOME sharing approval. Backend receives only coarse activity/fault notices, never raw input descriptors. Not human-provenance attestation.'},'cursor_glow':{'type':'boolean','description':'Explicit opt-in after explaining desktop-wide theme scope. Applies real themed cursor glow while active; custom app cursors may ignore it.'},'pointer_motion_return':{'type':'boolean','default':False,'description':'With retained sharing and native observation, yield on mouse movement and return once to the last confirmed point after physical quiet in the same app. No action replay.'},'interruption_policy':{'type':'string','enum':['close','retain-sharing'],'default':'close','description':'Opt-in retained consent for explicit pause/resume; physical observer faults remain terminal. No automatic cursor return or replay.'}}),
       ('desktop_observe','Return a fresh screenshot and dimensions. Optional inspect_target binds a single-use editable accessibility identity; inspect before input.',{'inspect_target':{'type':'boolean'}}),
-      ('desktop_action','Perform bounded input and return a fresh screenshot. Text/keys need same-call focus or a sequence beginning with a target click/focus shortcut. Coordinates use logical_size. Discrete wheel steps only. Text uses GNOME Unicode composition by default; verify actual results. Never replay uncertain input.',{'action':ACTION_SCHEMA,'target_id':{'type':'string','minLength':32,'maxLength':32},'recovery_observation_id':{'type':'string'},'window_observation_id':{'type':'string','minLength':32,'maxLength':32},'window_fit_shared':{'type':'boolean','description':'Separate opt-in Alt+F10 resize toggle fitting the current oversized focused window to the shared monitor. Exactly two verified monitors; center/titlebar midpoint and strictly largest intersection must identify the shared monitor. Same-window full containment required after; no focus activation or retry.'},'window_normalize_for_move':{'type':'boolean','description':'Separate opt-in Alt+F10 resize toggle of the currently focused window on the other of two verified monitors before a later monitor move. Only a frame not wholly source-contained is admitted; origin and center must identify that source; same-window full source containment required after. No focus activation or content observation.'},'window_move_to_shared':{'type':'boolean','description':'Opt-in single Super+Shift+Arrow move of the currently focused window from the other monitor to the shared monitor; exactly two unambiguous monitors and unchanged configured shortcut required. No focus activation or unseen-content claim.'},'focus_transition':{'type':'boolean','description':'Only one explicit left click, launcher/Return or Ctrl+s/Ctrl+Shift+s/Ctrl+o gesture may change foreground; no remaining batch. Inspect its returned image before further input.'}}),
+      ('desktop_action','Perform bounded input and return a fresh screenshot. Text/keys need same-call focus or a sequence beginning with a target click/focus shortcut. Coordinates use logical_size. Discrete wheel steps only. Text uses GNOME Unicode composition by default; verify actual results. Never replay uncertain input.',{'action':ACTION_SCHEMA,'target_id':{'type':'string','minLength':32,'maxLength':32},'recovery_observation_id':{'type':'string'},'window_observation_id':{'type':'string','minLength':32,'maxLength':32},'window_fit_shared':{'type':'boolean','description':'Separate opt-in Alt+F10 resize toggle fitting the current oversized focused window to the shared monitor. Exactly two verified monitors; center/titlebar midpoint and strictly largest intersection must identify the shared monitor. Same-window full containment required after; no focus activation or retry.'},'window_normalize_for_move':{'type':'boolean','description':'Separate opt-in Alt+F10 resize toggle of the currently focused window on the other of two verified monitors before a later monitor move. Only a frame not wholly source-contained is admitted; origin and center must identify that source; same-window full source containment required after. No focus activation or content observation.'},'window_move_to_shared':{'type':'boolean','description':'Opt-in single Super+Shift+Arrow move of the currently focused window from the other monitor to the shared monitor; exactly two unambiguous monitors and unchanged configured shortcut required. No focus activation or unseen-content claim.'},'wait_for_permission':{'type':'boolean','description':'One observed package Install left click then capture/input-free trusted GNOME authentication waiting; requires startup allow_permission_wait, native retained sharing and recording_stopped=true. No approval automation or action replay.'},'recording_stopped':{'type':'boolean','description':'Explicit operator attestation all owned recorders are stopped and finalized before a permission-wait gesture; not proof about external recorders.'},'await_context_change':{'type':'boolean','description':'Explicit launch-only opt-in with focus_transition: one left click or Return, then require an actual foreground context change within a hard five-second budget before publishing an image. No replay or app-identity guarantee.'},'focus_transition':{'type':'boolean','description':'Only one explicit left click, launcher/Return or Ctrl+s/Ctrl+Shift+s/Ctrl+o gesture may change foreground; no remaining batch. Inspect its returned image before further input.'}}),
       ('desktop_pause','Cancel current work, release virtual input and stop capture. Retaining sharing requires interruption_policy=retain-sharing at startup.',{}),
       ('desktop_resume','Explicitly resume retained sharing with a fresh screenshot and new observation tokens. Never replays input.',{'pause_id':{'type':'string','minLength':32,'maxLength':32}}),
       ('desktop_status','Read session and cleanup state without capturing or sending input.',{}),
@@ -800,10 +804,40 @@ class RecoveryLedger:
     def observed(self):
         if self.inspection_required:self.observation_id=uuid.uuid4().hex
 
+PERMISSION_NO_PROMPT_GRACE=3
+
+class ContextManualPause(RuntimeError):pass
+
+class ContextRecoveryPending(RetainedPause):
+    pass
+
+CONTEXT_RECOVERY_SECONDS=15
+CONTEXT_RECOVERY_QUIET=1.5
+
+class PermissionWaitFailure(RuntimeError):
+    pass
+
+PERMISSION_FAILURE_REASONS=frozenset((
+    'owner-changed','cancelled','deadline-expired','native-observer-ended','lease-ended',
+    'observer-unavailable','observer-invalid-state','origin-changed','attempt-changed','attempt-unsupported',
+    'prompt-disappeared','prompt-still-active','mapping-unavailable','mapping-changed',
+    'native-begin-failed','native-end-failed','capture-suspension-failed','capture-resume-failed',
+    'foreground-unavailable','publication-changed','action-failed','unexpected-failure',
+    'blocked-unknown-system-ui','blocked-locked','blocked-greeter','blocked-observer-unavailable',
+    'blocked-auth-observer-unsupported','blocked-auth-observer-unavailable','blocked-unavailable',
+    'blocked-polkit-dialog-unavailable','blocked-origin-unavailable','blocked-origin-changed','blocked-modal-mismatch'))
+PERMISSION_FAILURE_STAGES=frozenset(('preparing','waiting-for-prompt','waiting-for-human',
+    'waiting-for-released-input','prompt-observed','prompt-not-observed'))
+
+class PermissionSignal:
+    # Signal receipt grants no authority and performs no blocking D-Bus work.
+    # The waiting worker validates the trusted auth state before any resume.
+    def changed(self,epoch):pass
+
 class Server:
     def __init__(self,factory=Desktop):
         self.factory=factory;self.backend=None;self.cancel_token=None;self.request_epoch=None
-        self.state_lock=threading.RLock();self.generation=0;self.state='closed'
+        self.state_lock=threading.RLock();self.generation=0;self.state='closed';self.closure_reason=None
         # Opening a replacement session must wait until every owned resource
         # from the previous session has finished cleanup. Cancellation itself
         # never waits for this lock.
@@ -811,11 +845,11 @@ class Server:
         self.execution_lock=threading.RLock()
         self.owner_cancel_events={}
         self.interruption_policy='close';self.pause_id=None;self.pause_reason=None;self.pause_fence_generation=-1;self.pause_watch_stop=None
-        self.pointer_motion_return=False;self.consent_id=None;self.native_pause_epoch=None;self.manual_pause_requested=False
+        self.pointer_motion_return=False;self.consent_id=None;self.native_pause_epoch=None;self.manual_pause_requested=False;self.manual_pause_latch=None;self.intervention_latch=None;self.click_context_pending=None
         self.return_state='disabled';self.return_attempted=set();self.return_record=None
         self.recovery=RecoveryLedger();self.target_provider=None;self.target_record=None
         self.cursor_glow=None;self.cursor_glow_pending=None;self.cursor_glow_warning=None;self.cursor_glow_last=None
-        self.physical_takeover=False;self.physical_takeover_warning=None;self.native_activity=None;self.native_activity_last=None;self.native_session_seconds=120;self.native_pointer_source="mouse"
+        self.physical_takeover=False;self.physical_takeover_warning=None;self.native_activity=None;self.native_activity_last=None;self.native_session_seconds=120;self.native_pointer_source="mouse";self.native_click_policy="close";self.context_change_policy='close';self.context_recovery=None;self.context_observation_required=False;self.native_startup_verification='challenge';self.native_allow_permission_wait=False;self.permission_wait_stage=None;self.permission_wait_reason=None;self.permission_wait_failure_stage=None
         self.target_cleanup_warning=None;self.indicator=None;self.indicator_warning=None;self.window_record=None
 
     def own_observer(self,attribute,owner):
@@ -830,7 +864,7 @@ class Server:
         lease=self.owner_cancel_events.get(attribute)
         if lease is not None and lease[0] is owner:lease[1].set()
 
-    def invalidate(self,expected_native=None,expected_indicator=None,warning=None):
+    def invalidate(self,expected_native=None,expected_indicator=None,warning=None,reason=None):
         conditional=expected_native is not None or expected_indicator is not None
         if expected_native is not None:self.cancel_observer('native_activity',expected_native)
         if expected_indicator is not None:self.cancel_observer('indicator',expected_indicator)
@@ -838,8 +872,16 @@ class Server:
         with self.state_lock:
             if expected_native is not None and self.native_activity is not expected_native:return False
             if expected_indicator is not None and self.indicator is not expected_indicator:return False
-            if conditional and self.state not in ('opening','active','pausing','paused','resuming'):return False
+            if conditional and self.state not in ('opening','active','pausing','paused','resuming','auth-waiting'):return False
             if conditional and self.backend:self.backend.cancelled.set()
+            # Fixed categories only: keep the initiating cause through cleanup
+            # and downstream observer authorization loss; never export context.
+            category=reason if reason in ('foreground-context-changed','requested-close') else ('native-observer-fault' if warning=='native' else ('foreground-observer-fault' if warning=='indicator' else 'session-invalidated'))
+            if self.closure_reason is None:self.closure_reason=category
+            if self.state=='auth-waiting':
+                cause={'native-observer-fault':'native-observer-ended','foreground-observer-fault':'observer-unavailable',
+                    'foreground-context-changed':'origin-changed','requested-close':'cancelled'}.get(category)
+                if cause:self.permission_diagnostic(cause)
             if warning=='native':self.physical_takeover_warning='Native activity observer fault; desktop session closed.'
             elif warning=='indicator':self.indicator_warning='Foreground observer heartbeat failed; session closed without retry.'
             self.generation+=1;self.state='closing';self.target_record=None;self.window_record=None
@@ -869,11 +911,11 @@ class Server:
         try:disk_match=_runtime_build.fingerprint(os.path.dirname(__file__))==SERVER_BUILD
         except Exception:disk_match=False
         result=dict(raw,server_version=VERSION,server_build=SERVER_BUILD,server_disk_match=disk_match,active=active,session_state=self.state,
-            capture_allowed=active,input_allowed=active and not self.recovery.inspection_required,
-            sharing_active=bool(raw.get('active')),interruption_policy=self.interruption_policy,
+            capture_allowed=active,input_allowed=active and not self.recovery.inspection_required and not self.context_observation_required,context_change_policy=self.context_change_policy,context_observation_required=self.context_observation_required,closure_reason=self.closure_reason,
+            sharing_active=bool(raw.get('active')),permission_wait_stage=self.permission_wait_stage,permission_wait_reason=self.permission_wait_reason,permission_wait_failure_stage=self.permission_wait_failure_stage,interruption_policy=self.interruption_policy,
             pause={'pause_id':self.pause_id,'reason':self.pause_reason,'automatic_return':self.pointer_motion_return,'automatic_resume':self.pointer_motion_return,
                 'return_state':self.return_state},
-            recovery=self.recovery.snapshot(),fresh_observation_required=not active or self.recovery.inspection_required)
+            recovery=self.recovery.snapshot(),fresh_observation_required=not active or self.recovery.inspection_required or self.context_observation_required)
         if not active:result['logical_size']=[0,0]
         if self.target_cleanup_warning:result['accessibility_cleanup_warning']=self.target_cleanup_warning
         result['native_activity']=native
@@ -883,6 +925,10 @@ class Server:
         result['cursor_glow']=self.cursor_glow.status() if self.cursor_glow else (self.cursor_glow_pending.status() if self.cursor_glow_pending else (self.cursor_glow_last or {'active':False}))
         if self.cursor_glow_warning:result['cursor_glow_warning']=self.cursor_glow_warning
         return result
+
+    def manual_pause_pending(self):
+        latch=self.manual_pause_latch
+        return self.manual_pause_requested or (latch is not None and latch[0] is self.backend and latch[1]==self.consent_id)
 
     def begin_pause(self,reason='manual',expected_native=None,expected_epoch=None):
         # Set the captured operation event before waiting for publication locks.
@@ -895,22 +941,24 @@ class Server:
         event=getattr(backend,'operation_cancelled',None)
         if expected_native is not None and self.native_activity is not expected_native:return False
         if expected_epoch is not None and not expected_native.is_current_yield(expected_epoch):return False
+        if reason=='physical-click' and not expected_native.is_current_intervention(expected_epoch):return False
         if event is not None:event.set()
         with self.state_lock:
             if backend is not self.backend:return False
             if expected_native is not None and self.native_activity is not expected_native:return False
             if expected_epoch is not None and not expected_native.is_current_yield(expected_epoch):return False
-            effective_reason='manual' if self.manual_pause_requested else reason
+            if reason=='physical-click' and not expected_native.is_current_intervention(expected_epoch):return False
+            effective_reason='manual' if self.manual_pause_pending() else reason
             if self.state in ('pausing','paused') and self.pause_reason==effective_reason and (expected_epoch is None or self.native_pause_epoch==expected_epoch):return True
             if self.state not in ('active','resuming','pausing','paused'):raise RuntimeError('Only active sharing can pause')
             current=getattr(self.backend,'operation_cancelled',None)
             if current is not None:current.set()
             self.generation+=1;self.pause_fence_generation=self.generation
             self.state='pausing';self.pause_id=uuid.uuid4().hex
-            self.pause_reason=effective_reason if effective_reason in ('manual','pointer-motion') else 'manual'
+            self.pause_reason=effective_reason if effective_reason in ('manual','pointer-motion','physical-click','context-change') else 'manual'
             self.native_pause_epoch=expected_epoch
             self.return_record=getattr(backend,'confirmed_pointer_record',None)
-            self.return_state='waiting-quiet' if self.pause_reason=='pointer-motion' and self.pointer_motion_return else 'manual'
+            self.return_state='waiting-quiet' if self.pause_reason in ('pointer-motion','physical-click') and (self.pointer_motion_return or self.native_click_policy=='pause-return') else 'manual'
             self.target_record=None;self.window_record=None
             if self.indicator:self.indicator.armed=None
         return True
@@ -939,6 +987,9 @@ class Server:
         event=getattr(self.backend,'operation_cancelled',None)
         if self.native_activity is not controller or not controller.is_current_yield(epoch):return
         if event is not None:event.set()
+        context_record=self.context_recovery
+        if context_record is not None and context_record.get('phase') in ('admitting','settling','capturing') and context_record['native'] is controller:
+            context_record['native_yield']=epoch;return
         def suspend():
             pause_id=None
             try:
@@ -950,17 +1001,52 @@ class Server:
                     if self.native_activity is controller and self.pause_id==pause_id:self.native_activity_lost(controller,'Pause suspension failed')
         threading.Thread(target=suspend,daemon=True,name='pointer-motion-yield').start()
 
+    def physical_intervention(self,controller,epoch):
+        # Sole native reader callback: cancel the captured operation before any
+        # publication lock. Consent/event ownership prevents stale cancellation.
+        backend=self.backend;consent=self.consent_id
+        event=getattr(backend,'operation_cancelled',None)
+        if (self.native_click_policy!='pause-return' or self.native_activity is not controller or
+            backend is not self.backend or consent!=self.consent_id or not controller.is_current_intervention(epoch)):return
+        self.intervention_latch=(controller,backend,consent,epoch)
+        if event is not None:event.set()
+        context_record=self.context_recovery
+        if context_record is not None and context_record.get('phase') in ('admitting','settling','capturing') and context_record['native'] is controller:
+            context_record['native_yield']=epoch;return
+        def suspend():
+            pause_id=None
+            try:
+                if not self.begin_pause('physical-click',controller,epoch):return
+                pause_id=self.pause_id
+                self.finish_pause(pause_id)
+            except Exception:
+                with self.lifecycle_lock:
+                    if self.native_activity is controller and self.pause_id==pause_id:self.native_activity_lost(controller,'Click pause suspension failed')
+        threading.Thread(target=suspend,daemon=True,name='physical-click-pause').start()
+
     def pointer_quiet(self,controller,epoch):
-        if not self.pointer_motion_return:return
+        if not self.pointer_motion_return and self.native_click_policy!='pause-return':return
         threading.Thread(target=self.return_after_quiet,args=(controller,epoch),daemon=True,name='pointer-quiet-return').start()
 
     def return_after_quiet(self,controller,epoch):
         # Serialize with transport request context and response publication. A
         # source callback can still cancel the captured operation immediately.
         with self.execution_lock,self.lifecycle_lock:
-            if not self.pointer_motion_return or self.interruption_policy!='retain-sharing' or self.manual_pause_requested:return False
+            click_return=self.native_click_policy=='pause-return' and controller.is_current_intervention(epoch,quiet=True)
+            if (not self.pointer_motion_return and not click_return) or self.interruption_policy!='retain-sharing' or self.manual_pause_pending():return False
             if self.state not in ('active','pausing','paused','resuming'):return False
             if self.native_activity is not controller or not controller.is_current_yield(epoch,quiet=True):return False
+            if self.native_startup_verification=='passive' and not click_return:
+                proof=getattr(controller,'motion_epoch',None)
+                if type(proof) is not int or proof!=epoch:
+                    self.return_state='waiting-motion-evidence';return False
+            if click_return:
+                try:return self.return_after_click(controller,epoch)
+                except RetainedPause:return False
+                except Exception:
+                    if self.native_activity is controller:self.native_activity_lost(controller,'Click recovery context failed')
+                    return False
+            if getattr(controller,'intervention_epoch',None) is not None:return False
             if self.native_pause_epoch!=epoch:
                 if not self.begin_pause('pointer-motion',controller,epoch):return False
             if self.pause_reason!='pointer-motion':return False
@@ -997,6 +1083,32 @@ class Server:
                 if self.native_activity is controller:self.native_activity_lost(controller,'Pointer return failed')
                 return False
 
+    def return_after_click(self,controller,epoch):
+        # Called under execution+lifecycle ownership. A click may select a new
+        # ordinary window; never reclaim focus or replay the interrupted action.
+        if self.manual_pause_pending() or not controller.is_current_intervention(epoch,quiet=True):return False
+        if self.native_pause_epoch!=epoch or self.pause_reason!='physical-click':
+            if not self.begin_pause('physical-click',controller,epoch):return False
+        self.finish_pause(self.pause_id)
+        if self.state!='paused' or epoch in self.return_attempted:return False
+        self.backend.mapping_guard()
+        module=self.window_guard_module();context=self.indicator.context()
+        signature=module.WindowGuard.signature(context)
+        if context.get('kind')!='window':raise RuntimeError('Click recovery requires an ordinary foreground window')
+        record=self.return_record
+        mapping=getattr(self.backend,'monitor_mapping',None) or getattr(self.backend,'mapping_guard',None)
+        eligible=(record is not None and record.get('consent_id')==self.consent_id and
+                  record.get('session')==self.backend.session and record.get('mapping') is mapping and record.get('context')==signature)
+        if eligible:
+            try:module.pointer_local(context,self.backend.monitor_geometry())
+            except RuntimeError:eligible=False
+        if not controller.is_current_intervention(epoch,quiet=True) or self.manual_pause_pending():return False
+        self.return_attempted.add(epoch);self.return_state='returning' if eligible else 'refreshing-context'
+        self.resume_sharing({'pause_id':self.pause_id},return_record=record if eligible else None,
+                            expected_native=controller,expected_epoch=epoch,click_return=True,click_context=signature)
+        if self.state=='active':self.return_state='returned' if eligible else 'context-refreshed'
+        return self.state=='active'
+
     def check_pause_health(self,pause_id,backend,indicator):
         # Pausing capture/input must not suspend lock, observer or layout checks.
         # A retired watch cannot close a resumed or replacement consent session.
@@ -1015,13 +1127,13 @@ class Server:
                 self.close_backend()
             return False
 
-    def resume_sharing(self,args,return_record=None,expected_native=None,expected_epoch=None):
+    def resume_sharing(self,args,return_record=None,expected_native=None,expected_epoch=None,click_return=False,click_context=None):
         with self.lifecycle_lock:
             self.guard(('paused',))
             if not self.pause_id or args.get('pause_id')!=self.pause_id:
                 raise RetainedPause('Stale or missing pause_id; sharing remains paused')
             pause_id=self.pause_id
-            if return_record is not None and self.manual_pause_requested:raise RetainedPause('Manual pause superseded automatic return')
+            if (return_record is not None or click_return) and self.manual_pause_pending():raise RetainedPause('Manual pause superseded automatic return')
             self.require_runtime()
             if self.backend.cancelled.is_set() or not self.backend.status().get('active'):
                 raise RuntimeError('Sharing consent ended while paused')
@@ -1036,7 +1148,11 @@ class Server:
                 if self.pause_reason=='pointer-motion' or native.status().get('yielded') is True:
                     epoch=(self.native_pause_epoch if self.native_pause_epoch is not None else native.status().get('yield_epoch')) if expected_epoch is None else expected_epoch
                     if not native.is_current_yield(epoch,quiet=True):raise RetainedPause('Physical pointer is not quiet; sharing remains paused')
-                    try:native.resume_from_pause(epoch)
+                    try:
+                        clicked=self.native_click_policy=='pause-return' and native.is_current_intervention(epoch,quiet=True)
+                        if click_return and not clicked:raise RetainedPause('Click recovery epoch changed')
+                        if clicked:native.resume_from_pause(epoch,click_return=True)
+                        else:native.resume_from_pause(epoch)
                     except Exception:
                         current=native.status()
                         if self.native_activity is native and self.state in ('pausing','paused') and current.get('yielded') is True and current.get('yield_epoch')!=epoch:
@@ -1047,18 +1163,23 @@ class Server:
             with self.state_lock:
                 self.guard(('paused',))
                 if self.pause_id!=pause_id:raise RetainedPause('A new motion replaced this resume')
-                if return_record is not None and self.manual_pause_requested:raise RetainedPause('Manual pause superseded automatic return')
-                if return_record is None:self.manual_pause_requested=False
+                if (return_record is not None or click_return) and self.manual_pause_pending():raise RetainedPause('Manual pause superseded automatic return')
+                if return_record is None and not click_return:self.manual_pause_requested=False;self.manual_pause_latch=None;self.intervention_latch=None;self.click_context_pending=None
                 if self.pause_watch_stop:self.pause_watch_stop.set()
                 self.pause_watch_stop=None
                 self.state='resuming';self.generation+=1;self.pause_fence_generation=self.generation
                 if self.request_epoch is not None:self.request_epoch=self.generation
+                self.click_context_pending=None
                 self.backend.operation_cancelled=threading.Event()
                 self.backend.request_cancel=self.cancel_token
                 self.backend.pointer_position=None
                 self.pause_id=None
+            if click_return:
+                if self.manual_pause_pending():raise RetainedPause('Manual pause superseded click recovery')
+                module=self.window_guard_module()
+                if module.WindowGuard.signature(self.indicator.context())!=click_context:raise RuntimeError('Foreground changed during click recovery')
             if return_record is not None:
-                if self.manual_pause_requested:
+                if self.manual_pause_pending():
                     self.begin_pause('manual');self.finish_pause()
                     raise RetainedPause('Manual pause superseded automatic return')
                 module=self.window_guard_module()
@@ -1071,11 +1192,12 @@ class Server:
                 self.indicator.armed=guard
                 try:self.backend.position(*return_record['point'])
                 finally:self.backend.pointer_reader=None;self.backend.window_guard=None;self.backend.endpoint_context=None
-            if return_record is not None and self.manual_pause_requested:
+            if (return_record is not None or click_return) and self.manual_pause_pending():
                 self.begin_pause('manual');self.finish_pause()
                 raise RetainedPause('Manual pause superseded automatic capture')
             self.backend.resume_capture()
-            content=self.capture_result(('resuming',),return_record['context'] if return_record is not None else None)
+            content=self.capture_result(('resuming',),return_record['context'] if return_record is not None else click_context)
+            if click_return:self.backend.mapping_guard()
             self.pause_reason=None
             return content
 
@@ -1085,10 +1207,174 @@ class Server:
             self.invalidate();self.close_backend()
             raise
 
+    def permission_diagnostic(self,reason):
+        category=reason if type(reason) is str and reason in PERMISSION_FAILURE_REASONS else 'unexpected-failure'
+        if self.permission_wait_reason is None:
+            self.permission_wait_reason=category
+            stage=self.permission_wait_stage
+            self.permission_wait_failure_stage=stage if stage in PERMISSION_FAILURE_STAGES else 'not-started'
+
+    def permission_fail(self,reason,record=None):
+        # Fixed categories only. Never stringify exception details, application
+        # text, authentication fields, identifiers, input or dialog contents.
+        category=reason if type(reason) is str and reason in PERMISSION_FAILURE_REASONS else 'unexpected-failure'
+        owned=record is None or (self.backend is record['backend'] and self.consent_id==record['consent'])
+        if owned:self.permission_diagnostic(category)
+        raise PermissionWaitFailure(category)
+
+    def permission_auth_state(self,record=None,publishing=False):
+        try:value=self.indicator.auth_state()
+        except Exception:
+            if record is not None:self.permission_check(record,publishing=publishing)
+            self.permission_fail('observer-unavailable',record)
+        if record is not None:self.permission_check(record,publishing=publishing)
+        if type(value) is not dict or value.get('auth_state') not in ('none','pending','visible','blocked'):
+            self.permission_fail('observer-invalid-state',record)
+        if value['auth_state']=='blocked':
+            reason=value.get('reason')
+            category='blocked-'+reason if type(reason) is str and 'blocked-'+reason in PERMISSION_FAILURE_REASONS else 'observer-invalid-state'
+            self.permission_fail(category,record)
+        return value
+
+    def permission_context(self,record=None):
+        try:return self.read_window_context()
+        except Exception:
+            if record is not None:self.permission_check(record)
+            self.permission_fail('foreground-unavailable',record)
+
+    def permission_check(self,record,publishing=False):
+        if (self.backend is not record['backend'] or self.native_activity is not record['controller'] or
+            self.consent_id!=record['consent'] or self.generation!=record['generation'] or self.state!=('active' if publishing else 'auth-waiting')):
+            if self.backend is record['backend'] and self.consent_id==record['consent']:
+                cause={'native-observer-fault':'native-observer-ended','foreground-observer-fault':'observer-unavailable',
+                    'foreground-context-changed':'origin-changed','requested-close':'cancelled'}.get(self.closure_reason)
+                if cause:self.permission_fail(cause,record)
+            self.permission_fail('owner-changed',record)
+        try:self.guard()
+        except Exception:self.permission_fail('cancelled',record)
+        if time.monotonic()>=record['deadline']:self.permission_fail('deadline-expired',record)
+        if self.backend.cancelled.is_set() or self.manual_pause_pending() or (getattr(self.backend,'operation_cancelled',None) is not None and self.backend.operation_cancelled.is_set()):
+            self.permission_fail('cancelled',record)
+        try:native_active=record['controller'].status().get('active') is True
+        except Exception:self.permission_fail('native-observer-ended',record)
+        if not native_active:self.permission_fail('native-observer-ended',record)
+        authorized=getattr(record['controller'],'_yield_authorized',None)
+        if callable(authorized) and not authorized():self.permission_fail('lease-ended',record)
+        if time.monotonic()>=record['deadline']:self.permission_fail('deadline-expired',record)
+
+    def permission_state(self,record):
+        self.permission_check(record)
+        value=self.permission_auth_state(record)
+        self.permission_check(record)
+        if value.get('auth_state') not in ('none','pending','visible'):self.permission_fail('observer-invalid-state',record)
+        if value.get('origin_window_id')!=record['origin']:self.permission_fail('origin-changed',record)
+        return value
+
+    def prepare_permission_wait(self,context):
+        self.permission_wait_reason=None;self.permission_wait_failure_stage=None;self.permission_wait_stage='preparing'
+        controller=self.native_activity;backend=self.backend
+        origin=context['window_id']
+        initial=self.permission_auth_state()
+        self.guard(('active',))
+        if initial.get('auth_state')!='none' or initial.get('origin_window_id')!=origin:self.permission_fail('origin-changed')
+        current=self.permission_context()
+        if self.window_guard_module().WindowGuard.signature(current)!=self.window_guard_module().WindowGuard.signature(context):self.permission_fail('origin-changed')
+        record={'backend':backend,'controller':controller,'consent':self.consent_id,'generation':self.generation,
+            'origin':origin,'previous_attempt':initial.get('attempt_id'),'deadline':time.monotonic()+120,'epoch':None,'action_category':None}
+        self.permission_signal=PermissionSignal()
+        self.state='auth-waiting';self.permission_wait_stage='preparing'
+        # The separate recorder must have been finalized by the operator. This
+        # suspends only this backend capture; it cannot stop external recorders.
+        try:backend.pause_input()
+        except Exception:self.permission_fail('capture-suspension-failed',record)
+        self.permission_check(record)
+        try:record['epoch']=controller.begin_auth_wait()
+        except Exception:self.permission_fail('native-begin-failed',record)
+        self.permission_check(record)
+        self.permission_wait_stage='waiting-for-prompt'
+        return record
+
+    def finish_permission_wait(self,record):
+        # The single reserved activation click is already complete. No further
+        # task input or screenshots occur until the trusted attempt has ended.
+        self.backend.action_deadline=None
+        self.indicator.armed=self.permission_signal
+        attempt=None;seen_visible=False;grace_deadline=min(record['deadline'],time.monotonic()+PERMISSION_NO_PROMPT_GRACE)
+        while True:
+            value=self.permission_state(record);state=value['auth_state']
+            if state in ('pending','visible'):
+                token=value.get('attempt_id')
+                category=value.get('action_category')
+                if category!='system-authentication':self.permission_fail('attempt-unsupported',record)
+                if record['action_category'] is not None and category!=record['action_category']:self.permission_fail('attempt-changed',record)
+                record['action_category']=category
+                if not isinstance(token,str) or len(token)!=32:self.permission_fail('observer-invalid-state',record)
+                if token==record['previous_attempt'] or (attempt is not None and token!=attempt):self.permission_fail('attempt-changed',record)
+                attempt=token;seen_visible|=state=='visible'
+                self.permission_wait_stage='waiting-for-human'
+            elif seen_visible:
+                if value.get('attempt_id')!=attempt:self.permission_fail('attempt-changed',record)
+                break
+            elif attempt is not None:self.permission_fail('prompt-disappeared',record)
+            else:
+                if value.get('attempt_id')!=record['previous_attempt']:self.permission_fail('attempt-changed',record)
+                current=self.permission_context(record);self.permission_check(record)
+                if current.get('kind')!='window' or current.get('window_id')!=record['origin']:self.permission_fail('origin-changed',record)
+                self.permission_mapping_check()
+                self.permission_check(record)
+                if time.monotonic()>=grace_deadline:
+                    attempt=record['previous_attempt'];break
+            self.permission_check(record)
+            if self.backend.cancelled.wait(.05):self.permission_fail('cancelled',record)
+        self.permission_wait_stage='waiting-for-released-input'
+        try:record['controller'].end_auth_wait(record['epoch'])
+        except Exception:self.permission_fail('native-end-failed',record)
+        value=self.permission_state(record)
+        if value.get('auth_state')!='none':self.permission_fail('prompt-still-active',record)
+        if value.get('attempt_id')!=attempt:self.permission_fail('attempt-changed',record)
+        current=self.permission_context(record)
+        self.permission_check(record)
+        if current.get('kind')!='window' or current.get('window_id')!=record['origin']:self.permission_fail('origin-changed',record)
+        self.permission_mapping_check()
+        self.permission_check(record)
+        try:self.backend.resume_capture()
+        except Exception:self.permission_fail('capture-resume-failed',record)
+        self.permission_check(record)
+        result=self.capture_result(('auth-waiting',),self.window_guard_module().WindowGuard.signature(current))
+        record['attempt']=attempt
+        self.permission_publish_check(record)
+        self.window_record['permission_binding']=record
+        self.permission_wait_stage='prompt-observed' if seen_visible else 'prompt-not-observed'
+        if self.indicator:self.indicator.armed=None
+        return result
+
+    def permission_publish_check(self,record):
+        self.permission_check(record,publishing=True)
+        self.permission_mapping_check()
+        self.permission_check(record,publishing=True)
+        value=self.permission_auth_state(record,publishing=True)
+        self.permission_check(record,publishing=True)
+        if value.get('auth_state')!='none' or value.get('origin_window_id')!=record['origin'] or value.get('attempt_id')!=record['attempt']:
+            self.permission_fail('publication-changed',record)
+
+    def permission_mapping_check(self):
+        mapping=getattr(self.backend,'mapping_guard',None)
+        if not callable(mapping):self.permission_fail('mapping-unavailable')
+        try:mapping()
+        except Exception:self.permission_fail('mapping-changed')
+
     def startup_status_snapshot(self):
         # Only coarse Python-owned fields: no backend/GUI calls or authority writes.
         if not self.state_lock.acquire(blocking=False):return None
         try:
+            if self.context_recovery is not None and self.context_recovery.get('phase') in ('admitting','settling'):
+                return {'server_version':VERSION,'server_build':SERVER_BUILD,'session_state':'context-settling','active':False,
+                    'capture_allowed':False,'input_allowed':False,'snapshot_kind':'context-recovery-read-only',
+                    'fresh_observation_required':True,'portal_closed_confirmed':False,'held_input_count':None}
+            if self.state=='auth-waiting':
+                return {'server_version':VERSION,'server_build':SERVER_BUILD,'session_state':'auth-waiting',
+                    'active':False,'capture_allowed':False,'input_allowed':False,'snapshot_kind':'permission-wait-read-only',
+                    'permission_wait_stage':self.permission_wait_stage,'permission_wait_reason':self.permission_wait_reason,'permission_wait_failure_stage':self.permission_wait_failure_stage,'portal_closed_confirmed':False,'held_input_count':None}
             if self.state!='opening':return None
             controller=self.native_activity
             native={'active':False,'calibration_state':'not-started','calibration_verified':False,
@@ -1118,6 +1404,12 @@ class Server:
                     'request_active':getattr(controller,'notice_active',False) is True,
                     'delivery_unknown':getattr(controller,'notice_delivery_unknown',False) is True,
                     'visibility_verified':False}
+                if getattr(controller,'startup_verification','challenge')=='passive':
+                    native.update(startup_verification='passive',calibration_state='not-requested',
+                        calibration_verified=False,post_arm_required=False,post_arm_state='not-required-passive',
+                        post_arm_verified=False,post_arm_remaining_seconds=None,coverage_verified=False,
+                        readiness_stage='passive-startup')
+                    native['calibration_notice'].update(requested=False,phase=None,request_acknowledged=False,request_active=False)
             return {'server_version':VERSION,'server_build':SERVER_BUILD,
                 'session_state':'opening','active':False,'capture_allowed':False,'input_allowed':False,
                 'startup_snapshot':True,'snapshot_kind':'startup-read-only',
@@ -1150,6 +1442,12 @@ class Server:
     def require_native_ready(self):
         status=self.native_activity.status() if self.native_activity is not None else {}
         if status.get('active') is not True:raise RuntimeError('Native activity observer did not arm')
+        if self.native_startup_verification=='passive':
+            if (status.get('startup_verification')!='passive' or status.get('readiness_kind')!='passive-unverified' or
+                status.get('passive_acknowledged') is not True or status.get('monitor_armed') is not True or
+                status.get('calibration_verified') is not False or status.get('post_arm_verified') is not False):
+                raise RuntimeError('Passive observer acknowledgement is unverified; capture and input refused')
+            return
         if self.interruption_policy=='retain-sharing' and (status.get('post_arm_verified') is not True or status.get('post_arm_state')!='verified'):
             raise RuntimeError('Post-ARM mouse readiness is unverified; capture and input refused')
 
@@ -1165,20 +1463,25 @@ class Server:
             notice.POST_ARM_SUMMARY='Desktop control touchpad readiness'
             notice.POST_ARM_BODY='Move one finger on the touchpad briefly, then lift it. Do not click or press keys.'
         controller=module.Controller(
-            active=lambda:self.state in ('opening','active','pausing','paused','resuming') and self.backend is not None and self.backend.status().get('active') is True,
+            active=lambda:self.state in ('opening','active','pausing','paused','resuming','auth-waiting') and self.backend is not None and self.backend.status().get('active') is True,
             on_activity=lambda:self.native_activity_lost(controller),
             on_fault=lambda error:self.native_activity_lost(controller,error),notice=notice,
             retain_sharing=self.interruption_policy=='retain-sharing',
             on_yield=self.pointer_yielded,on_quiet=self.pointer_quiet,
             **({'session_seconds':self.native_session_seconds} if self.native_session_seconds!=120 else {}),
-            **({'pointer_source':self.native_pointer_source} if self.native_pointer_source!='mouse' else {}))
+            **({'pointer_source':self.native_pointer_source} if self.native_pointer_source!='mouse' else {}),
+            **({'click_policy':self.native_click_policy,'on_intervention':self.physical_intervention} if self.native_click_policy!='close' else {}),
+            **({'startup_verification':self.native_startup_verification} if self.native_startup_verification!='challenge' else {}),
+            **({'allow_permission_wait':True} if self.native_allow_permission_wait else {}))
         # Publish ownership atomically with callback invalidation checks.
         self.own_observer('native_activity',controller)
         controller.start()
         self.require_native_ready()
         self.guard(('opening','active'))
         self.require_runtime()
-        self.physical_takeover=True;self.physical_takeover_warning=None
+        self.physical_takeover=True
+        self.physical_takeover_warning=('Supervised passive observation: fresh keyboard/pointer coverage has not been calibrated.'
+            if self.native_startup_verification=='passive' else None)
 
     def native_activity_lost(self,expected,error=None):
         if not self.invalidate(expected_native=expected,warning='native' if error else None):return
@@ -1251,8 +1554,200 @@ class Server:
             indicator=self.indicator
         if indicator is not None:self.foreground_lost(indicator)
 
+    def defer_click_context_loss(self,expected):
+        # Only the explicit click policy may briefly correlate a foreground
+        # signal with native click evidence. No input/capture while correlating.
+        backend=self.backend;native=self.native_activity;consent=self.consent_id
+        event=getattr(backend,'operation_cancelled',None)
+        if (self.native_click_policy!='pause-return' or self.interruption_policy!='retain-sharing' or
+            expected is not self.indicator or native is None or backend is not self.backend or
+            consent!=self.consent_id or self.state not in ('active','resuming','pausing','paused') or backend.cancelled.is_set()):return False
+        pending=self.click_context_pending
+        if pending is not None and pending['backend'] is backend and pending['event'] is event and pending['native'] is native and pending['consent']==consent:return True
+        record={'backend':backend,'native':native,'indicator':expected,'consent':consent,'event':event,
+                'deadline':time.monotonic()+.25,'done':threading.Event(),'epoch':None}
+        self.click_context_pending=record
+        if event is not None:event.set()
+        def correlate():
+            matched=False
+            try:
+                with self.lifecycle_lock:
+                    if (self.backend is not backend or self.native_activity is not native or self.indicator is not expected or
+                        self.consent_id!=consent or backend.operation_cancelled is not event or backend.cancelled.is_set()):return
+                    backend.pause_input()
+                while time.monotonic()<record['deadline']:
+                    if (self.backend is not backend or self.native_activity is not native or self.indicator is not expected or
+                        self.consent_id!=consent or backend.operation_cancelled is not event or backend.cancelled.is_set()):return
+                    context=expected.context()
+                    if time.monotonic()>=record['deadline']:break
+                    if context.get('available') is True:
+                        self.window_guard_module().WindowGuard.signature(context)
+                        if context.get('kind')!='window':break
+                    elif context.get('reason')!='no-foreground-window':break
+                    epoch=native.status().get('intervention_epoch')
+                    if context.get('available') is True and type(epoch) is int and native.is_current_intervention(epoch):
+                        record['epoch']=epoch;matched=True;self.physical_intervention(native,epoch);return
+                    backend.cancelled.wait(min(.01,max(0,record['deadline']-time.monotonic())))
+            except Exception:pass
+            finally:
+                record['done'].set()
+                if not matched and self.click_context_pending is record and self.backend is backend and self.native_activity is native and self.indicator is expected and self.consent_id==consent and backend.operation_cancelled is event:
+                    if self.invalidate(expected_indicator=expected,reason='foreground-context-changed'):
+                        self.close_backend(expected_indicator=expected)
+        threading.Thread(target=correlate,daemon=True,name='click-context-correlation').start()
+        return True
+
+    def matched_click_context_loss(self):
+        record=self.click_context_pending
+        if record is None:return False
+        record['done'].wait(max(0,record['deadline']-time.monotonic())+.02)
+        epoch=record['epoch']
+        return (type(epoch) is int and self.backend is record['backend'] and self.native_activity is record['native'] and
+                self.consent_id==record['consent'] and self.backend.operation_cancelled is record['event'] and
+                not self.backend.cancelled.is_set() and record['native'].is_current_intervention(epoch))
+
+    def make_window_guard(self,bridge,context,cancel):
+        cls=self.window_guard_module().WindowGuard
+        if self.context_change_policy=='pause-recover':return cls(bridge,context,cancel,failure=ContextRecoveryPending)
+        return cls(bridge,context,cancel)
+
+    def context_recovery_owned(self,record=None):
+        record=self.context_recovery if record is None else record
+        return bool(record is not None and self.context_recovery is record and
+            self.backend is record['backend'] and self.native_activity is record['native'] and
+            self.indicator is record['indicator'] and self.consent_id==record['consent'] and
+            self.backend.operation_cancelled is record['event'] and not self.backend.cancelled.is_set())
+
+    def context_changed(self):
+        if self.defer_context_loss(self.indicator):raise ContextRecoveryPending('Ordinary foreground change is awaiting a fresh observation')
+        raise RuntimeError('Foreground changed; session must close')
+
+    def defer_context_loss(self,expected):
+        if self.context_change_policy!='pause-recover' or self.interruption_policy!='retain-sharing':return False
+        backend=self.backend;native=self.native_activity;consent=self.consent_id
+        event=getattr(backend,'operation_cancelled',None)
+        if (native is None or expected is not self.indicator or backend is not self.backend or
+            consent!=self.consent_id or event is None or backend.cancelled.is_set() or
+            self.state not in ('active','resuming','pausing','paused')):return False
+        existing=self.context_recovery
+        if self.context_recovery_owned(existing) and existing['phase'] in ('admitting','settling'):return True
+        event.set()
+        record={'backend':backend,'native':native,'indicator':expected,'consent':consent,'event':event,
+            'deadline':time.monotonic()+CONTEXT_RECOVERY_SECONDS,'phase':'admitting','native_yield':None}
+        self.context_recovery=record;self.context_observation_required=True
+        threading.Thread(target=self.recover_context,args=(record,),daemon=True,name='ordinary-context-recovery').start()
+        return True
+
+    def recover_context(self,record):
+        backend=record['backend'];native=record['native'];bridge=record['indicator']
+        try:
+            with self.execution_lock,self.lifecycle_lock:
+                if not self.context_recovery_owned(record):return
+                if not self.begin_pause('context-change'):return
+                backend.pause_input();self.close_target_provider()
+                self.state='paused';record['phase']='settling'
+                stable=None;since=None
+                while self.context_recovery_owned(record):
+                    if self.manual_pause_pending():
+                        self.pause_reason='manual';self.state='pausing';self.finish_pause(self.pause_id);record['phase']='manual';return
+                    if time.monotonic()>=record['deadline']:raise RuntimeError('Ordinary foreground recovery timed out')
+                    status=native.status()
+                    if not native._yield_authorized() or status.get('observer_alive') is not True or status.get('auth_waiting'):
+                        raise RuntimeError('Native observer unavailable during foreground recovery')
+                    epoch=record['native_yield'] or (status.get('yield_epoch') if status.get('yielded') else None)
+                    if epoch is not None:
+                        record['phase']='handed-off'
+                        if native.is_current_intervention(epoch):self.physical_intervention(native,epoch)
+                        else:self.pointer_yielded(native,epoch)
+                        return
+                    if status.get('active') is not True:raise RuntimeError('Native observer unavailable during foreground recovery')
+                    backend.mapping_guard()
+                    context=bridge.context()
+                    if not self.context_recovery_owned(record):return
+                    if time.monotonic()>=record['deadline']:raise RuntimeError('Ordinary foreground recovery timed out')
+                    status=native.status()
+                    if not native._yield_authorized() or status.get('observer_alive') is not True:raise RuntimeError('Native observer unavailable during foreground recovery')
+                    if status.get('yielded'):continue
+                    if status.get('active') is not True:raise RuntimeError('Native observer unavailable during foreground recovery')
+                    backend.mapping_guard()
+                    if context.get('available') is not True:
+                        if context.get('reason')!='no-foreground-window':raise RuntimeError('Protected foreground cannot recover')
+                        stable=None;since=None
+                    else:
+                        signature=self.window_guard_module().WindowGuard.signature(context)
+                        if context.get('kind')!='window':raise RuntimeError('Only ordinary application windows can recover')
+                        now=time.monotonic()
+                        if signature!=stable:stable=signature;since=now
+                        if now-since>=CONTEXT_RECOVERY_QUIET:
+                            with self.state_lock:
+                                if not self.context_recovery_owned(record) or self.manual_pause_pending():continue
+                                if time.monotonic()>=record['deadline']:raise RuntimeError('Ordinary foreground recovery timed out')
+                                # Old work retains its cancelled event. Only a new
+                                # observe can produce authority for further input.
+                                backend.operation_cancelled=threading.Event();record['event']=backend.operation_cancelled
+                                self.state='resuming'
+                            try:backend.resume_capture()
+                            except RetainedPause:
+                                if self.manual_pause_pending():
+                                    self.state='pausing';self.pause_reason='manual';self.finish_pause(self.pause_id);record['phase']='manual';return
+                                epoch=native.status().get('yield_epoch')
+                                if native.is_current_yield(epoch):
+                                    record['phase']='handed-off'
+                                    if native.is_current_intervention(epoch):self.physical_intervention(native,epoch)
+                                    else:self.pointer_yielded(native,epoch)
+                                    return
+                                raise
+                            backend.mapping_guard()
+                            current=bridge.context()
+                            if not self.context_recovery_owned(record):return
+                            if time.monotonic()>=record['deadline']:raise RuntimeError('Ordinary foreground recovery timed out')
+                            if self.manual_pause_pending():
+                                self.state='pausing';self.pause_reason='manual';self.finish_pause(self.pause_id);record['phase']='manual';return
+                            if self.window_guard_module().WindowGuard.signature(current)!=stable:
+                                record['event'].set();backend.pause_input();self.state='paused';stable=None;since=None;continue
+                            status=native.status()
+                            if not native._yield_authorized() or status.get('observer_alive') is not True:raise RuntimeError('Native observer unavailable during foreground recovery')
+                            if status.get('yielded'):
+                                record['event'].set();backend.pause_input();record['phase']='handed-off'
+                                epoch=status.get('yield_epoch')
+                                if native.is_current_intervention(epoch):self.physical_intervention(native,epoch)
+                                else:self.pointer_yielded(native,epoch)
+                                return
+                            with self.state_lock:
+                                if not self.context_recovery_owned(record):return
+                                if self.manual_pause_pending():raise ContextManualPause()
+                                backend.mapping_guard()
+                                status=native.status()
+                                if time.monotonic()>=record['deadline'] or not native._yield_authorized() or status.get('observer_alive') is not True:raise RuntimeError('Foreground recovery admission changed')
+                                if status.get('yielded'):
+                                    record['event'].set();record['phase']='handed-off';epoch=status.get('yield_epoch')
+                                    if native.is_current_intervention(epoch):self.physical_intervention(native,epoch)
+                                    else:self.pointer_yielded(native,epoch)
+                                    return
+                                if self.manual_pause_pending():raise ContextManualPause()
+                                if status.get('active') is not True or record['event'].is_set():raise RuntimeError('Foreground recovery admission changed')
+                                self.state='active';self.pause_id=None;self.pause_reason=None
+                                self.window_record=None;self.target_record=None;self.return_record=None
+                                backend.confirmed_pointer_record=None
+                                self.return_state='context-awaiting-observation';record['phase']='complete'
+                                bridge.armed=self.make_window_guard(bridge,context,lambda:self.foreground_lost(bridge))
+                                return
+                    backend.cancelled.wait(.05)
+        except ContextManualPause:
+            if self.context_recovery_owned(record):
+                try:
+                    self.begin_pause('manual');self.finish_pause(self.pause_id);record['phase']='manual'
+                except Exception:
+                    if self.invalidate(expected_indicator=bridge,reason='foreground-context-changed'):self.close_backend(expected_indicator=bridge)
+        except Exception:
+            if self.context_recovery_owned(record):
+                record['phase']='failed'
+                if self.invalidate(expected_indicator=bridge,reason='foreground-context-changed'):self.close_backend(expected_indicator=bridge)
+
     def foreground_lost(self,expected):
-        if not self.invalidate(expected_indicator=expected):return
+        if self.defer_context_loss(expected):return
+        if self.defer_click_context_loss(expected):return
+        if not self.invalidate(expected_indicator=expected,reason='foreground-context-changed'):return
         # Do not do synchronous D-Bus cleanup in the context-signal callback.
         def cleanup():
             self.close_backend(expected_indicator=expected)
@@ -1276,7 +1771,7 @@ class Server:
             self.pause_watch_stop=None
             self.owner_cancel_events.clear()
             self.return_record=None;self.consent_id=None;self.native_pause_epoch=None
-            self.return_state='closed'
+            self.return_state='closed';self.click_context_pending=None
             glow=self.cursor_glow;self.cursor_glow=None
             native=self.native_activity;self.native_activity=None
             indicator=self.indicator;self.indicator=None
@@ -1335,8 +1830,12 @@ class Server:
             self.guard()
             if callable(getattr(self.backend,'check',None)):self.backend.check()
             context=self.indicator.context()
+            self.guard()
+            if callable(getattr(self.backend,'check',None)):self.backend.check()
+            if settle_seconds>0 and time.monotonic()>=deadline:raise RuntimeError('Foreground observation exceeded transition deadline')
             if context.get('available') is True:return context
-            if context.get('reason')!='no-foreground-window' or settle_seconds<=0 or time.monotonic()>=deadline:raise RuntimeError('Foreground context unavailable or system UI active; session must close')
+            if context.get('reason')=='no-foreground-window' and settle_seconds<=0:self.context_changed()
+            if context.get('reason')!='no-foreground-window' or time.monotonic()>=deadline:raise RuntimeError('Foreground context unavailable or system UI active; session must close')
             # This is read-only app-launch settling, never readiness or a retry.
             if callable(getattr(self.backend,'wait_interruptibly',None)):self.backend.wait_interruptibly(.05)
             else:time.sleep(.05)
@@ -1347,35 +1846,37 @@ class Server:
         spec=importlib.util.spec_from_file_location('desktop_window_guard',path)
         module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
 
-    def stable_transition_context(self,deadline):
+    def stable_transition_context(self,deadline,origin=None):
         stable=None;since=None
         while True:
             context=self.read_window_context(max(0,deadline-time.monotonic()))
             signature=self.window_guard_module().WindowGuard.signature(context)
             now=time.monotonic()
             if signature!=stable:stable=signature;since=now
-            if now-since>=.15:return context
             if now>=deadline:raise RuntimeError('Intentional transition did not settle; session must close')
+            if signature!=origin and now-since>=.15:return context
             wait=min(.05,deadline-now)
             if callable(getattr(self.backend,'wait_interruptibly',None)):self.backend.wait_interruptibly(wait)
             else:time.sleep(wait)
 
-    def capture_result(self,allowed,expected_window=None,transition_settle=False,moved_window=None):
+    def capture_result(self,allowed,expected_window=None,transition_settle=False,moved_window=None,transition_origin=None,transition_deadline=None):
         required=getattr(self.backend,'requires_window_guard',False)
-        deadline=time.monotonic()+2
+        deadline=transition_deadline if transition_deadline is not None else time.monotonic()+2
         attempts=0
         while True:
-            before=(self.stable_transition_context(deadline) if transition_settle else self.read_window_context()) if required else None
+            before=(self.stable_transition_context(deadline,transition_origin) if transition_settle else self.read_window_context()) if required else None
             if moved_window is not None:
                 self.backend.mapping_guard()
                 self.window_guard_module().validate_monitor_arrival(before,*moved_window)
-            if expected_window is not None and self.window_guard_module().WindowGuard.signature(before)!=expected_window:raise RuntimeError('Foreground changed after input; session must close')
+            if expected_window is not None and self.window_guard_module().WindowGuard.signature(before)!=expected_window:self.context_changed()
             self.require_runtime()
             self.guard(allowed)
             if self.state=='opening' and self.physical_takeover:self.require_native_ready()
             png=self.backend.capture();self.guard(allowed)
+            if transition_settle and time.monotonic()>=deadline:raise RuntimeError('Transition capture exceeded deadline; no image published')
             if self.state=='opening' and self.physical_takeover:self.require_native_ready()
             after=self.read_window_context(max(0,deadline-time.monotonic()) if transition_settle else 0) if required else None
+            if transition_settle and time.monotonic()>=deadline:raise RuntimeError('Transition observation exceeded deadline; no image published')
             if moved_window is not None:
                 self.backend.mapping_guard()
                 self.window_guard_module().validate_monitor_arrival(after,*moved_window)
@@ -1383,17 +1884,19 @@ class Server:
             # Only the already-authorized single transition may settle across a
             # capture race. Discard pixels and observe again; never repeat input.
             attempts+=1
-            if not transition_settle or attempts>=2 or time.monotonic()>=deadline:raise RuntimeError('Foreground changed while capturing; no image is published')
+            if not transition_settle or attempts>=2 or time.monotonic()>=deadline:self.context_changed()
         with self.state_lock:
             self.guard(allowed)
             if self.state=='opening' and self.physical_takeover:self.require_native_ready()
             operation=getattr(self.backend,'operation_cancelled',None)
             if operation is not None and operation.is_set():raise RetainedPause('Capture discarded by pause')
+            if transition_settle and time.monotonic()>=deadline:raise RuntimeError('Transition publication exceeded deadline; no image published')
             self.state='active'
         self.recovery.observed();self.window_record=None
         observation={'available':False}
         if after:
             self.window_record={'id':uuid.uuid4().hex,'generation':self.generation,'issued':time.monotonic(),'context':after}
+            if transition_settle:self.window_record['publication_deadline']=deadline
             observation={'available':True,'observation_id':self.window_record['id'],'epoch':after['epoch'],'kind':after['kind'],'frame_rect':after['rect'],'expires_seconds':60}
         import struct
         w,h=struct.unpack('>II',png[16:24])
@@ -1410,7 +1913,7 @@ class Server:
         if not isinstance(args,dict):raise ValueError('Arguments must be an object')
         if name=='desktop_status':return [text(self.status())]
         if name=='desktop_close':
-            self.invalidate();self.close_backend();return [text(self.status())]
+            self.invalidate(reason='requested-close');self.close_backend();return [text(self.status())]
         if name=='desktop_pause':
             if self.begin_pause():self.finish_pause()
             else:self.close_backend()
@@ -1425,9 +1928,20 @@ class Server:
             if self.state in ('pausing','paused','resuming'):raise RetainedPause('Sharing is paused; use desktop_resume rather than desktop_start')
             physical=args.get('physical_takeover',False)
             if type(physical) is not bool:raise ValueError('physical_takeover must be boolean')
+            context_policy=args.get('context_change_policy','close')
+            if context_policy not in ('close','pause-recover') or not isinstance(context_policy,str):raise ValueError('Invalid context_change_policy')
+            if context_policy=='pause-recover' and (not physical or policy!='retain-sharing'):raise ValueError('Context recovery requires retained native sharing')
+            click_policy=args.get('click_policy','close')
+            if type(click_policy) is not str or click_policy not in ('close','pause-return'):raise ValueError('Invalid click_policy')
+            if click_policy=='pause-return' and (not physical or policy!='retain-sharing'):raise ValueError('Click pause requires physical_takeover and retained sharing')
             pointer_source=args.get('pointer_source','mouse')
             if not isinstance(pointer_source,str) or pointer_source not in ('mouse','touchpad'):raise ValueError('Invalid pointer_source')
             if pointer_source=='touchpad' and (not physical or policy!='retain-sharing'):raise ValueError('Touchpad observation requires physical_takeover and retained sharing')
+            allow_permission_wait=args.get('allow_permission_wait',False)
+            if type(allow_permission_wait) is not bool or (allow_permission_wait and (not physical or policy!='retain-sharing')):raise ValueError('Permission waiting requires retained native sharing')
+            startup_verification=args.get('startup_verification','challenge')
+            if not isinstance(startup_verification,str) or startup_verification not in ('challenge','passive'):raise ValueError('Invalid startup_verification')
+            if startup_verification=='passive' and (not physical or policy!='retain-sharing'):raise ValueError('Passive supervision requires physical_takeover and retained sharing')
             session_seconds=args.get('session_seconds',120)
             if type(session_seconds) is not int or not 120<=session_seconds<=600:raise ValueError('session_seconds must be an integer from 120 to 600')
             if 'session_seconds' in args and not physical:raise ValueError('session_seconds requires physical_takeover')
@@ -1449,17 +1963,20 @@ class Server:
                         self.backend.cancelled=threading.Event()
                         self.backend.operation_cancelled=threading.Event()
                         self.native_session_seconds=session_seconds
-                        self.native_pointer_source=pointer_source
+                        self.native_pointer_source=pointer_source;self.native_click_policy=click_policy;self.context_change_policy=context_policy;self.context_recovery=None;self.context_observation_required=False
+                        self.native_startup_verification=startup_verification;self.native_allow_permission_wait=allow_permission_wait;self.permission_wait_stage=None;self.permission_wait_reason=None;self.permission_wait_failure_stage=None
                         self.interruption_policy=policy;self.pause_id=None;self.pause_reason=None
                         self.pointer_motion_return=auto_return;self.consent_id=uuid.uuid4().hex;self.backend.consent_id=self.consent_id
-                        self.backend.confirmed_pointer_record=None;self.return_record=None;self.return_attempted=set();self.native_pause_epoch=None;self.manual_pause_requested=False
+                        self.backend.confirmed_pointer_record=None;self.return_record=None;self.return_attempted=set();self.native_pause_epoch=None;self.manual_pause_requested=False;self.manual_pause_latch=None;self.intervention_latch=None;self.click_context_pending=None
                         self.return_state='ready' if auto_return else 'disabled'
-                        self.state='opening';self.target_record=None
+                        self.state='opening';self.target_record=None;self.closure_reason=None
                 if previous_owned:
                     self.invalidate();self.close_backend()
                     raise RuntimeError('Previous session resources required cleanup; call desktop_start again for a new consent session')
                 try:
-                    if getattr(self.backend,'requires_window_guard',False) and self.indicator is None:self.preflight_context()
+                    if getattr(self.backend,'requires_window_guard',False) and self.indicator is None:
+                        preflight=self.preflight_context()
+                        if self.native_allow_permission_wait and getattr(preflight,'auth_wait_protocol',0)!=3:raise RuntimeError('Permission-wait observer protocol unavailable')
                     if physical:
                         self.backend.start(defer_capture=True)
                         self.enable_physical_guard()
@@ -1478,13 +1995,18 @@ class Server:
                         metadata=json.loads(content[0]['text']);metadata.update(self.status());content[0]=text(metadata)
                     return content
                 except BaseException:self.close_backend();raise
+            if 'allow_permission_wait' in args and allow_permission_wait!=self.native_allow_permission_wait:raise ValueError('An active permission-wait mode cannot change')
+            if 'startup_verification' in args and startup_verification!=self.native_startup_verification:raise ValueError('An active startup verification mode cannot be changed')
             if 'pointer_source' in args and pointer_source!=self.native_pointer_source:raise ValueError('An active input source cannot be changed')
+            if 'context_change_policy' in args and context_policy!=self.context_change_policy:raise ValueError('An active context recovery policy cannot change')
+            if 'click_policy' in args and click_policy!=self.native_click_policy:raise ValueError('An active click policy cannot be changed')
             if 'session_seconds' in args and session_seconds!=self.native_session_seconds:raise ValueError('An active native lease cannot be changed; close before selecting a new initial limit')
             if physical and not self.physical_takeover:raise RuntimeError('Device-source observation must be selected before a new consent session')
             expected=self.window_guard_module().WindowGuard.signature(self.window_record['context']) if self.window_record else None
             return self.capture_result(('active',),expected)
         self.guard(('active',));self.ensure_backend()
         if name=='desktop_action':
+            if self.context_observation_required:raise RetainedPause('Ordinary context recovered; inspect desktop_observe before further input')
             record=self.target_record;self.target_record=None
             window_record=self.window_record;self.window_record=None
             self.recovery.begin(args.get('recovery_observation_id'))
@@ -1493,6 +2015,16 @@ class Server:
             # the current partial-result report.
             self.backend.transaction_info={'completed_steps':0,'failed_step':None,'input_events_attempted':0,'input_characters_completed':0}
             try:
+                permission=args.get('wait_for_permission',False)
+                if type(permission) is not bool:raise ValueError('wait_for_permission must be boolean')
+                if 'recording_stopped' in args and type(args['recording_stopped']) is not bool:raise ValueError('recording_stopped must be boolean')
+                if permission:
+                    action=args.get('action',{})
+                    if (args.get('focus_transition') is not True or args.get('recording_stopped') is not True or
+                        any(args.get(k,False) for k in ('await_context_change','window_move_to_shared','window_fit_shared','window_normalize_for_move')) or
+                        'target_id' in args or action.get('type')!='click' or action.get('button','left')!='left' or action.get('count',1)!=1 or
+                        not set(action)<={'type','button','count','x','y'}):raise ValueError('Permission waiting requires one separate observed Install click and stopped owned recorders')
+                    if not self.native_allow_permission_wait or self.interruption_policy!='retain-sharing' or self.native_activity is None or self.native_activity.status().get('auth_wait_supported') is not True or getattr(self.indicator,'auth_wait_protocol',0)!=3:raise RuntimeError('Permission waiting capability unavailable')
                 monitor_move=args.get('window_move_to_shared',False);moved_window=None
                 normalize_window=args.get('window_normalize_for_move',False)
                 if type(normalize_window) is not bool:raise ValueError('window_normalize_for_move must be boolean')
@@ -1501,15 +2033,25 @@ class Server:
                 if type(monitor_move) is not bool:raise ValueError('window_move_to_shared must be boolean')
                 if sum((normalize_window,fit_window,monitor_move))>1:raise ValueError('Window setup gestures require separate observed actions')
                 transition=args.get('focus_transition',False)
+                await_change=args.get('await_context_change',False)
+                if type(await_change) is not bool:raise ValueError('await_context_change must be boolean')
+                if await_change:
+                    action=args.get('action',{})
+                    launch_click=action.get('type')=='click' and action.get('button','left')=='left' and action.get('count',1)==1 and set(action)<= {'type','button','count','x','y'}
+                    launch_return=action=={'type':'keys','keys':['Return']}
+                    if transition is not True or monitor_move or normalize_window or fit_window or not getattr(self.backend,'requires_window_guard',False) or not (launch_click or launch_return):raise ValueError('await_context_change requires a separate guarded launch click or Return transition')
                 if (monitor_move or normalize_window or fit_window) and (transition is not True or not getattr(self.backend,'requires_window_guard',False)):raise ValueError('Monitor move requires a guarded explicit focus transition')
                 if type(transition) is not bool:raise ValueError('focus_transition must be boolean')
                 if transition and 'target_id' in args:raise ValueError('A focus transition cannot reuse an editable-control identity')
                 if getattr(self.backend,'requires_window_guard',False):
                     if not window_record or args.get('window_observation_id')!=window_record['id'] or window_record['generation']!=self.generation:raise RuntimeError('Foreground observation expired or invalid; inspect a fresh screenshot before input')
                     def cancel_window():
+                        if self.context_change_policy=='pause-recover':
+                            self.foreground_lost(self.indicator);return
+                        if self.defer_click_context_loss(self.indicator):raise ClickContextPending('Foreground change awaiting physical click evidence')
                         self.backend.cancelled.set()
                         if self.cancel_token:self.cancel_token.set()
-                    module=self.window_guard_module();window=module.WindowGuard(self.indicator,window_record['context'],cancel_window);window.check()
+                    module=self.window_guard_module();window=self.make_window_guard(self.indicator,window_record['context'],cancel_window);window.check()
                     if time.monotonic()-window_record['issued']>60:
                         # A matching old token grants no input. If its foreground
                         # still matches, return a fresh inspected-image opportunity
@@ -1559,13 +2101,18 @@ class Server:
                             module.monitor_shortcut_configured(direction)
                             mapping.window_move_direction(self.read_window_context(),direction)
                             window.check()
-                        self.indicator.armed=None
+                        self.indicator.armed=self.permission_signal if permission else None
                     self.backend.begin_transition=begin_transition if transition else None
                 if 'target_id' in args:
                     if not record or args['target_id']!=record['id'] or record['epoch']!=self.generation or time.monotonic()-record['issued']>60:
                         raise RuntimeError('Target identity expired or invalid; inspect a fresh desktop_observe(inspect_target=true) result before input')
                     target=record['target'];target.live(active=True,focused=True);self.guard(('active',))
                 self.backend.target_guard=target
+                auth_record=None
+                if permission:
+                    window.validate_points(args['action'],(geometry['x'],geometry['y']))
+                    auth_record=self.prepare_permission_wait(window_record['context'])
+                transition_deadline=time.monotonic()+5 if await_change else None
                 try:
                     self.backend.action(args['action'])
                     if window is not None and not transition:window.check()
@@ -1573,12 +2120,34 @@ class Server:
                     self.backend.target_guard=None;self.backend.pointer_reader=None;self.backend.begin_transition=None;self.backend.endpoint_context=None
                     self.backend.window_guard=None;self.backend.window_transition=False;self.backend.transition_activation_key=None
                     if self.indicator:self.indicator.armed=None
-                content=self.capture_result(('active',),window.baseline if window is not None and not transition else None,transition_settle=transition,moved_window=moved_window)
-            except BaseException:
+                if permission:
+                    content=self.finish_permission_wait(auth_record)
+                else:content=self.capture_result(('active',),window.baseline if window is not None and not transition else None,transition_settle=transition,moved_window=moved_window,transition_origin=window.baseline if await_change else None,transition_deadline=transition_deadline)
+            except BaseException as action_error:
                 self.backend.pointer_reader=None;self.backend.begin_transition=None;self.backend.endpoint_context=None
                 self.backend.window_guard=None;self.backend.window_transition=False;self.backend.transition_activation_key=None
                 if self.indicator:self.indicator.armed=None
                 self.recovery.finish(getattr(self.backend,'transaction_info',{}),failed=True)
+                progress=getattr(self.backend,'transaction_info',{})
+                if (isinstance(action_error,ValueError) and not permission and window is not None and
+                    self.interruption_policy=='retain-sharing' and self.native_activity is not None and
+                    progress.get('input_events_attempted')==0 and progress.get('completed_steps')==0):
+                    # Only a successfully bound, fresh window token can reach
+                    # this path. Invalid/stale identities and partial input fail.
+                    self.backend.check();self.backend.mapping_guard();window.check()
+                    native=self.native_activity;status=native.status()
+                    if not native._yield_authorized() or status.get('active') is not True or status.get('observer_alive') is not True:raise RuntimeError('Native readiness changed during validation refusal')
+                    content=self.capture_result(('active',),window.baseline)
+                    self.backend.mapping_guard();window.check();status=native.status()
+                    if self.native_activity is not native or not native._yield_authorized() or status.get('active') is not True or status.get('observer_alive') is not True:raise RuntimeError('Native readiness changed before validation image')
+                    metadata=json.loads(content[0]['text']);metadata['action_refused']='Invalid action arguments; zero input was sent. Inspect the fresh image before choosing a corrected action.'
+                    content[0]=text(metadata);return content
+                if permission:
+                    if self.permission_wait_reason is None:
+                        self.permission_wait_reason='action-failed'
+                        stage=self.permission_wait_stage
+                        self.permission_wait_failure_stage=stage if stage in PERMISSION_FAILURE_STAGES else 'not-started'
+                    raise RuntimeError('Permission wait interrupted or could not be verified') from None
                 raise
             self.recovery.finish(getattr(self.backend,'transaction_info',{}))
             # Capture assembled status before finish; refresh only metadata.
@@ -1596,6 +2165,7 @@ class Server:
         expected=self.window_guard_module().WindowGuard.signature(self.window_record['context']) if self.window_record else None
         content=self.capture_result(('active',),expected)
         if name=='desktop_observe':
+            self.context_observation_required=False
             metadata=json.loads(content[0]['text'])
             if args.get('inspect_target') is True:
                 if target is not None:
@@ -1615,6 +2185,11 @@ class Server:
 
 
     def error_result(self,error,name=None):
+        if isinstance(error,ContextRecoveryPending):
+            if self.context_recovery_owned():error=RetainedPause('Foreground changed; pending work was cancelled and a fresh observation is required')
+            else:error=RuntimeError('Foreground recovery could not be admitted; session must close')
+        if name in ('desktop_action','desktop_observe','desktop_resume') and isinstance(error,ClickContextPending) and self.matched_click_context_loss():
+            error=RetainedPause('Foreground change matched a physical click; interrupted work was discarded')
         retained=isinstance(error,RetainedPause) and self.interruption_policy=='retain-sharing'
         if name in ('desktop_start','desktop_observe','desktop_action','desktop_resume','desktop_pause') and not retained:
             try:self.invalidate();self.close_backend()
@@ -1647,6 +2222,10 @@ class Server:
     def fence_response(self,request,response):
         content=(response or {}).get('result',{}).get('content',[])
         if any(c.get('type')=='image' for c in content):
+            permission_binding=(self.window_record or {}).get('permission_binding')
+            if permission_binding is not None:
+                try:self.permission_publish_check(permission_binding)
+                except Exception:return {'jsonrpc':'2.0','id':request.get('id'),'result':self.error_result('Permission state invalidated image publication',request.get('params',{}).get('name'))}
             if request.get('params',{}).get('name')=='desktop_start' and self.physical_takeover:
                 try:self.require_native_ready()
                 except Exception:
@@ -1655,21 +2234,25 @@ class Server:
                 return {'jsonrpc':'2.0','id':request.get('id'),'result':self.error_result(RetainedPause('Screenshot discarded by pause; no image published'),request.get('params',{}).get('name'))}
             if getattr(self.backend,'requires_window_guard',False):
                 try:
-                    if not self.window_record or self.window_guard_module().WindowGuard.signature(self.read_window_context())!=self.window_guard_module().WindowGuard.signature(self.window_record['context']):raise RuntimeError('Foreground changed')
-                except Exception:
+                    if self.window_record and self.window_record.get('publication_deadline') is not None and time.monotonic()>=self.window_record['publication_deadline']:raise RuntimeError('Transition publication deadline expired')
+                    if not self.window_record or self.window_guard_module().WindowGuard.signature(self.read_window_context())!=self.window_guard_module().WindowGuard.signature(self.window_record['context']):self.context_changed()
+                except Exception as foreground_error:
                     name=request.get('params',{}).get('name');self.recovery.observation_id=None
                     if name=='desktop_action':self.recovery.finish(getattr(self.backend,'transaction_info',{}),failed=True)
-                    return {'jsonrpc':'2.0','id':request.get('id'),'result':self.error_result('Screenshot invalidated by foreground change; no image published',name)}
+                    return {'jsonrpc':'2.0','id':request.get('id'),'result':self.error_result(foreground_error if isinstance(foreground_error,ContextRecoveryPending) else 'Screenshot invalidated by foreground change; no image published',name)}
             if request.get('_generation',self.generation)!=self.generation or self.state!='active' or (self.cancel_token and self.cancel_token.is_set()) or (self.backend and self.backend.cancelled.is_set()) or (getattr(self.backend,'operation_cancelled',None) is not None and self.backend.operation_cancelled.is_set()):
                 name=request.get('params',{}).get('name');self.recovery.observation_id=None;self.target_record=None;self.window_record=None
                 if name=='desktop_action':self.recovery.finish(getattr(self.backend,'transaction_info',{}),failed=True)
                 return {'jsonrpc':'2.0','id':request.get('id'),'result':self.error_result(RetainedPause('Screenshot invalidated by pause; no image published') if self.interruption_policy=='retain-sharing' and (self.state in ('pausing','paused') or (getattr(self.backend,'operation_cancelled',None) is not None and self.backend.operation_cancelled.is_set())) else 'Screenshot invalidated by session closure; no image published',name)}
             if getattr(self.backend,'requires_window_guard',False):
                 bridge=self.indicator
-                guard=self.window_guard_module().WindowGuard(bridge,self.window_record['context'],lambda:self.foreground_lost(bridge))
+                guard=self.make_window_guard(bridge,self.window_record['context'],lambda:self.foreground_lost(bridge))
                 bridge.armed=guard
-                try:guard.check()
-                except Exception:return {'jsonrpc':'2.0','id':request.get('id'),'result':self.error_result('Foreground changed before publication; session closed',request.get('params',{}).get('name'))}
+                try:
+                    guard.check()
+                    if permission_binding is not None:self.permission_publish_check(permission_binding)
+                    if self.window_record and self.window_record.get('publication_deadline') is not None and time.monotonic()>=self.window_record['publication_deadline']:raise RuntimeError('Transition publication deadline expired')
+                except Exception as foreground_error:return {'jsonrpc':'2.0','id':request.get('id'),'result':self.error_result(foreground_error if isinstance(foreground_error,ContextRecoveryPending) else 'Foreground changed before publication; session closed',request.get('params',{}).get('name'))}
         return response
 
     def shutdown(self):
@@ -1730,8 +2313,20 @@ class StdioTransport:
                                 except queue.Full:pass # Busy: retain normal serialized handling below.
                                 else:continue
                         if params['name']=='desktop_pause':
-                            if not self.server.begin_pause():self.interrupt(all_requests=True)
-                        if params['name']=='desktop_close':self.interrupt(all_requests=True);self.server.invalidate()
+                            # Reader must never wait for state/publication locks.
+                            # Bind manual intent to this consent owner before
+                            # cancelling only its current operation. The worker
+                            # performs the fenced state transition later.
+                            backend=self.server.backend;consent=self.server.consent_id
+                            request['_pause_owner']=(backend,consent)
+                            operation=getattr(backend,'operation_cancelled',None)
+                            if backend is not self.server.backend or consent!=self.server.consent_id:
+                                request['_admission_error']='Pause consent owner changed'
+                            elif self.server.interruption_policy=='retain-sharing' and backend is not None:
+                                self.server.manual_pause_latch=(backend,consent)
+                                if operation is not None:operation.set()
+                            else:self.interrupt(all_requests=True)
+                        if params['name']=='desktop_close':self.interrupt(all_requests=True)
                     request['_generation']=self.server.generation;token=threading.Event()
                     if rid is not None:
                         with self.token_lock:self.tokens[rid]=token
@@ -1752,9 +2347,15 @@ class StdioTransport:
                 request,token=item;params=request.get('params') or {}
                 self.server.execution_lock.acquire()
                 try:
+                    latch=self.server.manual_pause_latch
+                    if latch is not None and latch[0] is self.server.backend and latch[1]==self.server.consent_id and self.server.state in ('active','resuming'):
+                        self.server.begin_pause()
                     if '_protocol_error' in request:response={'jsonrpc':'2.0','id':request.get('id'),'error':{'code':-32600,'message':request['_protocol_error']}}
                     elif '_parse_error' in request:response={'jsonrpc':'2.0','id':request.get('id'),'error':{'code':-32700,'message':request['_parse_error']}}
                     else:
+                        if '_pause_owner' in request:
+                            owner,consent=request['_pause_owner']
+                            if owner is not self.server.backend or consent!=self.server.consent_id:request['_admission_error']='Pause consent owner changed'
                         self.server.cancel_token=token;self.server.request_epoch=request.get('_generation')
                         if self.disconnected.is_set() and request.get('method')=='tools/call' and params.get('name') not in ('desktop_status','desktop_close'):token.set()
                         response=self.server.handle(request)

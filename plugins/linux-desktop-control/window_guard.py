@@ -1,8 +1,8 @@
 """Foreground-context fences, not physical-input provenance or atomic dispatch."""
 import math
 class WindowGuard:
- def __init__(self,bridge,baseline,cancel):
-  self.bridge=bridge;self.baseline=self.signature(baseline);self.cancel=cancel;self.failed=False
+ def __init__(self,bridge,baseline,cancel,failure=RuntimeError):
+  self.bridge=bridge;self.baseline=self.signature(baseline);self.cancel=cancel;self.failed=False;self.failure=failure
   if not baseline.get('available'):raise RuntimeError('Foreground observation unavailable')
  @staticmethod
  def signature(context):
@@ -10,7 +10,7 @@ class WindowGuard:
   if context.get('available') is not True or not isinstance(epoch,int) or isinstance(epoch,bool) or epoch<0 or not isinstance(identity,str) or not identity or kind not in ('window','overview') or not isinstance(rect,list) or len(rect)!=4 or not all(isinstance(x,(int,float)) and not isinstance(x,bool) and math.isfinite(x) for x in rect) or rect[2]<=0 or rect[3]<=0:raise RuntimeError('Invalid foreground observation')
   return (identity,epoch,tuple(rect),kind)
  def fail(self):
-  self.failed=True;self.cancel();raise RuntimeError('Foreground target changed or became unavailable; remaining input cancelled. Session must close; wait for explicit readiness.')
+  self.failed=True;self.cancel();raise self.failure('Foreground target changed or became unavailable; remaining input cancelled. Session must close; wait for explicit readiness.')
  def check(self):
   if self.failed:self.fail()
   try:current=self.signature(self.bridge.context())

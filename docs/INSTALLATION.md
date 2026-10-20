@@ -39,7 +39,7 @@ Use GNOME's sharing control to stop whenever you want. A stopped or revoked sess
 
 Ordinary control does not require the native activity helper. For physical-input monitoring, separately review and build the [native helper](../native-activity/README.md). It needs administrator-approved installation and system authorization, and receives raw input internally. Enter administrator passwords only into the system's own dialog.
 
-Protected sessions require keyboard/mouse calibration. Retained-sharing mode adds a mouse-only readiness check before capture. Calibration lasts only while that observer stays alive. Do not cache a pass across new sessions or skip a failed check.
+The default protected startup uses keyboard/pointer calibration. An explicitly selected supervised passive startup skips manual challenges while reporting source coverage as unverified; see [passive startup](PASSIVE_STARTUP.md). Retained-sharing mode adds a mouse-only readiness check before capture. Calibration lasts only while that observer stays alive. Do not cache a pass across new sessions or skip a failed check.
 
 Default sessions last 120 seconds. Native-protected sessions may explicitly choose an initial 120–600-second limit before calibration; pause and heartbeat do not renew it. Automatic cursor return is opt-in and limited to covered relative movement in the same verified context. See [retained sharing](RETAINED_SHARING.md).
 

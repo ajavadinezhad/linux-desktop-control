@@ -11,7 +11,7 @@ with tempfile.TemporaryDirectory(prefix='ldc-helper-build-') as work:
  command += [str(root/'opener.c'),'/usr/lib/x86_64-linux-gnu/libudev.so.1','/usr/lib/x86_64-linux-gnu/libsystemd.so.0','-o',str(binary)]
  subprocess.run(command,check=True);binary.chmod(0o755)
  policy=stage/'usr/share/polkit-1/actions/org.codex.desktop-activity.policy';policy.parent.mkdir(parents=True);shutil.copyfile(root/policy.name,policy);policy.chmod(0o644)
- control=stage/'DEBIAN/control';control.parent.mkdir();control.write_text('Package: codex-desktop-activity\nVersion: 0.8.7\nArchitecture: amd64\nMaintainer: Independent Linux Desktop Control project\nDepends: libc6, libudev1, libsystemd0, pkexec\nDescription: Optional temporary local device-activity monitor\n Receives input internally and exports only coarse takeover/fault signals.\n No service, setuid binary, input group or persistent device ACL.\n')
+ control=stage/'DEBIAN/control';control.parent.mkdir();control.write_text('Package: codex-desktop-activity\nVersion: 0.8.10\nArchitecture: amd64\nMaintainer: Independent Linux Desktop Control project\nDepends: libc6, libudev1, libsystemd0, pkexec\nDescription: Optional temporary local device-activity monitor\n Receives input internally and exports only coarse takeover/fault signals.\n No service, setuid binary, input group or persistent device ACL.\n')
  control.chmod(0o644)
  for directory,_,_ in os.walk(stage):pathlib.Path(directory).chmod(0o755)
  subprocess.run(['dpkg-deb','--root-owner-group','--build',str(stage),str(output)],check=True)
