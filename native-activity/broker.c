@@ -49,6 +49,8 @@ static bool observation_touchpad_motion_after_arm;
 static bool device_touchpad[MAX_DEVICES], touchpad_snapshot_contact[MAX_DEVICES];
 static struct tp_limits touchpad_limits[MAX_DEVICES];
 static struct tp_state touchpad_states[MAX_DEVICES];
+/* First parser rejection only; exported after every input fd is closed. */
+static enum tp_reject_reason touchpad_terminal_reject;
 static bool observation_primary_after_arm, observation_relative_after_arm, observation_yield_sent;
 static unsigned pointer_epoch;
 static long long pointer_last_motion;
@@ -115,12 +117,15 @@ static int report(const char *message) {
     /* Fixed terminal evidence only; raw descriptors are already gone. Neither
      * these bits nor successful export establishes input authority. */
     char payload[128];
-    int length = snprintf(payload, sizeof payload, "%s%s%u%u%u%u\n", message,
+    int length = snprintf(payload, sizeof payload, "%s%s%u%u%u%u\n%s%s%s", message,
         touchpad_yield_mode ? "OBS_TPAD_" : "OBS_DIAG_",
         (touchpad_yield_mode ? calibration_touchpad_motion : calibration_pointer_stream) ? 1U : 0U,
         observation_primary_after_arm ? 1U : 0U,
         (touchpad_yield_mode ? observation_touchpad_motion_after_arm : observation_relative_after_arm) ? 1U : 0U,
-        observation_yield_sent ? 1U : 0U);
+        observation_yield_sent ? 1U : 0U,
+        touchpad_terminal_reject==TP_REJECT_NONE?"":"TP_REJECT_",
+        touchpad_terminal_reject==TP_REJECT_NONE?"":tp_reject_name(touchpad_terminal_reject),
+        touchpad_terminal_reject==TP_REJECT_NONE?"":"\n");
     if (length <= 0 || (size_t)length >= sizeof payload) return -1;
     ssize_t n = send(CONTROL, payload, (size_t)length, MSG_NOSIGNAL | MSG_DONTWAIT);
     return n == length ? 0 : -1;
@@ -332,7 +337,10 @@ static int drain(int fd) {
                 }
                 if(pad) {
                     enum tp_result result=tp_event(&touchpad_states[fd-4],&event,&touchpad_limits[fd-4]);
-                    if(result==TP_UNSUPPORTED)return -1;
+                    if(result==TP_UNSUPPORTED){
+                        if(touchpad_terminal_reject==TP_REJECT_NONE)touchpad_terminal_reject=touchpad_states[fd-4].reject_reason;
+                        return -1;
+                    }
                     if(result==TP_CONTACT||result==TP_MOTION||event.type==EV_KEY)auth_last_activity=current;
                     continue;
                 }
@@ -390,7 +398,10 @@ static int drain(int fd) {
                 if(calibrating&&(calibration_reset_pending||stamp<=calibration_time))continue;
                 bool was_active=tp_active(&touchpad_states[fd-4]);
                 enum tp_result result=tp_event_contacts(&touchpad_states[fd-4],&event,&touchpad_limits[fd-4],armed&&click_pause_mode?(multi_contact_mode?4:2):1);
-                if(result==TP_UNSUPPORTED){collector_phase=50;return -1;}
+                if(result==TP_UNSUPPORTED){
+                    if(touchpad_terminal_reject==TP_REJECT_NONE)touchpad_terminal_reject=touchpad_states[fd-4].reject_reason;
+                    collector_phase=50;return -1;
+                }
                 if(armed) {
                     if(result==TP_INTERVENTION) {
                         if(!click_pause_mode||pointer_click(current))return -1;

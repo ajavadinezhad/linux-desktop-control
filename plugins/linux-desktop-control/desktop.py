@@ -17,7 +17,7 @@ import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import Gio, GLib, Gst
 
-VERSION = '0.8.31'
+VERSION = '0.8.32'
 # Freeze identity at module load: old providers must never report a new disk build.
 _build_spec = importlib.util.spec_from_file_location('_desktop_runtime_build', os.path.join(os.path.dirname(__file__), 'runtime_build.py'))
 _runtime_build = importlib.util.module_from_spec(_build_spec)

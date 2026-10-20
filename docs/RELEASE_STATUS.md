@@ -2,7 +2,9 @@
 
 **Preview, GNOME-only:** currently targets GNOME Shell 51 on Wayland. Other platforms are planned and are not yet supported.
 
-Current source update: plugin **0.8.31**, native helper **0.8.14**, GNOME authentication observer protocol **3** unchanged. Explicit multi-contact recovery extends touchpad intervention handling through four contacts, retaining pause until all contacts lift. It uses the existing released-quiet and private context-settling path without replay or pointer/focus reclaim. Independent review, **607 controller/recorder tests**, **73 native checks**, and the seven-tool loader check passed. Live four-finger acceptance remains pending.
+Current source update: plugin **0.8.32**, native helper **0.8.15**, GNOME authentication observer protocol **3** unchanged. This is a diagnostic update, not a claimed four-finger repair. After cleanup, the helper may preserve one fixed parser rejection category without raw values, coordinates or device identities. Old/missing diagnostic reports do not alter authority or outcomes. Independent review, **613 controller/recorder tests**, **77 native checks**, and the seven-tool loader check passed. Live diagnosis remains pending.
+
+The preceding0.8.31 passed607 controller/recorder tests,73 native checks and loader validation, but the live four-finger contact check failed in the parser after an intervention. Sharing closed cleanly with no held input. The exact rejected case was not preserved, so four-finger and workspace gesture acceptance remain unresolved.
 
 The preceding0.8.30 passed600 controller/recorder tests and loader validation. A live Alt+Tab cycle retained sharing, recovered into the selected window, and allowed a subsequent harmless pointer action. A later four-finger gesture hit the helper’s unsupported contact path and closed sharing. The keyboard result is scoped; workspace gesture acceptance was not established.
 
