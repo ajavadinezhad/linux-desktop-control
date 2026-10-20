@@ -2,7 +2,13 @@
 
 **Preview — currently supports GNOME Shell 51 on Wayland only.** Other platforms are planned; they are not supported yet.
 
-ChatGPT, working through your Linux desktop. Open apps, create slides, and paint using the same visible controls you use.
+ChatGPT, working through your Linux desktop. Open apps, make music, create slides, and paint using the same visible controls you use.
+
+## This time, ChatGPT makes music
+
+https://github.com/user-attachments/assets/5a0e5379-a9b6-48dd-8544-8cb5b7256afd
+
+**8 minutes 50 seconds, with system audio.** Watch ChatGPT find and open LMMS, enter piano notes and minor-key chords, add cello and drums, then save and export a short original sketch. Real GUI operation at normal speed; opening private setup is trimmed and brief background details are covered.
 
 ## Look, ChatGPT is drawing a bear
 
