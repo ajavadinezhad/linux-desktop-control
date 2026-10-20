@@ -1,6 +1,6 @@
 # Install Linux Desktop Control
 
-This is a supervised beta licensed under [GPL-3.0-or-later](../LICENSE). See [licensing scope and third-party notices](../LICENSING.md). The repository remains private until its visibility change is completed.
+This is a supervised beta licensed under [GPL-3.0-or-later](../LICENSE). See [licensing scope and third-party notices](../LICENSING.md). The repository is public.
 
 ## 1. Check requirements
 
@@ -9,7 +9,7 @@ This is a supervised beta licensed under [GPL-3.0-or-later](../LICENSE). See [li
 - System Python 3 with PyGObject/Gio, GStreamer, PipeWire capture elements and libxkbcommon.
 - GNOME desktop portals and PipeWire working in the logged-in session.
 
-The preflight checks exact dependencies without requesting sharing or changing settings. From a terminal, get the private repository and check it:
+The preflight checks exact dependencies without requesting sharing or changing settings. From a terminal, get the repository and check it:
 
 ```sh
 git clone https://github.com/ajavadinezhad/linux-desktop-control.git
@@ -17,7 +17,7 @@ cd linux-desktop-control
 ./install.sh --check
 ```
 
-GitHub authentication and repository permission are required. If the Codex executable is elsewhere, set `CODEX_BIN` to its actual installed path before running the check. Resolve reported missing dependencies using your distribution's packages. Do not bypass a failed GNOME-version check and assume support.
+If the Codex executable is elsewhere, set `CODEX_BIN` to its actual installed path before running the check. Resolve reported missing dependencies using your distribution's packages. Do not bypass a failed GNOME-version check and assume support.
 
 ## 2. Install the local plugin
 
