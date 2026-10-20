@@ -1,5 +1,16 @@
 # Changes
 
+Current status: see [release status](docs/RELEASE_STATUS.md). Older entries below are checkpoint records.
+
+## 0.8.17 — reduce pointer-action overhead
+
+- Remove duplicate post-displacement endpoint passes while preserving two fresh samples for every point and a separate check immediately before button-down.
+- Remove blanket trailing waits after drag, move, scroll and explicit wait; keep click/key/text pacing and the screenshot settling fence.
+- Recheck exact typed display state against its validated binding without re-deriving unchanged geometry. Fresh owner/state/owner queries remain mandatory.
+- Report coarse input and capture durations; recommend bounded observed batches instead of unnecessary observation calls.
+- 450 isolated Python tests and loader/schema validation pass. Live speedup has not been measured; native helper is unchanged.
+
+
 ## 0.8.16 candidate — fit oversized window on shared monitor
 
 - Dedicated single Alt+F10 resize toggle with center/titlebar midpoint and uniquely largest overlap identifying the shared monitor. Same identity and whole shared containment required around capture; no retry, focus reclaim or automatic follow-up.

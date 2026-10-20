@@ -7,6 +7,7 @@ Start with [installation](INSTALLATION.md), then read [compatibility](COMPATIBIL
 | What is verified and what remains | [Release status](RELEASE_STATUS.md) · [Beta checklist](BETA_ACCEPTANCE.md) |
 | How the controller works | [Architecture](ARCHITECTURE.md) |
 | Pause, takeover and cursor return | [Retained sharing](RETAINED_SHARING.md) |
+| Action latency and measurements | [Performance](PERFORMANCE.md) |
 | Running checks | [Validation](VALIDATION.md) |
 | Optional input monitor | [Native helper](../native-activity/README.md) |
 | Recorded demonstration | [Bear demo](demo/README.md) |
