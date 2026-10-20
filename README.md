@@ -1,5 +1,14 @@
 # Linux Desktop Control
 
+## Look, ChatGPT is drawing a bear
+
+[Watch the actual 4:39 video](docs/demo/look-chatgpt-draws-a-bear.webm)
+
+[![A teddy bear painted through the desktop controller](docs/demo/bear.png)](docs/demo/look-chatgpt-draws-a-bear.webm)
+
+ChatGPT opens Kleki in Firefox and paints the bear through the visible brush tools using this independent local Linux integration. The video uses real GUI input, with no imported or generated picture. Setup waits are removed, the resumed session is labeled, and unrelated browser tab titles are hidden. The image above is a frame from the recording.
+
+
 Installed version **0.8.16** is a private local MCP integration using GNOME Wayland's public desktop portal. It is an independent project, not an official OpenAI product.
 
 Installed 0.8.16 passed 443 Python tests and loader/schema validation; all 14 plugin files and the verified provider build match. Helper 0.8.6 is unchanged (20-fixture baseline). Live Firefox fitting succeeded with full same-window containment. Six observed GUI strokes in a new Kleki tab produced an inspected mountain/sun/lake scene; no PNG was exported. The five-slide presentation was also saved through the actual Impress GUI as `/home/aj/Documents/ChatGPT-Linux-Desktop-Control-Demo.pptx` and independently verified. A later optional drag-first batch was refused before input and closed cleanly. The complex bear take is not complete; the existing video remains 5:37 and its extension is pending. Earlier release evidence below is historical.

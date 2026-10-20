@@ -213,3 +213,8 @@ A fresh actual 0.8.12 provider verified build `cd15c911aab846b0e04cbdddd8b845bdd
 Installation verification: plugin 0.8.13 is installed, and all 14 reviewed plugin files match canonical source. A fresh actual provider verified the expected build, matching disk sources, all seven tools and the window_move_to_shared schema. Sharing is closed with confirmed portal closure, zero held input and capture/input disabled. The real monitor move has not been tested live. Earlier candidate installation statements above describe the pre-install checkpoint.
 
 Final edited WebM passed a complete decode and sampled visual review, including the session cut and final cover. The original source and media remain local, outside this source repository.
+
+
+## Recorded bear demo completed
+
+A new Kleki session produced a colored teddy bear through about 35 visible GUI brush strokes, including face, paw pads, seam details and a red scarf. The final edit is 279 seconds at 1280×800 and15fps, with website-opening footage and the later painting session labeled. Unrelated tab titles are hidden and setup waits removed. Full decode and sampled visual review passed. Media and the poster frame are in docs/demo. No PNG export was completed in the app; the poster is a clean recording-frame crop. A later optional background batch exceeded its estimated input budget, was refused with zero input, and closed cleanly. Portal closure was confirmed, held input zero, no warning. Broader hardware and current-build keyboard/drag/physical Stop checks remain separate.
