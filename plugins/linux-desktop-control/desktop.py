@@ -17,7 +17,7 @@ import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import Gio, GLib, Gst
 
-VERSION = '0.8.15'
+VERSION = '0.8.16'
 # Freeze identity at module load: old providers must never report a new disk build.
 _build_spec = importlib.util.spec_from_file_location('_desktop_runtime_build', os.path.join(os.path.dirname(__file__), 'runtime_build.py'))
 _runtime_build = importlib.util.module_from_spec(_build_spec)
@@ -739,7 +739,7 @@ def tools():
     specs=[
       ('desktop_start','Request personal GNOME consent for one monitor, keyboard and pointer; return a fresh screenshot. Optional cursor_glow temporarily changes the desktop-wide cursor theme and restores it on close.',{'session_seconds':{'type':'integer','minimum':120,'maximum':600,'default':120,'description':'Optional initial native-helper lease in seconds, physical_takeover required. Negotiated once before calibration; default120, hard maximum600. No active renewal; Stop and faults remain terminal.'},'physical_takeover':{'type':'boolean','default':False,'description':'Explicit opt-in to a separately installed native activity helper; administrator authorization follows personal GNOME sharing approval. Backend receives only coarse activity/fault notices, never raw input descriptors. Not human-provenance attestation.'},'cursor_glow':{'type':'boolean','description':'Explicit opt-in after explaining desktop-wide theme scope. Applies real themed cursor glow while active; custom app cursors may ignore it.'},'pointer_motion_return':{'type':'boolean','default':False,'description':'With retained sharing and native observation, yield on mouse movement and return once to the last confirmed point after physical quiet in the same app. No action replay.'},'interruption_policy':{'type':'string','enum':['close','retain-sharing'],'default':'close','description':'Opt-in retained consent for explicit pause/resume; physical observer faults remain terminal. No automatic cursor return or replay.'}}),
       ('desktop_observe','Return a fresh screenshot and dimensions. Optional inspect_target binds a single-use editable accessibility identity; inspect before input.',{'inspect_target':{'type':'boolean'}}),
-      ('desktop_action','Perform bounded input and return a fresh screenshot. Text/keys need same-call focus or a sequence beginning with a target click/focus shortcut. Coordinates use logical_size. Discrete wheel steps only. Text uses GNOME Unicode composition by default; verify actual results. Never replay uncertain input.',{'action':ACTION_SCHEMA,'target_id':{'type':'string','minLength':32,'maxLength':32},'recovery_observation_id':{'type':'string'},'window_observation_id':{'type':'string','minLength':32,'maxLength':32},'window_normalize_for_move':{'type':'boolean','description':'Separate opt-in Alt+F10 resize toggle of the currently focused window on the other of two verified monitors before a later monitor move. Only a frame not wholly source-contained is admitted; origin and center must identify that source; same-window full source containment required after. No focus activation or content observation.'},'window_move_to_shared':{'type':'boolean','description':'Opt-in single Super+Shift+Arrow move of the currently focused window from the other monitor to the shared monitor; exactly two unambiguous monitors and unchanged configured shortcut required. No focus activation or unseen-content claim.'},'focus_transition':{'type':'boolean','description':'Only one explicit left click, launcher/Return or Ctrl+s/Ctrl+Shift+s/Ctrl+o gesture may change foreground; no remaining batch. Inspect its returned image before further input.'}}),
+      ('desktop_action','Perform bounded input and return a fresh screenshot. Text/keys need same-call focus or a sequence beginning with a target click/focus shortcut. Coordinates use logical_size. Discrete wheel steps only. Text uses GNOME Unicode composition by default; verify actual results. Never replay uncertain input.',{'action':ACTION_SCHEMA,'target_id':{'type':'string','minLength':32,'maxLength':32},'recovery_observation_id':{'type':'string'},'window_observation_id':{'type':'string','minLength':32,'maxLength':32},'window_fit_shared':{'type':'boolean','description':'Separate opt-in Alt+F10 resize toggle fitting the current oversized focused window to the shared monitor. Exactly two verified monitors; center/titlebar midpoint and strictly largest intersection must identify the shared monitor. Same-window full containment required after; no focus activation or retry.'},'window_normalize_for_move':{'type':'boolean','description':'Separate opt-in Alt+F10 resize toggle of the currently focused window on the other of two verified monitors before a later monitor move. Only a frame not wholly source-contained is admitted; origin and center must identify that source; same-window full source containment required after. No focus activation or content observation.'},'window_move_to_shared':{'type':'boolean','description':'Opt-in single Super+Shift+Arrow move of the currently focused window from the other monitor to the shared monitor; exactly two unambiguous monitors and unchanged configured shortcut required. No focus activation or unseen-content claim.'},'focus_transition':{'type':'boolean','description':'Only one explicit left click, launcher/Return or Ctrl+s/Ctrl+Shift+s/Ctrl+o gesture may change foreground; no remaining batch. Inspect its returned image before further input.'}}),
       ('desktop_pause','Cancel current work, release virtual input and stop capture. Retaining sharing requires interruption_policy=retain-sharing at startup.',{}),
       ('desktop_resume','Explicitly resume retained sharing with a fresh screenshot and new observation tokens. Never replays input.',{'pause_id':{'type':'string','minLength':32,'maxLength':32}}),
       ('desktop_status','Read session and cleanup state without capturing or sending input.',{}),
@@ -1467,10 +1467,12 @@ class Server:
                 monitor_move=args.get('window_move_to_shared',False);moved_window=None
                 normalize_window=args.get('window_normalize_for_move',False)
                 if type(normalize_window) is not bool:raise ValueError('window_normalize_for_move must be boolean')
-                if normalize_window and monitor_move:raise ValueError('Normalize and monitor move require separate observed actions')
+                fit_window=args.get('window_fit_shared',False)
+                if type(fit_window) is not bool:raise ValueError('window_fit_shared must be boolean')
                 if type(monitor_move) is not bool:raise ValueError('window_move_to_shared must be boolean')
+                if sum((normalize_window,fit_window,monitor_move))>1:raise ValueError('Window setup gestures require separate observed actions')
                 transition=args.get('focus_transition',False)
-                if (monitor_move or normalize_window) and (transition is not True or not getattr(self.backend,'requires_window_guard',False)):raise ValueError('Monitor move requires a guarded explicit focus transition')
+                if (monitor_move or normalize_window or fit_window) and (transition is not True or not getattr(self.backend,'requires_window_guard',False)):raise ValueError('Monitor move requires a guarded explicit focus transition')
                 if type(transition) is not bool:raise ValueError('focus_transition must be boolean')
                 if transition and 'target_id' in args:raise ValueError('A focus transition cannot reuse an editable-control identity')
                 if getattr(self.backend,'requires_window_guard',False):
@@ -1494,12 +1496,13 @@ class Server:
                         window.check()
                         return module.pointer_local(self.read_window_context(),geometry)
                     self.backend.pointer_reader=pointer_reader
-                    if normalize_window:
+                    if normalize_window or fit_window:
                         module.validate_normalize_for_move(args['action'])
                         module.normalize_shortcut_configured()
                         mapping=getattr(self.backend,'monitor_mapping',None)
                         if mapping is None:raise RuntimeError('Verified monitor mapping unavailable')
-                        destination=mapping.window_normalize_source(window_record['context'])
+                        mapping_admission=mapping.window_fit_shared if fit_window else mapping.window_normalize_source
+                        destination=mapping_admission(window_record['context'])
                         moved_window=(window_record['context']['window_id'],destination)
                         self.backend.transition_activation_key=self.backend.keysym('F10')
                     elif monitor_move:
@@ -1519,9 +1522,9 @@ class Server:
                     self.indicator.armed=window
                     def begin_transition():
                         window.check()
-                        if normalize_window:
+                        if normalize_window or fit_window:
                             module.normalize_shortcut_configured()
-                            mapping.window_normalize_source(self.read_window_context())
+                            mapping_admission(self.read_window_context())
                             window.check()
                         elif monitor_move:
                             module.monitor_shortcut_configured(direction)

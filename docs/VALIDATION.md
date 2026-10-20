@@ -1,5 +1,19 @@
 # Validation
 
+## Current installed 0.8.16 acceptance — 2026-10-19
+
+Plugin 0.8.16 is installed; all 14 reviewed plugin files match canonical source. The verified runtime build is `6845b46fa981e6a1e4ef30e5d254ce86de9d578f3337ffddde18461155396bbb`. The frozen Python suite passed 443 tests in 21.819 seconds and loader/schema validation passed. Helper 0.8.6 is unchanged, with the prior 20-native-fixture baseline.
+
+The dedicated shared-window fit passed live: the same Firefox window settled wholly inside the shared monitor at frame `[0,272,1920,1097]`. In a new Kleki tab, six observed GUI brush strokes produced a mountain/sun/lake scene and its screenshot was inspected. No PNG export was performed. A later optional batch beginning with a drag failed validation before any input; sharing then closed with zero held input and no cleanup warning. This is a scoped drawing/fit check, not acceptance of arbitrary action sequences.
+
+The five-slide presentation was additionally saved through the actual Impress GUI to `/home/aj/Documents/ChatGPT-Linux-Desktop-Control-Demo.pptx`; independent ZIP/XML checks verified five slides. The more complex bear drawing is a newly authorized take, not a completed result. The existing video edit remains 5:37; adding this newer footage is pending. No completed bear image or extended video is claimed.
+
+## Historical preparation and earlier acceptance
+
+## 0.8.16 shared-window fit candidate — full suite pending
+
+Five new targeted tests pass: actual oversized-frame admission with off-monitor origin; center/titlebar/area-tie/already-fit/protected/layout refusals; same-window fully contained arrival and no-image refusal on no-op/wrong identity/configuration/topology loss; mutually exclusive setup flags; modifier/binding interruption releases without F10. Existing source-normalize five tests pass. Independent review passed. Expected full suite is 443 Python tests, pending actual run; unchanged helper0.8.6/native20-fixture baseline. Not installed or live accepted.
+
 ## Completed five-slide GUI demo — 2026-10-19
 
 A new presentation was saved at `/home/aj/Documents/ChatGPT-Linux-Desktop-Control-Demo.odp` through the actual observed Impress GUI, without backend deck generation, UNO or clipboard. All five revised slides were inspected at full size for content and fit; the saved ODP XML independently confirms five slides and the revised copy. The saved file was not reopened as a separate acceptance step. No existing personal deck was edited.
