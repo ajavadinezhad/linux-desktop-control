@@ -17,7 +17,7 @@ import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import Gio, GLib, Gst
 
-VERSION = '0.8.26'
+VERSION = '0.8.28'
 # Freeze identity at module load: old providers must never report a new disk build.
 _build_spec = importlib.util.spec_from_file_location('_desktop_runtime_build', os.path.join(os.path.dirname(__file__), 'runtime_build.py'))
 _runtime_build = importlib.util.module_from_spec(_build_spec)
@@ -876,7 +876,7 @@ class Server:
             if conditional and self.backend:self.backend.cancelled.set()
             # Fixed categories only: keep the initiating cause through cleanup
             # and downstream observer authorization loss; never export context.
-            category=reason if reason in ('foreground-context-changed','requested-close') else ('native-observer-fault' if warning=='native' else ('foreground-observer-fault' if warning=='indicator' else 'session-invalidated'))
+            category=reason if reason in ('foreground-context-changed','requested-close','publication-foreground-fault') else ('native-observer-fault' if warning=='native' else ('foreground-observer-fault' if warning=='indicator' else 'session-invalidated'))
             if self.closure_reason is None:self.closure_reason=category
             if self.state=='auth-waiting':
                 cause={'native-observer-fault':'native-observer-ended','foreground-observer-fault':'observer-unavailable',
@@ -2184,7 +2184,7 @@ class Server:
         return content
 
 
-    def error_result(self,error,name=None):
+    def error_result(self,error,name=None,closure_reason=None):
         if isinstance(error,ContextRecoveryPending):
             if self.context_recovery_owned():error=RetainedPause('Foreground changed; pending work was cancelled and a fresh observation is required')
             else:error=RuntimeError('Foreground recovery could not be admitted; session must close')
@@ -2192,7 +2192,7 @@ class Server:
             error=RetainedPause('Foreground change matched a physical click; interrupted work was discarded')
         retained=isinstance(error,RetainedPause) and self.interruption_policy=='retain-sharing'
         if name in ('desktop_start','desktop_observe','desktop_action','desktop_resume','desktop_pause') and not retained:
-            try:self.invalidate();self.close_backend()
+            try:self.invalidate(reason=closure_reason);self.close_backend()
             except Exception:pass
         progress=getattr(self.backend,'transaction_info',{}) if name=='desktop_action' else {}
         return {'isError':True,'content':[text({'error':str(error),'transaction':progress,
@@ -2239,7 +2239,7 @@ class Server:
                 except Exception as foreground_error:
                     name=request.get('params',{}).get('name');self.recovery.observation_id=None
                     if name=='desktop_action':self.recovery.finish(getattr(self.backend,'transaction_info',{}),failed=True)
-                    return {'jsonrpc':'2.0','id':request.get('id'),'result':self.error_result(foreground_error if isinstance(foreground_error,ContextRecoveryPending) else 'Screenshot invalidated by foreground change; no image published',name)}
+                    return {'jsonrpc':'2.0','id':request.get('id'),'result':self.error_result(foreground_error if isinstance(foreground_error,RetainedPause) else 'Screenshot invalidated by foreground change; no image published',name,closure_reason='publication-foreground-fault')}
             if request.get('_generation',self.generation)!=self.generation or self.state!='active' or (self.cancel_token and self.cancel_token.is_set()) or (self.backend and self.backend.cancelled.is_set()) or (getattr(self.backend,'operation_cancelled',None) is not None and self.backend.operation_cancelled.is_set()):
                 name=request.get('params',{}).get('name');self.recovery.observation_id=None;self.target_record=None;self.window_record=None
                 if name=='desktop_action':self.recovery.finish(getattr(self.backend,'transaction_info',{}),failed=True)
@@ -2252,7 +2252,7 @@ class Server:
                     guard.check()
                     if permission_binding is not None:self.permission_publish_check(permission_binding)
                     if self.window_record and self.window_record.get('publication_deadline') is not None and time.monotonic()>=self.window_record['publication_deadline']:raise RuntimeError('Transition publication deadline expired')
-                except Exception as foreground_error:return {'jsonrpc':'2.0','id':request.get('id'),'result':self.error_result(foreground_error if isinstance(foreground_error,ContextRecoveryPending) else 'Foreground changed before publication; session closed',request.get('params',{}).get('name'))}
+                except Exception as foreground_error:return {'jsonrpc':'2.0','id':request.get('id'),'result':self.error_result(foreground_error if isinstance(foreground_error,RetainedPause) else 'Foreground changed before publication; session closed',request.get('params',{}).get('name'),closure_reason='publication-foreground-fault')}
         return response
 
     def shutdown(self):

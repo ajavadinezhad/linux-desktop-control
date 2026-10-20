@@ -373,9 +373,13 @@ static int drain(int fd) {
                 /* Pre-challenge records may not establish a new baseline. */
                 if(calibrating&&(calibration_reset_pending||stamp<=calibration_time))continue;
                 bool was_active=tp_active(&touchpad_states[fd-4]);
-                enum tp_result result=tp_event(&touchpad_states[fd-4],&event,&touchpad_limits[fd-4]);
+                enum tp_result result=tp_event_mode(&touchpad_states[fd-4],&event,&touchpad_limits[fd-4],armed&&click_pause_mode);
                 if(result==TP_UNSUPPORTED){collector_phase=50;return -1;}
                 if(armed) {
+                    if(result==TP_INTERVENTION) {
+                        if(!click_pause_mode||pointer_click(current))return -1;
+                        continue;
+                    }
                     if(result==TP_MOTION)observation_touchpad_motion_after_arm=true;
                     if((result==TP_CONTACT||result==TP_MOTION)&&pointer_motion(current))return -1;
                     if(result==TP_MOTION&&passive_motion_notice())return -1;
@@ -438,13 +442,31 @@ static int held_state(void) {
         unsigned char keys[(KEY_MAX + 8) / 8] = {0};
         /* EVIOCGKEY flushes this client's queued EV_KEY. Never query the
          * primary stream descriptor; dup() would share the same client. */
-        if (ioctl(6 + device_count + i, EVIOCGKEY(sizeof keys), keys) < 0) return -1;
+        for (int attempt=0;;++attempt) {
+            if (ioctl(6 + device_count + i, EVIOCGKEY(sizeof keys), keys) < 0) return -1;
+            if(!(armed&&click_pause_mode&&touchpad_yield_mode&&device_touchpad[i]))break;
+            bool touch=(keys[BTN_TOUCH/8]&(1U<<(BTN_TOUCH%8)))!=0;
+            bool finger=(keys[BTN_TOOL_FINGER/8]&(1U<<(BTN_TOOL_FINGER%8)))!=0;
+            bool two=(keys[BTN_TOOL_DOUBLETAP/8]&(1U<<(BTN_TOOL_DOUBLETAP%8)))!=0;
+            if(!(finger&&two)&&touch==(finger||two))break;
+            bool other=false;
+            for(unsigned code=0;code<=KEY_MAX;++code)
+                if(code!=BTN_TOUCH&&code!=BTN_TOOL_FINGER&&code!=BTN_TOOL_DOUBLETAP&&
+                   (keys[code/8]&(1U<<(code%8)))){other=true;break;}
+            if(other)break; /* Never discard a key, button, or unsupported tool. */
+            /* EVIOCGKEY is atomic per input_event, not per SYN_REPORT.
+             * A tool-count transition can therefore expose intermediate bits.
+             * Re-read only this ambiguity, bounded without sleeps; never grant
+             * quiet/motion credit, and keep a persistent contradiction fatal. */
+            if(pointer_click(now_ms())||attempt==2||expiry_phase(now_ms(),heartbeat,session_time))return -1;
+            memset(keys,0,sizeof keys);
+        }
         if (calibrating) calibration_diag.query_success = true;
-        bool any = false, contact=false, finger=false, touch=false; unsigned categories = 0;
+        bool any = false, contact=false, finger=false, touch=false, two=false; unsigned categories = 0;
         for (unsigned code = 0; code <= KEY_MAX; ++code) {
             if (!(keys[code / 8] & (1U << (code % 8)))) continue;
-            if(touchpad_yield_mode&&device_touchpad[i]&&(code==BTN_TOUCH||code==BTN_TOOL_FINGER)) {
-                contact=true;touch|=code==BTN_TOUCH;finger|=code==BTN_TOOL_FINGER;continue;
+            if(touchpad_yield_mode&&device_touchpad[i]&&(code==BTN_TOUCH||code==BTN_TOOL_FINGER||(armed&&click_pause_mode&&code==BTN_TOOL_DOUBLETAP))) {
+                contact=true;touch|=code==BTN_TOUCH;finger|=code==BTN_TOOL_FINGER;two|=code==BTN_TOOL_DOUBLETAP;continue;
             }
             any = true;
             if((device_categories[i]&CATEGORY_POINTER)&&(code==BTN_LEFT||code==BTN_RIGHT||code==BTN_MIDDLE))held_admitted_click=true;
@@ -454,9 +476,9 @@ static int held_state(void) {
         }
         if(touchpad_yield_mode&&device_touchpad[i]) {
             /* An inconsistent snapshot is not a single-finger permission. */
-            if(touch!=finger)return -1;
+            if((finger&&two)||touch!=(finger||two))return -1;
             touchpad_snapshot_contact[i]=contact;
-            if(contact&&armed&&pointer_motion(now_ms()))return -1;
+            if(contact&&armed&&(two?pointer_click(now_ms()):pointer_motion(now_ms())))return -1;
             if(contact&&calibrating)calibration_note_kind(0,now_ms(),'H');
         }
         if (any) {

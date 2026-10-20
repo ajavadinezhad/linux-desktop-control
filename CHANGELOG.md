@@ -2,6 +2,14 @@
 
 Current status: see [release status](docs/RELEASE_STATUS.md). Older entries below are checkpoint records.
 
+## 0.8.28 — retain pauses during screenshot publication
+
+- Preserve typed retained pauses at both final foreground publication checks; discard stale images without closing healthy sharing or replaying input.
+- Keep fixed first-cause publication fault diagnostics for genuine terminal errors.
+- Helper0.8.12 rechecks only inconsistent one/two-finger tool snapshots, at most three immediate reads, without quiet or movement credit. Other input bits remain strict and cannot be discarded.
+- Include the earlier two-finger contact handling from0.8.27. Three or more contacts and unsupported gestures remain outside this recovery scope.
+- Independent review and targeted regressions pass; live acceptance remains separate from automated tests.
+
 ## 0.8.17 — reduce pointer-action overhead
 
 - Remove duplicate post-displacement endpoint passes while preserving two fresh samples for every point and a separate check immediately before button-down.
