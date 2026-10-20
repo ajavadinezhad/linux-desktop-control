@@ -19,6 +19,8 @@ https://github.com/user-attachments/assets/84610a30-2aff-4836-b048-608dfcd90eef
 
 Sharing requires your GNOME approval. Foreground, monitor, and pointer checks guard input. Stop and sharing revocation end control. Optional native takeover monitoring requires a separately approved system helper.
 
-**Private supervised beta.** Tested on the current setup; broader device and app coverage remains unfinished. Independent integration, not an official OpenAI product.
+**Supervised beta.** Tested on the current setup; broader device and app coverage remains unfinished. Independent integration, not an official OpenAI product.
 
 [Install](docs/INSTALLATION.md) · [All guides](docs/README.md) · [Compatibility](docs/COMPATIBILITY.md) · [Current status](docs/RELEASE_STATUS.md) · [Privacy](docs/PRIVACY.md) · [Architecture](docs/ARCHITECTURE.md)
+
+Licensed under [GPL-3.0-or-later](LICENSE); [third-party notices](LICENSING.md) remain applicable.
