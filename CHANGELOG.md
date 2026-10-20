@@ -2,6 +2,13 @@
 
 Current status: see [release status](docs/RELEASE_STATUS.md). Older entries below are checkpoint records.
 
+## 0.8.30 — wait through foreground transitions while paused
+
+- Keep capture/input off through an owned keyboard intervention’s transient foreground gap, system switcher, or overview.
+- Resume only after released quiet and a stable ordinary window; no replay or focus reclaim.
+- Bound private waiting without holding operation locks, preserving responsive Stop and fixed expiry.
+- Native helper and GNOME observer are unchanged; live acceptance is reported separately.
+
 ## 0.8.29 — recover from ordinary keyboard intervention
 
 - Add explicit keyboard recovery with exact helper acknowledgement; ordinary keys, modifiers and scan framing pause capture/input until release and quiet.
