@@ -1,6 +1,6 @@
 # Optional native activity helper
 
-Helper **0.8.13** adds physical-input monitoring to explicitly protected sessions. It is off by default and is separate from ordinary portal control. See [release status](../docs/RELEASE_STATUS.md) for scoped live evidence and unpassed checks.
+Helper **0.8.14** adds physical-input monitoring to explicitly protected sessions. It is off by default and is separate from ordinary portal control. See [release status](../docs/RELEASE_STATUS.md) for scoped live evidence and unpassed checks.
 
 ## Consent and startup
 
@@ -46,3 +46,5 @@ The current helper passed 57 isolated native tests without opening physical inpu
 The old preopened-descriptor prototype has been removed; the production collector retains raw device access inside its own boundary. Earlier design tradeoffs remain in [DESIGN.md](DESIGN.md), explicitly as historical context.
 
 Optional KEYPAUSE1 negotiation permits ordinary keyboard intervention to use the existing coarse released-quiet recovery protocol. Key scan framing and unfinished frames pause without movement credit; no key values are exported. Default keyboard handling and protected authentication waiting remain separate.
+
+MULTICONTACT1 explicitly extends armed touchpad intervention handling through four consistent contacts, retaining pause until all contacts lift. It never exports raw events or supplies multi-contact motion credit; default and authentication paths stay strict.

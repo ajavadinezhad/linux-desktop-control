@@ -40,6 +40,7 @@ static bool pointer_yield_mode, pointer_yielded, pointer_quiet;
 static bool pointer_strict_coverage, calibration_pointer_stream;
 static bool click_pause_mode, click_pause_sticky;
 static bool key_pause_mode, keyboard_frame_pending[MAX_DEVICES];
+static bool multi_contact_mode;
 static bool held_admitted_click, held_other_input;
 static unsigned click_notice_epoch;
 static bool touchpad_yield_mode, calibration_touchpad_motion;
@@ -388,7 +389,7 @@ static int drain(int fd) {
                 /* Pre-challenge records may not establish a new baseline. */
                 if(calibrating&&(calibration_reset_pending||stamp<=calibration_time))continue;
                 bool was_active=tp_active(&touchpad_states[fd-4]);
-                enum tp_result result=tp_event_mode(&touchpad_states[fd-4],&event,&touchpad_limits[fd-4],armed&&click_pause_mode);
+                enum tp_result result=tp_event_contacts(&touchpad_states[fd-4],&event,&touchpad_limits[fd-4],armed&&click_pause_mode?(multi_contact_mode?4:2):1);
                 if(result==TP_UNSUPPORTED){collector_phase=50;return -1;}
                 if(armed) {
                     if(result==TP_INTERVENTION) {
@@ -450,6 +451,11 @@ static int drain(int fd) {
 /* Read only aggregate held state, including buttons; never identify/export a
  * bit. This supplements evdev delivery when another reader owns a grab.
  * It can miss a complete press/release between polls and keyless motion. */
+static bool admitted_contact_code(unsigned code) {
+    return code==BTN_TOUCH||code==BTN_TOOL_FINGER||
+        (armed&&click_pause_mode&&(code==BTN_TOOL_DOUBLETAP||
+         (multi_contact_mode&&(code==BTN_TOOL_TRIPLETAP||code==BTN_TOOL_QUADTAP))));
+}
 static int held_state(void) {
     bool held = false;
     held_admitted_click=held_other_input=false;
@@ -463,10 +469,13 @@ static int held_state(void) {
             bool touch=(keys[BTN_TOUCH/8]&(1U<<(BTN_TOUCH%8)))!=0;
             bool finger=(keys[BTN_TOOL_FINGER/8]&(1U<<(BTN_TOOL_FINGER%8)))!=0;
             bool two=(keys[BTN_TOOL_DOUBLETAP/8]&(1U<<(BTN_TOOL_DOUBLETAP%8)))!=0;
-            if(!(finger&&two)&&touch==(finger||two))break;
+            bool three=multi_contact_mode&&(keys[BTN_TOOL_TRIPLETAP/8]&(1U<<(BTN_TOOL_TRIPLETAP%8)))!=0;
+            bool four=multi_contact_mode&&(keys[BTN_TOOL_QUADTAP/8]&(1U<<(BTN_TOOL_QUADTAP%8)))!=0;
+            int tools=finger+two+three+four;
+            if(tools<=1&&touch==(tools==1))break;
             bool other=false;
             for(unsigned code=0;code<=KEY_MAX;++code)
-                if(code!=BTN_TOUCH&&code!=BTN_TOOL_FINGER&&code!=BTN_TOOL_DOUBLETAP&&
+                if(!admitted_contact_code(code)&&
                    (keys[code/8]&(1U<<(code%8)))){other=true;break;}
             if(other)break; /* Never discard a key, button, or unsupported tool. */
             /* EVIOCGKEY is atomic per input_event, not per SYN_REPORT.
@@ -477,11 +486,11 @@ static int held_state(void) {
             memset(keys,0,sizeof keys);
         }
         if (calibrating) calibration_diag.query_success = true;
-        bool any = false, contact=false, finger=false, touch=false, two=false; unsigned categories = 0;
+        bool any = false, contact=false, finger=false, touch=false, two=false,three=false,four=false; unsigned categories = 0;
         for (unsigned code = 0; code <= KEY_MAX; ++code) {
             if (!(keys[code / 8] & (1U << (code % 8)))) continue;
-            if(touchpad_yield_mode&&device_touchpad[i]&&(code==BTN_TOUCH||code==BTN_TOOL_FINGER||(armed&&click_pause_mode&&code==BTN_TOOL_DOUBLETAP))) {
-                contact=true;touch|=code==BTN_TOUCH;finger|=code==BTN_TOOL_FINGER;two|=code==BTN_TOOL_DOUBLETAP;continue;
+            if(touchpad_yield_mode&&device_touchpad[i]&&admitted_contact_code(code)) {
+                contact=true;touch|=code==BTN_TOUCH;finger|=code==BTN_TOOL_FINGER;two|=code==BTN_TOOL_DOUBLETAP;three|=code==BTN_TOOL_TRIPLETAP;four|=code==BTN_TOOL_QUADTAP;continue;
             }
             any = true;
             if((device_categories[i]&CATEGORY_POINTER)&&(code==BTN_LEFT||code==BTN_RIGHT||code==BTN_MIDDLE))held_admitted_click=true;
@@ -492,9 +501,10 @@ static int held_state(void) {
         }
         if(touchpad_yield_mode&&device_touchpad[i]) {
             /* An inconsistent snapshot is not a single-finger permission. */
-            if((finger&&two)||touch!=(finger||two))return -1;
+            int tools=finger+two+three+four;
+            if(tools>1||touch!=(tools==1))return -1;
             touchpad_snapshot_contact[i]=contact;
-            if(contact&&armed&&(two?pointer_click(now_ms()):pointer_motion(now_ms())))return -1;
+            if(contact&&armed&&((two||three||four)?pointer_click(now_ms()):pointer_motion(now_ms())))return -1;
             if(contact&&calibrating)calibration_note_kind(0,now_ms(),'H');
         }
         if (any) {
@@ -772,6 +782,12 @@ static int command(const char *line) {
     long long current = now_ms();
     if (current < 0) return -1;
     if (!strcmp(line, "CLOSE")) return 2;
+    if(!strcmp(line,"MULTICONTACT1")) {
+        if(multi_contact_mode||!click_pause_mode||!touchpad_yield_mode||armed||calibrating||calibrated||
+           calibration_release_pending||passive_selected||auth_waiting||expiry_phase(current,heartbeat,session_time))return -1;
+        multi_contact_mode=true;
+        return send(CONTROL,"MULTICONTACT1_OK\n",17,MSG_NOSIGNAL|MSG_DONTWAIT)==17?0:-1;
+    }
     if(!strcmp(line,"KEYPAUSE1")) {
         if(key_pause_mode||!click_pause_mode||!pointer_yield_mode||armed||calibrating||calibrated||
            calibration_release_pending||passive_selected||auth_waiting||expiry_phase(current,heartbeat,session_time))return -1;

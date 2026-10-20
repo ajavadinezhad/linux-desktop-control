@@ -8,7 +8,7 @@
 enum tp_result { TP_UNSUPPORTED=-1, TP_NONE=0, TP_CONTACT=1, TP_MOTION=2, TP_INTERVENTION=3 };
 struct tp_limits { int x_min,x_max,y_min,y_max; bool mt; int slot_min,slot_max,tracking_max; };
 struct tp_state {
-    bool double_finger,gesture_sticky;
+    bool double_finger,triple_finger,quad_finger,gesture_sticky;
     bool touch,finger,pending,baseline,x_seen,y_seen,frame_had_contact,coordinate_frame;
     int x,y,old_x,old_y,slot;
     bool slot_selected;
@@ -19,7 +19,7 @@ static void tp_reset(struct tp_state *s) {
     for(int i=0;i<TP_MAX_SLOTS;i++)s->tracking[i]=-1;
 }
 static bool tp_active(const struct tp_state *s) {
-    if(s->touch||s->finger||s->double_finger)return true;
+    if(s->touch||s->finger||s->double_finger||s->triple_finger||s->quad_finger)return true;
     for(int i=0;i<TP_MAX_SLOTS;i++)if(s->tracking[i]>=0)return true;
     return false;
 }
@@ -31,23 +31,23 @@ static bool tp_valid_limits(const struct tp_limits *l) {
     return l&&l->x_min<l->x_max&&l->y_min<l->y_max&&
         (!l->mt||(l->slot_min==0&&l->slot_max>=0&&l->slot_max<TP_MAX_SLOTS&&l->tracking_max>=0));
 }
-static enum tp_result tp_event_mode(struct tp_state *s,const struct input_event *e,const struct tp_limits *l,bool allow_two) {
-    if(!s||!e||!tp_valid_limits(l))return TP_UNSUPPORTED;
+static enum tp_result tp_event_contacts(struct tp_state *s,const struct input_event *e,const struct tp_limits *l,int max_contacts) {
+    if(!s||!e||!tp_valid_limits(l)||(max_contacts!=1&&max_contacts!=2&&max_contacts!=4))return TP_UNSUPPORTED;
     if(e->type==EV_SYN) {
         if(e->code!=SYN_REPORT||e->value!=0)return TP_UNSUPPORTED;
         int contacts=0;
         for(int i=0;i<TP_MAX_SLOTS;i++)contacts+=s->tracking[i]>=0;
-        int tools=(s->finger?1:0)+(s->double_finger?1:0);
-        int expected=s->double_finger?2:(s->finger?1:0);
-        if(tools>1||s->touch!=(tools==1)||(s->double_finger&&!allow_two)||
+        int tools=(s->finger?1:0)+(s->double_finger?1:0)+(s->triple_finger?1:0)+(s->quad_finger?1:0);
+        int expected=s->quad_finger?4:(s->triple_finger?3:(s->double_finger?2:(s->finger?1:0)));
+        if(tools>1||s->touch!=(tools==1)||expected>max_contacts||
            (l->mt&&contacts!=expected))return TP_UNSUPPORTED;
         if(!s->touch&&s->coordinate_frame&&!s->frame_had_contact)return TP_UNSUPPORTED;
         s->pending=false;
         s->frame_had_contact=s->coordinate_frame=false;
         if(!s->touch){tp_new_contact(s);s->gesture_sticky=false;return TP_NONE;}
-        /* Two-finger contact is an intervention, never pointer-motion proof.
-         * Keep that classification until ALL contacts lift, even after 2->1. */
-        if(s->double_finger||s->gesture_sticky){tp_new_contact(s);return TP_INTERVENTION;}
+        /* Multiple contacts are an intervention, never pointer-motion proof.
+         * Keep that classification until ALL contacts lift, even after 4->3->2->1. */
+        if(expected>1||s->gesture_sticky){tp_new_contact(s);return TP_INTERVENTION;}
         if(!s->x_seen||!s->y_seen)return TP_NONE;
         bool moved=s->baseline&&(s->x!=s->old_x||s->y!=s->old_y);
         s->old_x=s->x;s->old_y=s->y;s->baseline=true;
@@ -57,15 +57,15 @@ static enum tp_result tp_event_mode(struct tp_state *s,const struct input_event 
     s->frame_had_contact|=tp_active(s);
     s->pending=true;
     if(e->type==EV_KEY) {
-        if((e->code!=BTN_TOUCH&&e->code!=BTN_TOOL_FINGER&&!(allow_two&&e->code==BTN_TOOL_DOUBLETAP))||(e->value!=0&&e->value!=1))return TP_UNSUPPORTED;
+        if((e->code!=BTN_TOUCH&&e->code!=BTN_TOOL_FINGER&&!(max_contacts>=2&&e->code==BTN_TOOL_DOUBLETAP)&&!(max_contacts==4&&(e->code==BTN_TOOL_TRIPLETAP||e->code==BTN_TOOL_QUADTAP)))||(e->value!=0&&e->value!=1))return TP_UNSUPPORTED;
         bool before=tp_active(s);
-        bool *bit=e->code==BTN_TOUCH?&s->touch:(e->code==BTN_TOOL_FINGER?&s->finger:&s->double_finger);
+        bool *bit=e->code==BTN_TOUCH?&s->touch:(e->code==BTN_TOOL_FINGER?&s->finger:(e->code==BTN_TOOL_DOUBLETAP?&s->double_finger:(e->code==BTN_TOOL_TRIPLETAP?&s->triple_finger:&s->quad_finger)));
         if(*bit==(bool)e->value)return TP_UNSUPPORTED;
         *bit=e->value!=0;
         if(!e->value)tp_new_contact(s);
         else if(!before)tp_new_contact(s);
         s->frame_had_contact|=e->value!=0;
-        if(e->code==BTN_TOOL_DOUBLETAP&&e->value)s->gesture_sticky=true;
+        if(e->code!=BTN_TOUCH&&e->code!=BTN_TOOL_FINGER&&e->value)s->gesture_sticky=true;
         return s->gesture_sticky?TP_INTERVENTION:(e->value?TP_CONTACT:TP_NONE);
     }
     if(e->type!=EV_ABS)return TP_UNSUPPORTED;
@@ -95,7 +95,7 @@ static enum tp_result tp_event_mode(struct tp_state *s,const struct input_event 
             if(s->tracking[i]==e->value)return TP_UNSUPPORTED;
             count++;
         }
-        if(count>=(allow_two?2:1))return TP_UNSUPPORTED;
+        if(count>=max_contacts)return TP_UNSUPPORTED;
         if(count)s->gesture_sticky=true;
         s->tracking[slot]=e->value;tp_new_contact(s);s->frame_had_contact=true;return s->gesture_sticky?TP_INTERVENTION:TP_CONTACT;
     }
@@ -112,6 +112,9 @@ static enum tp_result tp_event_mode(struct tp_state *s,const struct input_event 
         return l->mt&&s->tracking[s->slot_selected?s->slot:0]>=0&&e->value>=0?TP_NONE:TP_UNSUPPORTED;
     default:return TP_UNSUPPORTED;
     }
+}
+static enum tp_result tp_event_mode(struct tp_state *s,const struct input_event *e,const struct tp_limits *l,bool allow_two) {
+    return tp_event_contacts(s,e,l,allow_two?2:1);
 }
 static enum tp_result tp_event(struct tp_state *s,const struct input_event *e,const struct tp_limits *l) {
     return tp_event_mode(s,e,l,false);
