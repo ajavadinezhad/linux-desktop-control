@@ -1,5 +1,7 @@
 # Release status
 
+**Preview, GNOME-only:** currently targets GNOME Shell 51 on Wayland. Other platforms are planned and are not yet supported.
+
 As reviewed on 19 October 2026: plugin **0.8.16**, optional native helper **0.8.6**. The repository is public; this remains a supervised beta, not a broadly verified release.
 
 ## Verified

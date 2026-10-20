@@ -1,5 +1,7 @@
 # Linux Desktop Control
 
+**Preview — currently supports GNOME Shell 51 on Wayland only.** Other platforms are planned; they are not supported yet.
+
 ChatGPT, working through your Linux desktop. Open apps, create slides, and paint using the same visible controls you use.
 
 ## Look, ChatGPT is drawing a bear
