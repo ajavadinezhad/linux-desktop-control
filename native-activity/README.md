@@ -1,12 +1,12 @@
 # Optional native activity helper
 
-Helper **0.8.6** adds physical-input monitoring to explicitly protected sessions. It is off by default and is separate from ordinary portal control. See [release status](../docs/RELEASE_STATUS.md) for scoped live evidence and unpassed checks.
+Helper **0.8.7** adds physical-input monitoring to explicitly protected sessions. It is off by default and is separate from ordinary portal control. See [release status](../docs/RELEASE_STATUS.md) for scoped live evidence and unpassed checks.
 
 ## Consent and startup
 
 The user approves GNOME screen/keyboard/pointer sharing, then authorizes the fixed helper in the system administrator dialog. Passwords belong only in that dialog.
 
-Before task capture/input, the helper must acknowledge readiness, complete fresh keyboard/pointer calibration, reach released/quiet state, and arm. Retained-sharing sessions additionally require strict streamed relative-motion coverage and a separate post-ARM mouse-only readiness check. Missing evidence closes startup; no synthetic challenge or fallback claims protection.
+Before task capture/input, the helper must acknowledge readiness, complete fresh keyboard/pointer calibration, reach released/quiet state, and arm. Retained-sharing sessions require strict streamed movement coverage for the selected source and a separate post-ARM pointer-only readiness check. Mouse mode uses MODEYIELD2; explicit touchpad mode uses MODEYIELD3 and accepts only verified indirect single-finger devices. Contact alone never earns movement credit; a resting finger blocks resume until lifted. Missing evidence closes startup; no synthetic challenge or fallback claims protection.
 
 Authorization input may settle for at most five seconds before calibration begins; it grants no calibration credit. Calibration is not reusable after the observer closes.
 
@@ -14,7 +14,7 @@ Authorization input may settle for at most five seconds before calibration begin
 
 The collector receives raw kernel codes and values internally and exports only fixed activity, fault, readiness and diagnostic messages. It never exports raw descriptors or input contents. See [privacy](docs/PRIVACY.md) and [confinement](docs/ARCHITECTURE.md).
 
-Covered relative movement may yield under explicitly negotiated retained-sharing mode. Keys, buttons, unsupported activity, faults and lifecycle loss remain terminal. The controller, not this helper, owns capture suspension and checked cursor return. It never replays an interrupted action. See [the mode contract](../docs/RETAINED_SHARING.md).
+Covered movement may yield under explicitly negotiated retained-sharing mode. In touchpad mode contact immediately pauses automation and blocks quiet until released; unselected mouse movement remains terminal. Keys, buttons, unsupported activity, faults and lifecycle loss remain terminal. The controller, not this helper, owns capture suspension and checked cursor return. It never replays an interrupted action. See [the mode contract](../docs/RETAINED_SHARING.md).
 
 Heartbeats use a one-second deadline. The absolute session budget defaults to 120 seconds and may be selected once, from 120–600, before calibration. Negotiation, heartbeat, pause and resume do not renew its original anchor. Device activity does not prove human identity; monitoring and input dispatch remain asynchronous.
 

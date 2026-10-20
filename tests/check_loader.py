@@ -44,7 +44,7 @@ with tempfile.TemporaryDirectory(prefix='desktop-plugin-loader-') as home:
         inventory=rpc(2,'mcpServerStatus/list',{'serverName':'linux_desktop'})
         server=inventory['data'][0]
         expected={'desktop_start','desktop_observe','desktop_action','desktop_status','desktop_close','desktop_pause','desktop_resume'}
-        assert server['serverInfo']['version']=='0.8.17',server['serverInfo']
+        assert server['serverInfo']['version']=='0.8.19',server['serverInfo']
         assert server['toolsError'] is None,server['toolsError']
         assert set(server['tools'])==expected,server['tools']
         assert not server['tools']['desktop_status']['inputSchema']['properties']

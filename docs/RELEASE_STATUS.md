@@ -2,6 +2,10 @@
 
 **Preview, GNOME-only:** currently targets GNOME Shell 51 on Wayland. Other platforms are planned and are not yet supported.
 
+Current installed update: plugin **0.8.19**, helper **0.8.7** unchanged. The drawing-only expanded batch and pacing skill pass **463 Python tests**, independent review, and seven-tool loading. All14 installed plugin files match source; read-only runtime verification confirms matching sources, closed sharing and zero held input. A recorded larger-batch trial completed and saved a bear, using actual groups of8–10 strokes before capture. Drawing-to-save took about207seconds; raw recording passed full decode. This is not a controlled speed comparison. See [performance](PERFORMANCE.md).
+
+### Earlier performance checkpoint
+
 Installed performance update: plugin **0.8.17**, optional native helper **0.8.6** unchanged. The repository is public; this remains a supervised beta, not a broadly verified release.
 
 The performance update passes 450 isolated regression checks and seven-tool loader validation. All 14 installed plugin files match reviewed source; a fresh provider confirmed the expected build and matching disk sources. Live speed measurement remains unperformed. See [performance measurements](PERFORMANCE.md). The live workflows below were recorded with earlier versions.
@@ -30,3 +34,7 @@ See [beta acceptance](BETA_ACCEPTANCE.md), [validation](VALIDATION.md), and [com
 ## Live performance attempt
 
 A first startup attempt delivered its calibration cue late because of an operator orchestration error. A corrected retry delivered the cue promptly but did not obtain strict relative-motion calibration credit despite coarse keyboard and pointer evidence. Both attempts closed before capture or task input, with confirmed portal closure, zero held input and no cleanup warning. No bear was drawn and no live speed comparison is claimed.
+
+## Touchpad candidate
+
+Plugin 0.8.18/helper 0.8.7 is installed. The controller passes 457 regression tests, the native helper passes 25 fixtures, and isolated seven-tool loading and independent review pass. All 14 installed plugin files and both helper payloads match reviewed source/package. A read-only installed-runtime check reports sharing closed and zero held input. Explicit touchpad source selection requires exact helper acknowledgement and does not fall back to mouse coverage. One scoped live touchpad pause/automatic-return check passed: movement paused capture/input while retaining sharing, finger release allowed return to the confirmed point, and a fresh image and user confirmation agreed. Cleanup confirmed portal closure, zero held input, and no warning. Other touchpad gestures and typing/drag interruption remain untested. See [touchpad scope](TOUCHPAD.md).

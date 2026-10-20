@@ -19,6 +19,7 @@
 #include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
+#include "touchpad.h"
 
 #define CONTROL 3
 #define MAX_DEVICES 64
@@ -37,6 +38,12 @@ static int collector_phase;
 static bool armed;
 static bool pointer_yield_mode, pointer_yielded, pointer_quiet;
 static bool pointer_strict_coverage, calibration_pointer_stream;
+static bool touchpad_yield_mode, calibration_touchpad_motion;
+static bool observation_touchpad_motion_after_arm;
+/* Opener-only admission; neither requester nor event payload sets these. */
+static bool device_touchpad[MAX_DEVICES], touchpad_snapshot_contact[MAX_DEVICES];
+static struct tp_limits touchpad_limits[MAX_DEVICES];
+static struct tp_state touchpad_states[MAX_DEVICES];
 static bool observation_primary_after_arm, observation_relative_after_arm, observation_yield_sent;
 static unsigned pointer_epoch;
 static long long pointer_last_motion;
@@ -88,9 +95,12 @@ static int report(const char *message) {
     /* Fixed terminal evidence only; raw descriptors are already gone. Neither
      * these bits nor successful export establishes input authority. */
     char payload[128];
-    int length = snprintf(payload, sizeof payload, "%sOBS_DIAG_%u%u%u%u\n", message,
-        calibration_pointer_stream ? 1U : 0U, observation_primary_after_arm ? 1U : 0U,
-        observation_relative_after_arm ? 1U : 0U, observation_yield_sent ? 1U : 0U);
+    int length = snprintf(payload, sizeof payload, "%s%s%u%u%u%u\n", message,
+        touchpad_yield_mode ? "OBS_TPAD_" : "OBS_DIAG_",
+        (touchpad_yield_mode ? calibration_touchpad_motion : calibration_pointer_stream) ? 1U : 0U,
+        observation_primary_after_arm ? 1U : 0U,
+        (touchpad_yield_mode ? observation_touchpad_motion_after_arm : observation_relative_after_arm) ? 1U : 0U,
+        observation_yield_sent ? 1U : 0U);
     if (length <= 0 || (size_t)length >= sizeof payload) return -1;
     ssize_t n = send(CONTROL, payload, (size_t)length, MSG_NOSIGNAL | MSG_DONTWAIT);
     return n == length ? 0 : -1;
@@ -172,6 +182,7 @@ static bool positional_mouse_motion(int device, const struct input_event *event)
         (event->code == REL_X || event->code == REL_Y) && event->value != 0;
 }
 static int pointer_motion(long long current) {
+    if(current<0)return -1;
     if (!pointer_yielded || pointer_quiet) {
         if (++pointer_epoch > POINTER_YIELD_MAX_EPOCH) return -1;
         pointer_yielded = true; pointer_quiet = false;
@@ -179,6 +190,18 @@ static int pointer_motion(long long current) {
     }
     pointer_last_motion = current;
     return 0;
+}
+static void touchpad_reset_all(void) {
+    for(int i=0;i<device_count;i++) {
+        tp_reset(&touchpad_states[i]);
+        touchpad_snapshot_contact[i]=false;
+    }
+}
+static bool touchpad_busy(void) {
+    if(!touchpad_yield_mode)return false;
+    for(int i=0;i<device_count;i++)if(device_touchpad[i]&&
+        (touchpad_snapshot_contact[i]||tp_active(&touchpad_states[i])||tp_incomplete(&touchpad_states[i])))return true;
+    return false;
 }
 /* Drain with a strict bound: an unbounded producer must not starve control. */
 static int drain(int fd) {
@@ -212,6 +235,8 @@ static int drain(int fd) {
                 calibration_resync[device] = true;
                 calibration_seen = 0;
                 calibration_pointer_stream = false;
+                calibration_touchpad_motion = false;
+                if(touchpad_yield_mode)touchpad_reset_all();
                 continue;
             }
             if (calibrating && !armed && fd >= 4 && fd < 4 + device_count && calibration_resync[fd - 4]) {
@@ -223,12 +248,33 @@ static int drain(int fd) {
                 return -1;
             }
             if (kind == 2) continue; /* Known output feedback: no calibration credit. */
+            if(touchpad_yield_mode&&fd>=4&&fd<4+device_count&&device_touchpad[fd-4]&&(armed||calibrating||calibrated)) {
+                long long current=now_ms();
+                long long stamp=(long long)event.time.tv_sec*1000+event.time.tv_usec/1000;
+                if(current<0||stamp>current+1000||(armed&&stamp<arm_time)) {collector_phase=45;return -1;}
+                if(calibrated&&!armed){collector_phase=46;return -1;}
+                /* Pre-challenge records may not establish a new baseline. */
+                if(calibrating&&(calibration_reset_pending||stamp<=calibration_time))continue;
+                enum tp_result result=tp_event(&touchpad_states[fd-4],&event,&touchpad_limits[fd-4]);
+                if(result==TP_UNSUPPORTED){collector_phase=50;return -1;}
+                if(armed) {
+                    if(result==TP_MOTION)observation_touchpad_motion_after_arm=true;
+                    if((result==TP_CONTACT||result==TP_MOTION)&&pointer_motion(current))return -1;
+                } else if(calibrating) {
+                    if(result==TP_MOTION)calibration_touchpad_motion=calibration_pointer_stream=true;
+                    /* Any actual contact/frame activity refreshes quiet, but
+                     * metadata-only clock records supply neither credit nor busy. */
+                    if(event.type!=EV_MSC)calibration_note_kind(
+                        result==TP_MOTION?CATEGORY_POINTER:0,current,calibration_event_kind(&event));
+                }
+                continue;
+            }
             if (kind) {
                 if (armed) {
                     long long stamp = (long long)event.time.tv_sec * 1000 + event.time.tv_usec / 1000;
                     if (stamp < arm_time || stamp > now_ms() + 1000) { collector_phase = 45; return -1; }
                     if (positional_mouse_motion(fd - 4, &event)) observation_relative_after_arm = true;
-                    if (pointer_yield_mode && positional_mouse_motion(fd - 4, &event)) {
+                    if (pointer_yield_mode && !touchpad_yield_mode && positional_mouse_motion(fd - 4, &event)) {
                         if (pointer_motion(now_ms())) return -1;
                         continue;
                     }
@@ -241,7 +287,7 @@ static int drain(int fd) {
                     long long current = now_ms();
                     if (current < 0 || stamp > current + 1000) { collector_phase = 45; return -1; }
                     if (stamp > calibration_time) {
-                        if (!calibration_reset_pending && positional_mouse_motion(fd - 4, &event))
+                        if (!touchpad_yield_mode&&!calibration_reset_pending && positional_mouse_motion(fd - 4, &event))
                             calibration_pointer_stream = true;
                         calibration_note_kind(event_category(fd - 4, &event), current, calibration_event_kind(&event));
                     }
@@ -265,12 +311,22 @@ static int held_state(void) {
          * primary stream descriptor; dup() would share the same client. */
         if (ioctl(6 + device_count + i, EVIOCGKEY(sizeof keys), keys) < 0) return -1;
         if (calibrating) calibration_diag.query_success = true;
-        bool any = false; unsigned categories = 0;
+        bool any = false, contact=false, finger=false, touch=false; unsigned categories = 0;
         for (unsigned code = 0; code <= KEY_MAX; ++code) {
             if (!(keys[code / 8] & (1U << (code % 8)))) continue;
+            if(touchpad_yield_mode&&device_touchpad[i]&&(code==BTN_TOUCH||code==BTN_TOOL_FINGER)) {
+                contact=true;touch|=code==BTN_TOUCH;finger|=code==BTN_TOOL_FINGER;continue;
+            }
             any = true;
             if (ordinary_key(code)) categories |= device_categories[i] & CATEGORY_KEYBOARD;
             if (code >= BTN_MISC) categories |= device_categories[i] & CATEGORY_POINTER;
+        }
+        if(touchpad_yield_mode&&device_touchpad[i]) {
+            /* An inconsistent snapshot is not a single-finger permission. */
+            if(touch!=finger)return -1;
+            touchpad_snapshot_contact[i]=contact;
+            if(contact&&armed&&pointer_motion(now_ms()))return -1;
+            if(contact&&calibrating)calibration_note_kind(0,now_ms(),'H');
         }
         if (any) {
             calibration_note_kind(categories, now_ms(), 'H');
@@ -291,7 +347,7 @@ static int calibration_tick(long long current) {
     if (held < 0 || current < 0) return -1;
     if (calibration_reset_pending) {
         for (int i = 0; i < device_count; ++i) if (calibration_resync[i]) return 0;
-        if (held) return 0;
+        if (held||touchpad_busy()) return 0;
         struct pollfd boundary[MAX_DEVICES + 2];
         for (int i = 0; i < device_count + 2; ++i)
             boundary[i] = (struct pollfd){4 + i, POLLIN, 0};
@@ -303,6 +359,8 @@ static int calibration_tick(long long current) {
 #endif
         calibration_seen = 0;
         calibration_pointer_stream = false;
+        calibration_touchpad_motion = false;
+        if(touchpad_yield_mode)touchpad_reset_all();
         calibration_time = calibration_last_activity = now_ms();
         if (calibration_time < 0) return -1;
         calibration_reset_pending = false;
@@ -311,11 +369,12 @@ static int calibration_tick(long long current) {
         return send(CONTROL, "CALIBRATION_RESET\n", 18, MSG_NOSIGNAL | MSG_DONTWAIT) == 18 ? 0 : -1;
     }
     bool missing = calibration_seen != (CATEGORY_KEYBOARD | CATEGORY_POINTER) || (pointer_strict_coverage && !calibration_pointer_stream);
-    calibration_quiet_reason = held ? 'H' : missing ? 'M' : current - calibration_last_activity < CALIBRATION_QUIET_MS ? 'R' : 'Y';
+    bool pad_busy=touchpad_busy();
+    calibration_quiet_reason = held||pad_busy ? 'H' : missing ? 'M' : current - calibration_last_activity < CALIBRATION_QUIET_MS ? 'R' : 'Y';
     calibration_diag.quiet_blocked = !held &&
         calibration_seen == (CATEGORY_KEYBOARD | CATEGORY_POINTER) &&
         current - calibration_last_activity < CALIBRATION_QUIET_MS;
-    if (held || missing || current - calibration_last_activity < CALIBRATION_QUIET_MS) return 0;
+    if (held || pad_busy || missing || current - calibration_last_activity < CALIBRATION_QUIET_MS) return 0;
     struct pollfd boundary[MAX_DEVICES + 2];
     for (int i = 0; i < device_count + 2; ++i)
         boundary[i] = (struct pollfd){4 + i, POLLIN, 0};
@@ -338,6 +397,8 @@ static int calibration_begin(void) {
     calibration_release_pending = false;
     calibration_seen = 0;
     calibration_pointer_stream = false;
+    calibration_touchpad_motion = false;
+    if(touchpad_yield_mode)touchpad_reset_all();
     calibration_reset_pending = false;
     calibration_reset_rounds = 0;
     memset(calibration_resync, 0, sizeof calibration_resync);
@@ -357,7 +418,7 @@ static int calibration_release_tick(long long current) {
     for (int i = 0; i < device_count; ++i) if (drain(4 + i)) return -1;
     int held = held_state();
     if (held < 0) { collector_phase = 49; return -1; }
-    if (held) return 0;
+    if (held||touchpad_busy()) return 0;
     struct pollfd boundary[MAX_DEVICES + 2];
     for (int i = 0; i < device_count + 2; ++i)
         boundary[i] = (struct pollfd){4 + i, POLLIN, 0};
@@ -375,6 +436,7 @@ static int calibration_release_tick(long long current) {
 }
 static int pointer_boundary(void) {
     if (held_state() != 0) return -1;
+    if(touchpad_busy())return -1;
     struct pollfd boundary[MAX_DEVICES + 2];
     for (int i = 0; i < device_count + 2; ++i)
         boundary[i] = (struct pollfd){4 + i, POLLIN, 0};
@@ -390,6 +452,7 @@ static int pointer_yield_tick(long long current) {
     if (current - pointer_last_motion < POINTER_QUIET_MS) return 0;
     /* A busy source is not proof of quiet. Main loop drains it first. */
     if (held_state() != 0) return -1;
+    if(touchpad_busy())return 0;
     struct pollfd boundary[MAX_DEVICES + 2];
     for (int i = 0; i < device_count + 2; ++i)
         boundary[i] = (struct pollfd){4 + i, POLLIN, 0};
@@ -422,11 +485,20 @@ static int command(const char *line) {
         /* The original READY anchor is never replaced or renewed. */
         return send(CONTROL,reply,(size_t)length,MSG_NOSIGNAL | MSG_DONTWAIT)==length ? 0 : -1;
     }
-    if (!strcmp(line, "MODEYIELD") || !strcmp(line, "MODEYIELD2")) {
+    if (!strcmp(line, "MODEYIELD") || !strcmp(line, "MODEYIELD2") || !strcmp(line,"MODEYIELD3")) {
         if (pointer_yield_mode || armed || calibrating || calibrated || calibration_release_pending) return -1;
+        bool want_touchpad=!strcmp(line,"MODEYIELD3");
+        if(want_touchpad) {
+            if(expiry_phase(current,heartbeat,session_time))return -1;
+            bool admitted=false;
+            for(int i=0;i<device_count;i++)admitted|=device_touchpad[i]&&tp_valid_limits(&touchpad_limits[i]);
+            if(!admitted)return -1;
+        }
         pointer_yield_mode = true;
-        pointer_strict_coverage = !strcmp(line, "MODEYIELD2");
-        const char *reply = pointer_strict_coverage ? "MODEYIELD2_OK\n" : "MODEYIELD_OK\n";
+        touchpad_yield_mode=want_touchpad;
+        pointer_strict_coverage = want_touchpad||!strcmp(line, "MODEYIELD2");
+        if(want_touchpad)touchpad_reset_all();
+        const char *reply = want_touchpad ? "MODEYIELD3_OK\n" : pointer_strict_coverage ? "MODEYIELD2_OK\n" : "MODEYIELD_OK\n";
         size_t length = strlen(reply);
         return send(CONTROL,reply,length,MSG_NOSIGNAL | MSG_DONTWAIT) == (ssize_t)length ? 0 : -1;
     }
@@ -489,6 +561,7 @@ static int command(const char *line) {
         /* The queue is checked again at the activation boundary. */
         for (int i = 0; i < device_count; ++i) if (drain(4 + i)) return -1;
         if (held_state() != 0) return -1;
+        if(touchpad_busy())return -1;
         /* Catch activity/topology queued during the state checks; no grace. */
         struct pollfd boundary[MAX_DEVICES + 2];
         for (int i = 0; i < device_count + 2; ++i)
