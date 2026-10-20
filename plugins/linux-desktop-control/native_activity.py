@@ -108,6 +108,7 @@ class Controller:
         self.activity_kind = None
         self.observation_evidence = None
         self.observation_report_kind = 'not-requested'
+        self.touchpad_rejection=None;self.touchpad_rejection_report_kind='not-requested'
         if type(retain_sharing) is not bool:raise ValueError('retain_sharing must be boolean')
         if pointer_source not in ("mouse","touchpad") or not isinstance(pointer_source,str):
             raise ValueError("Invalid pointer_source")
@@ -573,6 +574,30 @@ class Controller:
                 'eligible_relative_after_arm','yielded_token_sent'))
         self.observation_evidence={name:bit=='1' for name,bit in zip(names,message[9:])}
         self.observation_report_kind='received'
+        if self.pointer_source=='touchpad':self._read_touchpad_rejection(limit)
+
+    def _read_touchpad_rejection(self,deadline):
+        # Optional terminal-only enum after OBS_TPAD; never input authority.
+        if self.ready or not (self.notified or self.calibration_report_kind=='received'):
+            self.touchpad_rejection_report_kind='request-skipped';return
+        remaining=deadline-time.monotonic()
+        if remaining<=0:self.touchpad_rejection_report_kind='timeout';return
+        try:message=self._read(remaining)
+        except StopIteration:
+            self.touchpad_rejection_report_kind='missing';return
+        except (NativeFailure,OSError,RuntimeError,ValueError):
+            self.touchpad_rejection_report_kind='unavailable';return
+        if time.monotonic()>deadline:self.touchpad_rejection_report_kind='timeout';return
+        if message is None:self.touchpad_rejection_report_kind='missing';return
+        names=('invalid-configuration','frame-invalid','tool-cardinality','contact-state','contact-limit',
+               'contact-count','coordinate-without-contact','unsupported-key','unsupported-event-type','unsupported-axis','invalid-value','duplicate-state',
+               'axis-range','slot-range','tracking-range','contact-without-slot','duplicate-contact','contact-release')
+        # Select local labels only. Arbitrary helper text is never retained.
+        for name in names:
+            if type(message) is str and message=='TP_REJECT_'+name:
+                if self.touchpad_rejection is None:self.touchpad_rejection=name
+                self.touchpad_rejection_report_kind='received';return
+        self.touchpad_rejection_report_kind='malformed'
 
     def _notify(self, activity=False, error=None, reason='helper-fault'):
         if self.notified or self.stop.is_set():
@@ -885,6 +910,7 @@ class Controller:
                 'calibration_resets':self.calibration_resets,'activity_kind':self.activity_kind,
                 'observation_evidence':self.observation_evidence,
                 'observation_report_kind':self.observation_report_kind,
+                'touchpad_rejection':self.touchpad_rejection,'touchpad_rejection_report_kind':self.touchpad_rejection_report_kind,
                 'calibration_notice':{'requested':self.notice_requested,'request_acknowledged':self.notice_acknowledged,'request_active':self.notice_active,'delivery_unknown':self.notice_delivery_unknown,'visibility_verified':False,'warning':self.notice_warning},
                 'lease_remaining_is_estimate':True}
 

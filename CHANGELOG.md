@@ -2,6 +2,12 @@
 
 Current status: see [release status](docs/RELEASE_STATUS.md). Older entries below are checkpoint records.
 
+## 0.8.32 — preserve terminal touchpad rejection evidence
+
+- Retain one fixed parser rejection category after all input descriptors close; no raw event values or device details are exported.
+- Read optional evidence within the existing terminal budget, after Stop and cleanup notification. Older or missing reports remain valid.
+- This diagnoses the failed live four-finger trial; it does not widen input acceptance or claim a gesture fix.
+
 ## 0.8.31 — retain sharing through up to four touchpad contacts
 
 - Negotiate explicit multi-contact recovery; one through four consistent contacts use the existing intervention state machine.

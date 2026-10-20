@@ -142,7 +142,7 @@ int main(void){
  /* Physical buttons never receive the contact exemption. */
  snapshot_button=1;assert(held_state()==1);snapshot_button=0;
  assert(event(EV_KEY,BTN_LEFT,1)==-1);
- assert(report("ACTIVITY\n")==0);assert(!strcmp(reply,"ACTIVITY\nOBS_TPAD_1111\n"));
+ assert(report("ACTIVITY\n")==0);assert(!strcmp(reply,"ACTIVITY\nOBS_TPAD_1111\nTP_REJECT_unsupported-key\n"));
  assert(closed_mask==15);
  return 0;
 }
