@@ -27,7 +27,7 @@ class TouchpadRejectionTests(unittest.TestCase):
    ('s.coordinate_frame=true;', 'TP_REJECT_COORDINATE_CONTACT','EV_SYN,SYN_REPORT,0,4'),
    ('', 'TP_REJECT_EVENT_TYPE','EV_REL,REL_WHEEL,1,4'),
    ('', 'TP_REJECT_KEY','EV_KEY,BTN_TOOL_QUINTTAP,1,4'),
-   ('', 'TP_REJECT_AXIS_TYPE','EV_ABS,ABS_MT_TOOL_TYPE,1,4'),
+   ('', 'TP_REJECT_AXIS_TYPE','EV_ABS,ABS_MT_ORIENTATION,1,4'),
    ('', 'TP_REJECT_VALUE','EV_KEY,BTN_TOUCH,2,4'),
    ('', 'TP_REJECT_VALUE','EV_ABS,ABS_PRESSURE,-1,4'),
    ('s.tracking[0]=10;', 'TP_REJECT_VALUE','EV_ABS,ABS_MT_PRESSURE,-1,4'),

@@ -2,7 +2,9 @@
 
 **Preview, GNOME-only:** currently targets GNOME Shell 51 on Wayland. Other platforms are planned and are not yet supported.
 
-Current source update: plugin **0.8.32**, native helper **0.8.15**, GNOME authentication observer protocol **3** unchanged. This is a diagnostic update, not a claimed four-finger repair. After cleanup, the helper may preserve one fixed parser rejection category without raw values, coordinates or device identities. Old/missing diagnostic reports do not alter authority or outcomes. Independent review, **613 controller/recorder tests**, **77 native checks**, and the seven-tool loader check passed. Live diagnosis remains pending.
+Current source update: plugin **0.8.33**, native helper **0.8.16**, GNOME authentication observer protocol **3** unchanged. The live0.8.32 diagnostic preserved unsupported-axis; read-only advertised capabilities isolated ABS_MT_TOOL_TYPE as the sole unsupported axis. This update handles active-slot finger metadata and inert palm intervention without raw input export or motion credit. Independent review, **83 native checks**, and the fresh seven-tool loader check passed. Controller behavior is unchanged apart from release identity; its613-test regression result is retained. Live four-finger acceptance remains pending.
+
+The preceding diagnostic update passed613 controller/recorder tests,77 native checks and loader validation. One input-free diagnostic trial identified the parser category; it was not a gesture acceptance test. See the [kernel tool-type protocol](https://docs.kernel.org/input/multi-touch-protocol.html).
 
 The preceding0.8.31 passed607 controller/recorder tests,73 native checks and loader validation, but the live four-finger contact check failed in the parser after an intervention. Sharing closed cleanly with no held input. The exact rejected case was not preserved, so four-finger and workspace gesture acceptance remain unresolved.
 

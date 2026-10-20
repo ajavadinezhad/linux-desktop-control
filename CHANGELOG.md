@@ -2,6 +2,13 @@
 
 Current status: see [release status](docs/RELEASE_STATUS.md). Older entries below are checkpoint records.
 
+## 0.8.33 — handle verified touchpad tool metadata
+
+- Accept finger tool-type metadata on active verified slots without movement credit.
+- In opted-in multi-contact mode, palm classification yields inertly until all contacts lift; pen/unknown tools remain refused.
+- Keep slot, frame, duplicate tracking and ordinary non-palm validation strict; no raw tool values are exported.
+- Targets the unsupported-axis category isolated by the live diagnostic and read-only device capabilities; live acceptance remains separate.
+
 ## 0.8.32 — preserve terminal touchpad rejection evidence
 
 - Retain one fixed parser rejection category after all input descriptors close; no raw event values or device details are exported.
