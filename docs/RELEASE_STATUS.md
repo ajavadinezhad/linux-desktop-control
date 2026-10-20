@@ -19,6 +19,6 @@ Sessions default to 120 seconds; native-protected sessions may select 120–600 
 
 Routine invocation errors can still close sharing and require new consent. Calibration cannot be reused after its observer closes. Earlier missed mouse-delivery trials do not have a uniquely proven root cause.
 
-The demo sessions ended with confirmed portal closure, zero held input and no cleanup warning. Source remains private; reuse licensing is deferred.
+The demo sessions ended with confirmed portal closure, zero held input and no cleanup warning. GPL-3.0-or-later now covers original code; third-party notices remain applicable. Repository visibility is a separate publication step.
 
 See [beta acceptance](BETA_ACCEPTANCE.md), [validation](VALIDATION.md), and [compatibility](COMPATIBILITY.md). Earlier results remain in version-specific documents and Git history.

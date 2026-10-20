@@ -1,6 +1,6 @@
 # Install Linux Desktop Control
 
-This is a private supervised beta. Repository access does not grant reuse or redistribution rights; [licensing is still under review](LICENSING_REVIEW.md).
+This is a supervised beta licensed under [GPL-3.0-or-later](../LICENSE). See [licensing scope and third-party notices](../LICENSING.md). The repository remains private until its visibility change is completed.
 
 ## 1. Check requirements
 
