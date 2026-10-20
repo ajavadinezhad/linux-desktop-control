@@ -17,7 +17,7 @@ import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import Gio, GLib, Gst
 
-VERSION = '0.8.29'
+VERSION = '0.8.30'
 # Freeze identity at module load: old providers must never report a new disk build.
 _build_spec = importlib.util.spec_from_file_location('_desktop_runtime_build', os.path.join(os.path.dirname(__file__), 'runtime_build.py'))
 _runtime_build = importlib.util.module_from_spec(_build_spec)
@@ -808,6 +808,9 @@ PERMISSION_NO_PROMPT_GRACE=3
 
 class ContextManualPause(RuntimeError):pass
 
+class InterventionWaitExpired(RuntimeError):
+    pass
+
 class ContextRecoveryPending(RetainedPause):
     pass
 
@@ -845,7 +848,7 @@ class Server:
         self.execution_lock=threading.RLock()
         self.owner_cancel_events={}
         self.interruption_policy='close';self.pause_id=None;self.pause_reason=None;self.pause_fence_generation=-1;self.pause_watch_stop=None
-        self.pointer_motion_return=False;self.consent_id=None;self.native_pause_epoch=None;self.manual_pause_requested=False;self.manual_pause_latch=None;self.intervention_latch=None;self.click_context_pending=None
+        self.pointer_motion_return=False;self.consent_id=None;self.native_pause_epoch=None;self.keyboard_wait_deadline=None;self.keyboard_context_wait=None;self.manual_pause_requested=False;self.manual_pause_latch=None;self.intervention_latch=None;self.click_context_pending=None
         self.return_state='disabled';self.return_attempted=set();self.return_record=None
         self.recovery=RecoveryLedger();self.target_provider=None;self.target_record=None
         self.cursor_glow=None;self.cursor_glow_pending=None;self.cursor_glow_warning=None;self.cursor_glow_last=None
@@ -876,7 +879,7 @@ class Server:
             if conditional and self.backend:self.backend.cancelled.set()
             # Fixed categories only: keep the initiating cause through cleanup
             # and downstream observer authorization loss; never export context.
-            category=reason if reason in ('foreground-context-changed','requested-close','publication-foreground-fault','physical-activity') else ('native-observer-fault' if warning=='native' else ('foreground-observer-fault' if warning=='indicator' else 'session-invalidated'))
+            category=reason if reason in ('foreground-context-changed','requested-close','publication-foreground-fault','physical-activity','intervention-wait-expired') else ('native-observer-fault' if warning=='native' else ('foreground-observer-fault' if warning=='indicator' else 'session-invalidated'))
             if self.closure_reason is None:self.closure_reason=category
             if self.context_recovery is not None and self.context_recovery.get('phase') in ('admitting','settling','capturing'):self.context_recovery['phase']='cancelled'
             if self.state=='auth-waiting':
@@ -958,6 +961,7 @@ class Server:
             self.state='pausing';self.pause_id=uuid.uuid4().hex
             self.pause_reason=effective_reason if effective_reason in ('manual','pointer-motion','physical-click','context-change') else 'manual'
             self.native_pause_epoch=expected_epoch
+            if reason=='physical-click' and self.native_keyboard_policy=='pause-recover' and self.keyboard_wait_deadline is None:self.keyboard_wait_deadline=time.monotonic()+CONTEXT_RECOVERY_SECONDS
             self.return_record=getattr(backend,'confirmed_pointer_record',None)
             self.return_state='waiting-quiet' if self.pause_reason in ('pointer-motion','physical-click') and (self.pointer_motion_return or self.native_click_policy=='pause-return') else 'manual'
             self.target_record=None;self.window_record=None
@@ -1044,6 +1048,9 @@ class Server:
             if click_return:
                 try:return self.return_after_click(controller,epoch)
                 except RetainedPause:return False
+                except InterventionWaitExpired:
+                    if self.native_activity is controller:self.invalidate(reason='intervention-wait-expired');self.close_backend()
+                    return False
                 except Exception:
                     if self.native_activity is controller:self.native_activity_lost(controller,'Click recovery context failed')
                     return False
@@ -1094,6 +1101,16 @@ class Server:
         if self.state!='paused' or epoch in self.return_attempted:return False
         self.backend.mapping_guard()
         module=self.window_guard_module();context=self.indicator.context()
+        if self.keyboard_private_wait(context):
+            self.keyboard_context_wait={'pause_id':self.pause_id,'epoch':epoch,'signature':None,'since':None}
+            self.return_state='waiting-context';return False
+        pending=self.keyboard_context_wait
+        if pending is not None and pending['pause_id']==self.pause_id:
+            if pending['epoch']!=epoch:raise RetainedPause('Private context epoch changed')
+            if pending['signature']!=module.WindowGuard.signature(context):
+                pending['signature']=None;pending['since']=None;self.return_state='waiting-context';return False
+            if time.monotonic()>=self.keyboard_wait_deadline:raise InterventionWaitExpired('Physical intervention context wait expired')
+            if pending['since'] is None or time.monotonic()-pending['since']<CONTEXT_RECOVERY_QUIET:return False
         signature=module.WindowGuard.signature(context)
         if context.get('kind')!='window':raise RuntimeError('Click recovery requires an ordinary foreground window')
         record=self.return_record
@@ -1112,6 +1129,22 @@ class Server:
         if self.state=='active':self.return_state='returned' if eligible else 'context-refreshed'
         return self.state=='active'
 
+    def keyboard_inert_context(self,context):
+        if context.get('available') is True and context.get('kind')=='overview':
+            self.window_guard_module().WindowGuard.signature(context);return True
+        epoch=context.get('epoch')
+        return (set(context)=={'available','epoch','reason'} and context.get('available') is False and
+                type(epoch) is int and epoch>=0 and context.get('reason') in ('no-foreground-window','system-ui'))
+
+    def keyboard_private_wait(self,context):
+        # Metadata-only waiting is never authority to capture or control shell UI.
+        if not self.keyboard_inert_context(context):return False
+        native=self.native_activity
+        if (self.native_keyboard_policy!='pause-recover' or self.pause_reason not in ('physical-click','manual') or
+            self.state!='paused' or native is None or not native.is_current_intervention(self.native_pause_epoch)):return False
+        if self.keyboard_wait_deadline is None or time.monotonic()>=self.keyboard_wait_deadline:raise InterventionWaitExpired('Physical intervention context wait expired')
+        return True
+
     def check_pause_health(self,pause_id,backend,indicator):
         # Pausing capture/input must not suspend lock, observer or layout checks.
         # A retired watch cannot close a resumed or replacement consent session.
@@ -1120,13 +1153,29 @@ class Server:
             if backend.cancelled.is_set() or not backend.status().get('active'):raise RuntimeError('Sharing ended')
             if getattr(backend,'requires_window_guard',False):
                 backend.mapping_guard()
-                self.pause_context_signature(indicator.context())
+                context=indicator.context()
+                if self.backend is not backend or self.indicator is not indicator or self.state!='paused' or self.pause_id!=pause_id:return False
+                if self.keyboard_private_wait(context):
+                    self.keyboard_context_wait={'pause_id':pause_id,'epoch':self.native_pause_epoch,'signature':None,'since':None}
+                    self.return_state='waiting-context'
+                else:
+                    signature=self.pause_context_signature(context)
+                    pending=self.keyboard_context_wait;native=self.native_activity
+                    if pending is not None and pending['pause_id']==pause_id:
+                        if time.monotonic()>=self.keyboard_wait_deadline:raise InterventionWaitExpired('Physical intervention context wait expired')
+                        if context.get('kind')!='window':raise RuntimeError('Intervention recovery requires an ordinary window')
+                        now=time.monotonic()
+                        if pending['signature']!=signature:pending['signature']=signature;pending['since']=now
+                        if (not self.manual_pause_pending() and now-pending['since']>=CONTEXT_RECOVERY_QUIET and
+                            native is not None and native.is_current_intervention(pending['epoch'],quiet=True) and self.return_state=='waiting-context'):
+                            self.return_state='context-ready'
+                            self.pointer_quiet(native,pending['epoch'])
             return True
-        except Exception:
+        except Exception as error:
             with self.lifecycle_lock:
                 with self.state_lock:
                     if self.backend is not backend or self.indicator is not indicator or self.state!='paused' or self.pause_id!=pause_id:return False
-                    self.invalidate()
+                    self.invalidate(reason='intervention-wait-expired' if isinstance(error,InterventionWaitExpired) else None)
                 self.close_backend()
             return False
 
@@ -1144,6 +1193,19 @@ class Server:
             if getattr(self.backend,'requires_window_guard',False):
                 if not callable(mapping):raise RuntimeError('Verified monitor mapping unavailable')
                 mapping()
+            if self.native_keyboard_policy=='pause-recover' and self.keyboard_wait_deadline is not None:
+                context=self.indicator.context()
+                if self.keyboard_private_wait(context):
+                    if self.keyboard_context_wait is None:self.keyboard_context_wait={'pause_id':pause_id,'epoch':self.native_pause_epoch,'signature':None,'since':None}
+                    self.return_state='waiting-context'
+                    raise RetainedPause('Private context remains suspended')
+                signature=self.window_guard_module().WindowGuard.signature(context)
+                if context.get('kind')!='window':raise RetainedPause('Ordinary context is required before resuming')
+                pending=self.keyboard_context_wait
+                if pending is not None:
+                    if time.monotonic()>=self.keyboard_wait_deadline:raise InterventionWaitExpired('Physical intervention context wait expired')
+                    if (pending['pause_id']!=pause_id or pending['epoch']!=self.native_pause_epoch or pending['signature']!=signature or
+                        pending['since'] is None or time.monotonic()-pending['since']<CONTEXT_RECOVERY_QUIET):raise RetainedPause('Private context is not yet stable')
             if self.physical_takeover:
                 native=self.native_activity
                 if native is None or (expected_native is not None and native is not expected_native):
@@ -1201,7 +1263,7 @@ class Server:
             self.backend.resume_capture()
             content=self.capture_result(('resuming',),return_record['context'] if return_record is not None else click_context)
             if click_return:self.backend.mapping_guard()
-            self.pause_reason=None
+            self.pause_reason=None;self.keyboard_wait_deadline=None;self.keyboard_context_wait=None
             return content
 
     def require_runtime(self):
@@ -1585,12 +1647,13 @@ class Server:
                         self.consent_id!=consent or backend.operation_cancelled is not event or backend.cancelled.is_set()):return
                     context=expected.context()
                     if time.monotonic()>=record['deadline']:break
-                    if context.get('available') is True:
+                    inert=self.native_keyboard_policy=='pause-recover' and self.keyboard_inert_context(context)
+                    if context.get('available') is True and not inert:
                         self.window_guard_module().WindowGuard.signature(context)
                         if context.get('kind')!='window':break
-                    elif context.get('reason')!='no-foreground-window':break
+                    elif not inert and context.get('reason')!='no-foreground-window':break
                     epoch=native.status().get('intervention_epoch')
-                    if context.get('available') is True and type(epoch) is int and native.is_current_intervention(epoch):
+                    if (context.get('available') is True or inert) and type(epoch) is int and native.is_current_intervention(epoch):
                         record['epoch']=epoch;matched=True;self.physical_intervention(native,epoch);return
                     backend.cancelled.wait(min(.01,max(0,record['deadline']-time.monotonic())))
             except Exception:pass

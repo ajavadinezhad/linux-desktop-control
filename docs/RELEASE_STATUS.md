@@ -2,7 +2,9 @@
 
 **Preview, GNOME-only:** currently targets GNOME Shell 51 on Wayland. Other platforms are planned and are not yet supported.
 
-Current source update: plugin **0.8.29**, native helper **0.8.13**, GNOME authentication observer protocol **3**. Ordinary keyboard intervention can now opt into released-quiet recovery, sharing the existing intervention state machine. It cancels queued work and requires a fresh ordinary view without replay or pointer/focus reclaim. The new helper capability must be acknowledged exactly. Stale context-recovery records no longer hide terminal session state; physical-activity closures have a fixed diagnostic category. Independent review, **590 controller/recorder tests**, **68 native checks**, and the seven-tool loader check passed. Live keyboard acceptance remains pending.
+Current source update: plugin **0.8.30**, native helper **0.8.13** unchanged, GNOME authentication observer protocol **3** unchanged. This extends the keyboard-intervention recovery path to bounded metadata-only waiting through a transient foreground gap, system switcher, or overview. Capture and input remain off; only a stable ordinary window permits fresh observation and continuation. Stop must remain responsive during waiting. Independent review, **600 controller/recorder tests**, and the seven-tool loader check passed; the unchanged helper retains its68-check native result. Live Alt+Tab and workspace acceptance remain pending.
+
+The preceding0.8.29 passed590 controller/recorder tests,68 native checks, and loader validation, but its live Alt+Tab check failed because a physical pause still encountered a strict foreground checker. It is not recorded as live accepted. The same update fixed stale settling status masking a terminal closure and introduced exact native keyboard-recovery negotiation.
 
 The preceding0.8.28 update passed569 controller/recorder tests,61 native checks, and loader validation. A scoped live two-finger test observed capture paused with sharing retained, automatic recovery, a successful subsequent pointer action, and clean explicit closure. This does not establish broad device or keyboard coverage.
 
