@@ -37,3 +37,7 @@ Use each action's returned image directly rather than making a second observatio
 The frozen suite passed 450 Python tests. Endpoint mismatch, cancellation/release, typed-state changes and unchanged-query invariants have regression coverage. No live speedup, universal device support or new safety acceptance is claimed.
 
 Installation verification: all 14 reviewed plugin files match the installed 0.8.17 cache; a fresh provider confirms the expected source build and seven tools. Two live startup attempts ended before capture/input, so these measurements remain offline only. See [release status](RELEASE_STATUS.md).
+
+## Scoped live touchpad drawing
+
+Installed 0.8.18/helper 0.8.7 completed one uninterrupted Kleki bear redraw and GUI PNG save in approximately 4 minutes 25 seconds after startup. Both touchpad readiness gates passed. The user perceived faster operation, but no matched baseline establishes a percentage improvement. Example batches: five strokes 1785 ms input / 514 ms capture; six claw strokes 1565 ms input / approximately 600 ms capture; two scarf strokes 1201 ms input / approximately 500 ms capture. These counters exclude planning, tool transport and UI selection time. Their individual contributions were not measured. Cleanup confirmed portal closure, zero held input and no warning. No automatic replay or runtime modification occurred during the drawing.
