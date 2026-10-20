@@ -54,7 +54,7 @@ class Controller:
     def __init__(self, active, on_activity, on_fault, runtime_dir=None,
                  launcher=subprocess.Popen, validator=validate_helper,
                  credentials=peer_credentials, startup_timeout=60, notice=None,
-                 retain_sharing=False, on_yield=None, on_quiet=None, session_seconds=120):
+                 retain_sharing=False, on_yield=None, on_quiet=None, session_seconds=120, pointer_source="mouse"):
         # Dependency injections are for isolated tests, never model tool arguments.
         if type(session_seconds) is not int or not 120<=session_seconds<=600:
             raise ValueError("session_seconds must be an integer from 120 to 600")
@@ -109,6 +109,11 @@ class Controller:
         self.observation_evidence = None
         self.observation_report_kind = 'not-requested'
         if type(retain_sharing) is not bool:raise ValueError('retain_sharing must be boolean')
+        if pointer_source not in ("mouse","touchpad") or not isinstance(pointer_source,str):
+            raise ValueError("Invalid pointer_source")
+        if pointer_source=="touchpad" and not retain_sharing:
+            raise ValueError("Touchpad observation requires retained sharing")
+        self.pointer_source=pointer_source
         self.retain_sharing=retain_sharing
         self.on_yield=on_yield
         self.on_quiet=on_quiet
@@ -497,10 +502,12 @@ class Controller:
         if message is None:
             self.observation_report_kind='missing';return
         if (not isinstance(message,str) or len(message)!=13 or
-                not message.startswith('OBS_DIAG_') or any(bit not in '01' for bit in message[9:])):
+                not message.startswith('OBS_TPAD_' if self.pointer_source=='touchpad' else 'OBS_DIAG_') or any(bit not in '01' for bit in message[9:])):
             self.observation_report_kind='malformed';return
-        names=('relative_calibration_seen','primary_record_after_arm',
-               'eligible_relative_after_arm','yielded_token_sent')
+        names=(('touchpad_calibration_seen','primary_record_after_arm',
+                'eligible_touchpad_after_arm','yielded_token_sent') if self.pointer_source=='touchpad' else
+               ('relative_calibration_seen','primary_record_after_arm',
+                'eligible_relative_after_arm','yielded_token_sent'))
         self.observation_evidence={name:bit=='1' for name,bit in zip(names,message[9:])}
         self.observation_report_kind='received'
 
@@ -558,11 +565,11 @@ class Controller:
 
     def _negotiate_yield(self):
         deadline=time.monotonic()+1
-        # Version 2 proves calibration observed the same primary relative
-        # source class that can later yield; legacy category/held evidence is
-        # insufficient for retained pointer observation.
-        self._send('MODEYIELD2')
-        if self._read(max(0,deadline-time.monotonic()))!='MODEYIELD2_OK':
+        # Negotiate the selected source explicitly. Neither legacy category
+        # evidence nor an acknowledgement for another source grants coverage.
+        mode='MODEYIELD3' if self.pointer_source=='touchpad' else 'MODEYIELD2'
+        self._send(mode)
+        if self._read(max(0,deadline-time.monotonic()))!=mode+'_OK':
             raise NativeFailure('protocol-invalid','Native helper lacks strict retained pointer coverage')
         if time.monotonic()>=deadline or not self._yield_authorized():
             raise NativeFailure('session-ended','Native observer authorization ended')
@@ -684,7 +691,7 @@ class Controller:
         return {'active': self.ready and not self.stop.is_set(), 'supported': self.ready,
                 'observer_alive':self.calibration_verified and not self.stop.is_set() and not self.closed,
                 'yielded':self.yielded,'yield_epoch':self.yield_epoch,'quiet_epoch':self.quiet_epoch,
-                'retain_sharing':self.retain_sharing,
+                'retain_sharing':self.retain_sharing,'pointer_source':self.pointer_source,
                 'post_arm_verified':self.post_arm_verified,'post_arm_state':self.post_arm_state,
                 'post_arm_remaining_seconds':None if self.post_arm_deadline_monotonic is None else max(0,int(self.post_arm_deadline_monotonic-time.monotonic())),
                 'human_provenance': False, 'raw_device_fds': False,

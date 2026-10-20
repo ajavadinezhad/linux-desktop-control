@@ -29,6 +29,47 @@
 static bool property(struct udev_device *d, const char *key) {
     const char *v=udev_device_get_property_value(d,key);return v&&!strcmp(v,"1");
 }
+static bool input_bit(const unsigned char *bits,unsigned code) {
+    return (bits[code/8]&(1U<<(code%8)))!=0;
+}
+/* Admission is performed only by the privileged fixed opener, before its
+ * descriptors are handed to the unprivileged parser. Udev alone is not proof
+ * of an indirect single-finger coordinate protocol. */
+static bool verified_touchpad(int fd,struct udev_device *d,struct tp_limits *limits) {
+    if(!property(d,"ID_INPUT_TOUCHPAD")||property(d,"ID_INPUT_TOUCHSCREEN")||
+       property(d,"ID_INPUT_TABLET")||property(d,"ID_INPUT_JOYSTICK")||
+       property(d,"ID_INPUT_KEYBOARD")||property(d,"ID_INPUT_MOUSE"))return false;
+    unsigned char props[(INPUT_PROP_MAX+8)/8]={0};
+    unsigned char keys[(KEY_MAX+8)/8]={0},abs[(ABS_MAX+8)/8]={0};
+    if(ioctl(fd,EVIOCGPROP(sizeof props),props)<0||!input_bit(props,INPUT_PROP_POINTER)||
+       input_bit(props,INPUT_PROP_DIRECT)||
+       ioctl(fd,EVIOCGBIT(EV_KEY,sizeof keys),keys)<0||
+       ioctl(fd,EVIOCGBIT(EV_ABS,sizeof abs),abs)<0||
+       !input_bit(keys,BTN_TOUCH)||!input_bit(keys,BTN_TOOL_FINGER)||
+       !input_bit(abs,ABS_X)||!input_bit(abs,ABS_Y))return false;
+    struct input_absinfo x,y;
+    if(ioctl(fd,EVIOCGABS(ABS_X),&x)<0||ioctl(fd,EVIOCGABS(ABS_Y),&y)<0||
+       x.minimum>=x.maximum||y.minimum>=y.maximum)return false;
+    *limits=(struct tp_limits){.x_min=x.minimum,.x_max=x.maximum,.y_min=y.minimum,.y_max=y.maximum};
+    bool mt=false;
+    for(unsigned code=ABS_MT_SLOT;code<=ABS_MT_TOOL_Y;code++)mt|=input_bit(abs,code);
+    if(mt) {
+        if(!input_bit(abs,ABS_MT_SLOT)||!input_bit(abs,ABS_MT_TRACKING_ID)||
+           !input_bit(abs,ABS_MT_POSITION_X)||!input_bit(abs,ABS_MT_POSITION_Y))return false;
+        struct input_absinfo slot,tracking,mx,my;
+        if(ioctl(fd,EVIOCGABS(ABS_MT_SLOT),&slot)<0||
+           ioctl(fd,EVIOCGABS(ABS_MT_TRACKING_ID),&tracking)<0||
+           ioctl(fd,EVIOCGABS(ABS_MT_POSITION_X),&mx)<0||
+           ioctl(fd,EVIOCGABS(ABS_MT_POSITION_Y),&my)<0||
+           slot.minimum!=0||slot.maximum<0||slot.maximum>=TP_MAX_SLOTS||
+           tracking.minimum!=0||tracking.maximum<0||
+           mx.minimum!=x.minimum||mx.maximum!=x.maximum||
+           my.minimum!=y.minimum||my.maximum!=y.maximum)return false;
+        limits->mt=true;limits->slot_min=slot.minimum;limits->slot_max=slot.maximum;
+        limits->tracking_max=tracking.maximum;
+    }
+    return tp_valid_limits(limits);
+}
 static char *verified_session;
 static int active_local(uid_t uid,pid_t peer_pid) {
     char *session=NULL,*seat=NULL,*type=NULL;uid_t session_uid;int ok=0;
@@ -112,6 +153,10 @@ int main(int argc,char **argv) {
         bool has_switch=(capabilities[EV_SW/(8*sizeof(long))]>>(EV_SW%(8*sizeof(long))))&1;
         bool has_motion=((capabilities[EV_REL/(8*sizeof(long))]>>(EV_REL%(8*sizeof(long))))&1)||((capabilities[EV_ABS/(8*sizeof(long))]>>(EV_ABS%(8*sizeof(long))))&1);
         if((key&&!has_key)||(ptr&&!has_motion)||(!has_key&&!has_motion&&!has_switch)){close(fd);udev_device_unref(d);goto fault;}
+        /* Unadmitted pads remain covered by the unchanged terminal activity
+         * path. They do not gain contact exemptions or MODEYIELD3 credit. */
+        device_touchpad[count]=property(d,"ID_INPUT_TOUCHPAD")&&verified_touchpad(fd,d,&touchpad_limits[count]);
+        tp_reset(&touchpad_states[count]);
         /* EVIOCGKEY flushes its evdev client's key queue. A second OPEN,
          * never dup(), keeps held-state sampling off the event-stream client. */
         int snapshot=open(node,O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_NOFOLLOW);struct stat snapshot_info;
