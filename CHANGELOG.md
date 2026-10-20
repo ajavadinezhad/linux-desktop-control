@@ -2,6 +2,13 @@
 
 Current status: see [release status](docs/RELEASE_STATUS.md). Older entries below are checkpoint records.
 
+## 0.8.31 — retain sharing through up to four touchpad contacts
+
+- Negotiate explicit multi-contact recovery; one through four consistent contacts use the existing intervention state machine.
+- Keep capture/input paused through partial finger lifts and incomplete frames; multiple contacts never count as pointer-motion proof.
+- Recover only after all release, quiet, and a fresh ordinary workspace; preserve default and authentication behavior.
+- Reject unsupported five-contact, malformed and dropped-event paths. Live acceptance remains separate from fixtures.
+
 ## 0.8.30 — wait through foreground transitions while paused
 
 - Keep capture/input off through an owned keyboard intervention’s transient foreground gap, system switcher, or overview.

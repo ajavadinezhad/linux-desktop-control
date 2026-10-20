@@ -2,7 +2,9 @@
 
 **Preview, GNOME-only:** currently targets GNOME Shell 51 on Wayland. Other platforms are planned and are not yet supported.
 
-Current source update: plugin **0.8.30**, native helper **0.8.13** unchanged, GNOME authentication observer protocol **3** unchanged. This extends the keyboard-intervention recovery path to bounded metadata-only waiting through a transient foreground gap, system switcher, or overview. Capture and input remain off; only a stable ordinary window permits fresh observation and continuation. Stop must remain responsive during waiting. Independent review, **600 controller/recorder tests**, and the seven-tool loader check passed; the unchanged helper retains its68-check native result. Live Alt+Tab and workspace acceptance remain pending.
+Current source update: plugin **0.8.31**, native helper **0.8.14**, GNOME authentication observer protocol **3** unchanged. Explicit multi-contact recovery extends touchpad intervention handling through four contacts, retaining pause until all contacts lift. It uses the existing released-quiet and private context-settling path without replay or pointer/focus reclaim. Independent review, **607 controller/recorder tests**, **73 native checks**, and the seven-tool loader check passed. Live four-finger acceptance remains pending.
+
+The preceding0.8.30 passed600 controller/recorder tests and loader validation. A live Alt+Tab cycle retained sharing, recovered into the selected window, and allowed a subsequent harmless pointer action. A later four-finger gesture hit the helper’s unsupported contact path and closed sharing. The keyboard result is scoped; workspace gesture acceptance was not established.
 
 The preceding0.8.29 passed590 controller/recorder tests,68 native checks, and loader validation, but its live Alt+Tab check failed because a physical pause still encountered a strict foreground checker. It is not recorded as live accepted. The same update fixed stale settling status masking a terminal closure and introduced exact native keyboard-recovery negotiation.
 
