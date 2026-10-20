@@ -1,6 +1,6 @@
 # Optional native activity helper
 
-Helper **0.8.12** adds physical-input monitoring to explicitly protected sessions. It is off by default and is separate from ordinary portal control. See [release status](../docs/RELEASE_STATUS.md) for scoped live evidence and unpassed checks.
+Helper **0.8.13** adds physical-input monitoring to explicitly protected sessions. It is off by default and is separate from ordinary portal control. See [release status](../docs/RELEASE_STATUS.md) for scoped live evidence and unpassed checks.
 
 ## Consent and startup
 
@@ -44,3 +44,5 @@ The policy requires fresh administrator authorization for an active local sessio
 The current helper passed 57 isolated native tests without opening physical input devices. Fixture scripts live alongside the source. They do not establish coverage of a new keyboard, mouse or transport. Follow the [beta checklist](../docs/BETA_ACCEPTANCE.md) for separate live acceptance.
 
 The old preopened-descriptor prototype has been removed; the production collector retains raw device access inside its own boundary. Earlier design tradeoffs remain in [DESIGN.md](DESIGN.md), explicitly as historical context.
+
+Optional KEYPAUSE1 negotiation permits ordinary keyboard intervention to use the existing coarse released-quiet recovery protocol. Key scan framing and unfinished frames pause without movement credit; no key values are exported. Default keyboard handling and protected authentication waiting remain separate.

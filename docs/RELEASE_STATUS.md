@@ -2,7 +2,9 @@
 
 **Preview, GNOME-only:** currently targets GNOME Shell 51 on Wayland. Other platforms are planned and are not yet supported.
 
-Current source update: plugin **0.8.28**, native helper **0.8.12**, GNOME authentication observer protocol **3**. This fixes two reproduced screenshot-publication races that incorrectly converted a retained physical pause into session closure. A separate bounded native snapshot recheck mitigates intermediate one/two-finger tool-state updates while preserving unsupported-input refusal. Independent review, all **569 controller/recorder tests**, **61 native checks**, and the seven-tool loader check passed. Live acceptance of this update remains pending; the earlier DoorDash closure does not have a uniquely proven cause.
+Current source update: plugin **0.8.29**, native helper **0.8.13**, GNOME authentication observer protocol **3**. Ordinary keyboard intervention can now opt into released-quiet recovery, sharing the existing intervention state machine. It cancels queued work and requires a fresh ordinary view without replay or pointer/focus reclaim. The new helper capability must be acknowledged exactly. Stale context-recovery records no longer hide terminal session state; physical-activity closures have a fixed diagnostic category. Independent review, **590 controller/recorder tests**, **68 native checks**, and the seven-tool loader check passed. Live keyboard acceptance remains pending.
+
+The preceding0.8.28 update passed569 controller/recorder tests,61 native checks, and loader validation. A scoped live two-finger test observed capture paused with sharing retained, automatic recovery, a successful subsequent pointer action, and clean explicit closure. This does not establish broad device or keyboard coverage.
 
 The preceding two-finger update demonstrated an intervention and automatic return with retained sharing, but a later closure means full live acceptance is qualified. See [two-finger scope](TWO_FINGER_PAUSE.md).
 

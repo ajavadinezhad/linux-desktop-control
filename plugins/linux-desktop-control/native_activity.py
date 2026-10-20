@@ -54,7 +54,7 @@ class Controller:
     def __init__(self, active, on_activity, on_fault, runtime_dir=None,
                  launcher=subprocess.Popen, validator=validate_helper,
                  credentials=peer_credentials, startup_timeout=60, notice=None,
-                 retain_sharing=False, on_yield=None, on_quiet=None, session_seconds=120, pointer_source="mouse", startup_verification="challenge", allow_permission_wait=False, click_policy='close', on_intervention=None):
+                 retain_sharing=False, on_yield=None, on_quiet=None, session_seconds=120, pointer_source="mouse", startup_verification="challenge", allow_permission_wait=False, click_policy='close', on_intervention=None, keyboard_policy='close'):
         # Dependency injections are for isolated tests, never model tool arguments.
         if type(session_seconds) is not int or not 120<=session_seconds<=600:
             raise ValueError("session_seconds must be an integer from 120 to 600")
@@ -120,6 +120,8 @@ class Controller:
         self.pointer_source=pointer_source
         if type(click_policy) is not str or click_policy not in ('close','pause-return') or (click_policy!='close' and not retain_sharing):raise ValueError('Click return requires retained native observation')
         self.click_policy=click_policy;self.click_mode_acknowledged=False
+        if type(keyboard_policy) is not str or keyboard_policy not in ('close','pause-recover') or (keyboard_policy!='close' and (not retain_sharing or click_policy!='pause-return')):raise ValueError('Keyboard recovery requires retained click recovery')
+        self.keyboard_policy=keyboard_policy;self.keyboard_mode_acknowledged=False
         self.intervention_epoch=None;self.on_intervention=on_intervention;self.resume_click_return=False
         if not isinstance(startup_verification,str) or startup_verification not in ('challenge','passive'):
             raise ValueError('Invalid startup_verification')
@@ -238,6 +240,7 @@ class Controller:
             if self.retain_sharing:
                 self._negotiate_yield()
             if self.click_policy=='pause-return':self._negotiate_click()
+            if self.keyboard_policy=='pause-recover':self._negotiate_keyboard()
             if self.allow_permission_wait:self._negotiate_auth()
             if self.startup_verification=='passive':
                 return self._start_passive()
@@ -705,6 +708,14 @@ class Controller:
         if reply!='CLICKPAUSE1_OK' or time.monotonic()>=deadline or not self._yield_authorized():raise NativeFailure('protocol-invalid','Click observer negotiation failed')
         self.click_mode_acknowledged=True
 
+    def _negotiate_keyboard(self):
+        deadline=time.monotonic()+1
+        if not self.click_mode_acknowledged or not self._yield_authorized():raise NativeFailure('session-ended','Keyboard observer authorization ended')
+        self._send('KEYPAUSE1')
+        reply=self._read(max(0,deadline-time.monotonic()))
+        if reply!='KEYPAUSE1_OK' or time.monotonic()>=deadline or not self._yield_authorized():raise NativeFailure('protocol-invalid','Keyboard observer negotiation failed')
+        self.keyboard_mode_acknowledged=True
+
     def _yield_authorized(self):
         # Authorization callbacks may revoke/close reentrantly; their returned
         # value cannot resurrect a stopped owner or renew the original lease.
@@ -840,6 +851,7 @@ class Controller:
                 'readiness_kind':self.readiness_kind,'passive_acknowledged':self.passive_acknowledged,
                 'coverage_verified':self.calibration_verified and (not self.retain_sharing or self.post_arm_verified),
                 'motion_epoch':self.motion_epoch,'auth_wait_supported':self.auth_mode_acknowledged,'auth_waiting':self.auth_waiting,
+                'keyboard_policy':self.keyboard_policy,'keyboard_wait_supported':self.keyboard_mode_acknowledged,
                 'click_policy':self.click_policy,'click_wait_supported':self.click_mode_acknowledged,'intervention_epoch':self.intervention_epoch,
                 'yielded':self.yielded,'yield_epoch':self.yield_epoch,'quiet_epoch':self.quiet_epoch,
                 'retain_sharing':self.retain_sharing,'pointer_source':self.pointer_source,
