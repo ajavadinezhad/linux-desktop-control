@@ -1,5 +1,7 @@
 # Compatibility
 
+**Preview:** GNOME Shell 51 on Wayland is the only currently supported target. Support for other platforms is planned, with no release date or compatibility guarantee.
+
 The installation preflight currently requires **GNOME Shell 51 on Wayland**. Other desktops and GNOME versions are not validated. Consent must select exactly one monitor and allow keyboard and pointer control.
 
 | Area | Evidence and limits |
