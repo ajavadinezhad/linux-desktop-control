@@ -24,6 +24,9 @@
 #define MAX_DEVICES 64
 #define HEARTBEAT_MS 1000
 #define SESSION_BUDGET_MS 120000
+#define SESSION_MAX_MS 600000
+static long long session_budget_ms = SESSION_BUDGET_MS;
+static bool lease_negotiated;
 #define CALIBRATION_QUIET_MS 1500
 static int device_count;
 /* Exit status only: fixed stage identifiers, never device/input metadata. */
@@ -69,7 +72,7 @@ static long long now_ms(void) {
  * deadlines expired, so controller heartbeats cannot hide the lease cap. */
 static int expiry_phase(long long current, long long last_heartbeat, long long started) {
     if (current < 0 || current < last_heartbeat || current < started) return 19;
-    if (current - started >= SESSION_BUDGET_MS) return 18;
+    if (current - started >= session_budget_ms) return 18;
     if (current - last_heartbeat >= HEARTBEAT_MS) return 17;
     return 0;
 }
@@ -403,6 +406,22 @@ static int command(const char *line) {
     long long current = now_ms();
     if (current < 0) return -1;
     if (!strcmp(line, "CLOSE")) return 2;
+    if (!strncmp(line, "LEASE_", 6)) {
+        if (lease_negotiated || pointer_yield_mode || armed || calibrating || calibrated || calibration_release_pending ||
+            expiry_phase(current, heartbeat, session_time)) return -1;
+        const char *digits = line + 6;
+        if (strlen(digits) != 3 || digits[0] < '1' || digits[0] > '6' ||
+            digits[1] < '0' || digits[1] > '9' || digits[2] < '0' || digits[2] > '9') return -1;
+        unsigned seconds = (unsigned)(digits[0]-'0')*100 + (unsigned)(digits[1]-'0')*10 + (unsigned)(digits[2]-'0');
+        if (seconds < 120 || seconds > SESSION_MAX_MS/1000) return -1;
+        char reply[16];
+        int length = snprintf(reply,sizeof reply,"LEASE_%u_OK\n",seconds);
+        if (length <= 0 || (size_t)length >= sizeof reply) return -1;
+        lease_negotiated = true;
+        session_budget_ms = (long long)seconds * 1000;
+        /* The original READY anchor is never replaced or renewed. */
+        return send(CONTROL,reply,(size_t)length,MSG_NOSIGNAL | MSG_DONTWAIT)==length ? 0 : -1;
+    }
     if (!strcmp(line, "MODEYIELD") || !strcmp(line, "MODEYIELD2")) {
         if (pointer_yield_mode || armed || calibrating || calibrated || calibration_release_pending) return -1;
         pointer_yield_mode = true;

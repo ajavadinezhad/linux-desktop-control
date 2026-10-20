@@ -17,7 +17,7 @@ import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import Gio, GLib, Gst
 
-VERSION = '0.8.12'
+VERSION = '0.8.15'
 # Freeze identity at module load: old providers must never report a new disk build.
 _build_spec = importlib.util.spec_from_file_location('_desktop_runtime_build', os.path.join(os.path.dirname(__file__), 'runtime_build.py'))
 _runtime_build = importlib.util.module_from_spec(_build_spec)
@@ -302,6 +302,8 @@ class Desktop:
         # Keep the approach and modifiers fenced. The one authorized gesture
         # begins only at its activating press, never at motion or key release.
         activating=(method=='NotifyPointerButton' and args[-1]==1) or (method=='NotifyKeyboardKeysym' and args[-1]==1 and args[0] not in (0xffe1,0xffe2,0xffe3,0xffe4,0xffe9,0xffea))
+        transition_key=getattr(self,'transition_activation_key',None)
+        if transition_key is not None:activating=method=='NotifyKeyboardKeysym' and args[-1]==1 and args[0]==transition_key
         if getattr(self,'window_transition',False) and not getattr(self,'transition_activated',False) and activating:
             callback=getattr(self,'begin_transition',None)
             if callback is not None:callback()
@@ -735,9 +737,9 @@ ACTION_SCHEMA['properties']['steps']={'type':'array','items':STEP_SCHEMA,'minIte
 
 def tools():
     specs=[
-      ('desktop_start','Request personal GNOME consent for one monitor, keyboard and pointer; return a fresh screenshot. Optional cursor_glow temporarily changes the desktop-wide cursor theme and restores it on close.',{'physical_takeover':{'type':'boolean','default':False,'description':'Explicit opt-in to a separately installed native activity helper; administrator authorization follows personal GNOME sharing approval. Backend receives only coarse activity/fault notices, never raw input descriptors. Not human-provenance attestation.'},'cursor_glow':{'type':'boolean','description':'Explicit opt-in after explaining desktop-wide theme scope. Applies real themed cursor glow while active; custom app cursors may ignore it.'},'pointer_motion_return':{'type':'boolean','default':False,'description':'With retained sharing and native observation, yield on mouse movement and return once to the last confirmed point after physical quiet in the same app. No action replay.'},'interruption_policy':{'type':'string','enum':['close','retain-sharing'],'default':'close','description':'Opt-in retained consent for explicit pause/resume; physical observer faults remain terminal. No automatic cursor return or replay.'}}),
+      ('desktop_start','Request personal GNOME consent for one monitor, keyboard and pointer; return a fresh screenshot. Optional cursor_glow temporarily changes the desktop-wide cursor theme and restores it on close.',{'session_seconds':{'type':'integer','minimum':120,'maximum':600,'default':120,'description':'Optional initial native-helper lease in seconds, physical_takeover required. Negotiated once before calibration; default120, hard maximum600. No active renewal; Stop and faults remain terminal.'},'physical_takeover':{'type':'boolean','default':False,'description':'Explicit opt-in to a separately installed native activity helper; administrator authorization follows personal GNOME sharing approval. Backend receives only coarse activity/fault notices, never raw input descriptors. Not human-provenance attestation.'},'cursor_glow':{'type':'boolean','description':'Explicit opt-in after explaining desktop-wide theme scope. Applies real themed cursor glow while active; custom app cursors may ignore it.'},'pointer_motion_return':{'type':'boolean','default':False,'description':'With retained sharing and native observation, yield on mouse movement and return once to the last confirmed point after physical quiet in the same app. No action replay.'},'interruption_policy':{'type':'string','enum':['close','retain-sharing'],'default':'close','description':'Opt-in retained consent for explicit pause/resume; physical observer faults remain terminal. No automatic cursor return or replay.'}}),
       ('desktop_observe','Return a fresh screenshot and dimensions. Optional inspect_target binds a single-use editable accessibility identity; inspect before input.',{'inspect_target':{'type':'boolean'}}),
-      ('desktop_action','Perform bounded input and return a fresh screenshot. Text/keys need same-call focus or a sequence beginning with a target click/focus shortcut. Coordinates use logical_size. Discrete wheel steps only. Text uses GNOME Unicode composition by default; verify actual results. Never replay uncertain input.',{'action':ACTION_SCHEMA,'target_id':{'type':'string','minLength':32,'maxLength':32},'recovery_observation_id':{'type':'string'},'window_observation_id':{'type':'string','minLength':32,'maxLength':32},'focus_transition':{'type':'boolean','description':'Only one explicit left click, launcher/Return or Ctrl+s/Ctrl+Shift+s/Ctrl+o gesture may change foreground; no remaining batch. Inspect its returned image before further input.'}}),
+      ('desktop_action','Perform bounded input and return a fresh screenshot. Text/keys need same-call focus or a sequence beginning with a target click/focus shortcut. Coordinates use logical_size. Discrete wheel steps only. Text uses GNOME Unicode composition by default; verify actual results. Never replay uncertain input.',{'action':ACTION_SCHEMA,'target_id':{'type':'string','minLength':32,'maxLength':32},'recovery_observation_id':{'type':'string'},'window_observation_id':{'type':'string','minLength':32,'maxLength':32},'window_normalize_for_move':{'type':'boolean','description':'Separate opt-in Alt+F10 resize toggle of the currently focused window on the other of two verified monitors before a later monitor move. Only a frame not wholly source-contained is admitted; origin and center must identify that source; same-window full source containment required after. No focus activation or content observation.'},'window_move_to_shared':{'type':'boolean','description':'Opt-in single Super+Shift+Arrow move of the currently focused window from the other monitor to the shared monitor; exactly two unambiguous monitors and unchanged configured shortcut required. No focus activation or unseen-content claim.'},'focus_transition':{'type':'boolean','description':'Only one explicit left click, launcher/Return or Ctrl+s/Ctrl+Shift+s/Ctrl+o gesture may change foreground; no remaining batch. Inspect its returned image before further input.'}}),
       ('desktop_pause','Cancel current work, release virtual input and stop capture. Retaining sharing requires interruption_policy=retain-sharing at startup.',{}),
       ('desktop_resume','Explicitly resume retained sharing with a fresh screenshot and new observation tokens. Never replays input.',{'pause_id':{'type':'string','minLength':32,'maxLength':32}}),
       ('desktop_status','Read session and cleanup state without capturing or sending input.',{}),
@@ -795,7 +797,7 @@ class Server:
         self.return_state='disabled';self.return_attempted=set();self.return_record=None
         self.recovery=RecoveryLedger();self.target_provider=None;self.target_record=None
         self.cursor_glow=None;self.cursor_glow_pending=None;self.cursor_glow_warning=None;self.cursor_glow_last=None
-        self.physical_takeover=False;self.physical_takeover_warning=None;self.native_activity=None;self.native_activity_last=None
+        self.physical_takeover=False;self.physical_takeover_warning=None;self.native_activity=None;self.native_activity_last=None;self.native_session_seconds=120
         self.target_cleanup_warning=None;self.indicator=None;self.indicator_warning=None;self.window_record=None
 
     def own_observer(self,attribute,owner):
@@ -1144,7 +1146,8 @@ class Server:
             on_activity=lambda:self.native_activity_lost(controller),
             on_fault=lambda error:self.native_activity_lost(controller,error),notice=notice,
             retain_sharing=self.interruption_policy=='retain-sharing',
-            on_yield=self.pointer_yielded,on_quiet=self.pointer_quiet)
+            on_yield=self.pointer_yielded,on_quiet=self.pointer_quiet,
+            **({'session_seconds':self.native_session_seconds} if self.native_session_seconds!=120 else {}))
         # Publish ownership atomically with callback invalidation checks.
         self.own_observer('native_activity',controller)
         controller.start()
@@ -1333,12 +1336,15 @@ class Server:
             if callable(getattr(self.backend,'wait_interruptibly',None)):self.backend.wait_interruptibly(wait)
             else:time.sleep(wait)
 
-    def capture_result(self,allowed,expected_window=None,transition_settle=False):
+    def capture_result(self,allowed,expected_window=None,transition_settle=False,moved_window=None):
         required=getattr(self.backend,'requires_window_guard',False)
         deadline=time.monotonic()+2
         attempts=0
         while True:
             before=(self.stable_transition_context(deadline) if transition_settle else self.read_window_context()) if required else None
+            if moved_window is not None:
+                self.backend.mapping_guard()
+                self.window_guard_module().validate_monitor_arrival(before,*moved_window)
             if expected_window is not None and self.window_guard_module().WindowGuard.signature(before)!=expected_window:raise RuntimeError('Foreground changed after input; session must close')
             self.require_runtime()
             self.guard(allowed)
@@ -1346,6 +1352,9 @@ class Server:
             png=self.backend.capture();self.guard(allowed)
             if self.state=='opening' and self.physical_takeover:self.require_native_ready()
             after=self.read_window_context(max(0,deadline-time.monotonic()) if transition_settle else 0) if required else None
+            if moved_window is not None:
+                self.backend.mapping_guard()
+                self.window_guard_module().validate_monitor_arrival(after,*moved_window)
             if not required or self.window_guard_module().WindowGuard.signature(before)==self.window_guard_module().WindowGuard.signature(after):break
             # Only the already-authorized single transition may settle across a
             # capture race. Discard pixels and observe again; never repeat input.
@@ -1392,6 +1401,9 @@ class Server:
             if self.state in ('pausing','paused','resuming'):raise RetainedPause('Sharing is paused; use desktop_resume rather than desktop_start')
             physical=args.get('physical_takeover',False)
             if type(physical) is not bool:raise ValueError('physical_takeover must be boolean')
+            session_seconds=args.get('session_seconds',120)
+            if type(session_seconds) is not int or not 120<=session_seconds<=600:raise ValueError('session_seconds must be an integer from 120 to 600')
+            if 'session_seconds' in args and not physical:raise ValueError('session_seconds requires physical_takeover')
             auto_return=args.get('pointer_motion_return',False)
             if type(auto_return) is not bool:raise ValueError('pointer_motion_return must be boolean')
             if auto_return and (policy!='retain-sharing' or not physical):raise ValueError('Automatic pointer return requires retained sharing and native activity observation')
@@ -1409,6 +1421,7 @@ class Server:
                         # late callback cannot cancel this replacement session.
                         self.backend.cancelled=threading.Event()
                         self.backend.operation_cancelled=threading.Event()
+                        self.native_session_seconds=session_seconds
                         self.interruption_policy=policy;self.pause_id=None;self.pause_reason=None
                         self.pointer_motion_return=auto_return;self.consent_id=uuid.uuid4().hex;self.backend.consent_id=self.consent_id
                         self.backend.confirmed_pointer_record=None;self.return_record=None;self.return_attempted=set();self.native_pause_epoch=None;self.manual_pause_requested=False
@@ -1437,6 +1450,7 @@ class Server:
                         metadata=json.loads(content[0]['text']);metadata.update(self.status());content[0]=text(metadata)
                     return content
                 except BaseException:self.close_backend();raise
+            if 'session_seconds' in args and session_seconds!=self.native_session_seconds:raise ValueError('An active native lease cannot be changed; close before selecting a new initial limit')
             if physical and not self.physical_takeover:raise RuntimeError('Device-source observation must be selected before a new consent session')
             expected=self.window_guard_module().WindowGuard.signature(self.window_record['context']) if self.window_record else None
             return self.capture_result(('active',),expected)
@@ -1450,7 +1464,13 @@ class Server:
             # the current partial-result report.
             self.backend.transaction_info={'completed_steps':0,'failed_step':None,'input_events_attempted':0,'input_characters_completed':0}
             try:
+                monitor_move=args.get('window_move_to_shared',False);moved_window=None
+                normalize_window=args.get('window_normalize_for_move',False)
+                if type(normalize_window) is not bool:raise ValueError('window_normalize_for_move must be boolean')
+                if normalize_window and monitor_move:raise ValueError('Normalize and monitor move require separate observed actions')
+                if type(monitor_move) is not bool:raise ValueError('window_move_to_shared must be boolean')
                 transition=args.get('focus_transition',False)
+                if (monitor_move or normalize_window) and (transition is not True or not getattr(self.backend,'requires_window_guard',False)):raise ValueError('Monitor move requires a guarded explicit focus transition')
                 if type(transition) is not bool:raise ValueError('focus_transition must be boolean')
                 if transition and 'target_id' in args:raise ValueError('A focus transition cannot reuse an editable-control identity')
                 if getattr(self.backend,'requires_window_guard',False):
@@ -1474,7 +1494,23 @@ class Server:
                         window.check()
                         return module.pointer_local(self.read_window_context(),geometry)
                     self.backend.pointer_reader=pointer_reader
-                    if transition:module.validate_transition(args['action'])
+                    if normalize_window:
+                        module.validate_normalize_for_move(args['action'])
+                        module.normalize_shortcut_configured()
+                        mapping=getattr(self.backend,'monitor_mapping',None)
+                        if mapping is None:raise RuntimeError('Verified monitor mapping unavailable')
+                        destination=mapping.window_normalize_source(window_record['context'])
+                        moved_window=(window_record['context']['window_id'],destination)
+                        self.backend.transition_activation_key=self.backend.keysym('F10')
+                    elif monitor_move:
+                        direction=module.validate_monitor_move(args['action'])
+                        module.monitor_shortcut_configured(direction)
+                        mapping=getattr(self.backend,'monitor_mapping',None)
+                        if mapping is None:raise RuntimeError('Verified monitor mapping unavailable')
+                        destination=mapping.window_move_direction(window_record['context'],direction)
+                        moved_window=(window_record['context']['window_id'],destination)
+                        self.backend.transition_activation_key=self.backend.keysym(direction)
+                    elif transition:module.validate_transition(args['action'])
                     else:
                         geometry=self.backend.monitor_geometry() if callable(getattr(self.backend,'monitor_geometry',None)) else None
                         window.validate_points(args['action'],(geometry['x'],geometry['y']) if geometry else (0,0))
@@ -1483,6 +1519,14 @@ class Server:
                     self.indicator.armed=window
                     def begin_transition():
                         window.check()
+                        if normalize_window:
+                            module.normalize_shortcut_configured()
+                            mapping.window_normalize_source(self.read_window_context())
+                            window.check()
+                        elif monitor_move:
+                            module.monitor_shortcut_configured(direction)
+                            mapping.window_move_direction(self.read_window_context(),direction)
+                            window.check()
                         self.indicator.armed=None
                     self.backend.begin_transition=begin_transition if transition else None
                 if 'target_id' in args:
@@ -1495,12 +1539,12 @@ class Server:
                     if window is not None and not transition:window.check()
                 finally:
                     self.backend.target_guard=None;self.backend.pointer_reader=None;self.backend.begin_transition=None;self.backend.endpoint_context=None
-                    self.backend.window_guard=None;self.backend.window_transition=False
+                    self.backend.window_guard=None;self.backend.window_transition=False;self.backend.transition_activation_key=None
                     if self.indicator:self.indicator.armed=None
-                content=self.capture_result(('active',),window.baseline if window is not None and not transition else None,transition_settle=transition)
+                content=self.capture_result(('active',),window.baseline if window is not None and not transition else None,transition_settle=transition,moved_window=moved_window)
             except BaseException:
                 self.backend.pointer_reader=None;self.backend.begin_transition=None;self.backend.endpoint_context=None
-                self.backend.window_guard=None;self.backend.window_transition=False
+                self.backend.window_guard=None;self.backend.window_transition=False;self.backend.transition_activation_key=None
                 if self.indicator:self.indicator.armed=None
                 self.recovery.finish(getattr(self.backend,'transaction_info',{}),failed=True)
                 raise

@@ -54,8 +54,13 @@ class Controller:
     def __init__(self, active, on_activity, on_fault, runtime_dir=None,
                  launcher=subprocess.Popen, validator=validate_helper,
                  credentials=peer_credentials, startup_timeout=60, notice=None,
-                 retain_sharing=False, on_yield=None, on_quiet=None):
+                 retain_sharing=False, on_yield=None, on_quiet=None, session_seconds=120):
         # Dependency injections are for isolated tests, never model tool arguments.
+        if type(session_seconds) is not int or not 120<=session_seconds<=600:
+            raise ValueError("session_seconds must be an integer from 120 to 600")
+        self.requested_session_seconds=session_seconds
+        self.session_seconds=120
+        self.lease_negotiation_started=False
         self.active = active
         self.on_activity = on_activity
         self.on_fault = on_fault
@@ -208,6 +213,7 @@ class Controller:
                     code = None
                 raise NativeFailure('helper-fault' if readiness in (None,'FAULT') else 'protocol-invalid','Native observer did not become ready')
             self.helper_ready_at_monotonic=time.monotonic()
+            if self.requested_session_seconds!=120:self._negotiate_lease()
             if self.retain_sharing:
                 self._negotiate_yield()
             self._send('CALIBRATE')
@@ -534,6 +540,22 @@ class Controller:
             raise NativeFailure('protocol-invalid','Native observer invalid response')
         return False
 
+    def _negotiate_lease(self):
+        # One initial negotiation, before mode/calibration; no active renewal.
+        if self.lease_negotiation_started or self.calibration_state!='not-started' or self.ready or self.armed_at_monotonic is not None:
+            raise NativeFailure('protocol-invalid','Native lease can only be selected once before calibration')
+        self.lease_negotiation_started=True
+        seconds=self.requested_session_seconds
+        deadline=time.monotonic()+1
+        if not self._yield_authorized():raise NativeFailure('session-ended','Native observer authorization ended')
+        self._send('LEASE_'+str(seconds))
+        reply=self._read(max(0,deadline-time.monotonic()))
+        if not self._yield_authorized() or time.monotonic()>=deadline:
+            raise NativeFailure('session-ended','Native observer lease acknowledgement expired')
+        if reply!='LEASE_'+str(seconds)+'_OK':
+            raise NativeFailure('protocol-invalid','Native helper did not acknowledge requested initial lease')
+        self.session_seconds=seconds
+
     def _negotiate_yield(self):
         deadline=time.monotonic()+1
         # Version 2 proves calibration observed the same primary relative
@@ -552,7 +574,7 @@ class Controller:
         authorized=self.active()
         lease=self.helper_ready_at_monotonic
         return (authorized and not self.stop.is_set() and not self.closed and
-                lease is not None and time.monotonic()-lease<120)
+                lease is not None and time.monotonic()-lease<self.session_seconds)
 
     def is_current_yield(self,epoch,quiet=False):
         with self.yield_condition:
@@ -669,7 +691,8 @@ class Controller:
                 'error': self.error, 'cleanup_warning': self.cleanup_warning,
                 'terminal_reason':self.terminal_reason,'helper_exit_code':self.helper_exit_code,
                 'armed_at_monotonic':self.armed_at_monotonic,'elapsed_seconds':elapsed,
-                'lease_remaining_seconds':None if lease_elapsed is None else max(0,120-lease_elapsed),
+                'session_seconds':self.session_seconds,'requested_session_seconds':self.requested_session_seconds,
+                'lease_remaining_seconds':None if lease_elapsed is None else max(0,self.session_seconds-lease_elapsed),
                 'helper_ready_at_monotonic':self.helper_ready_at_monotonic,
                 'calibration_verified':self.calibration_verified,'calibration_state':self.calibration_state,
                 'calibration_evidence':self.calibration_evidence,

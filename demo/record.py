@@ -109,7 +109,7 @@ def parse_args(argv=None):
  a.status_file=(a.status_file or Path(str(a.output)+'.status.json')).resolve()
  paths=(a.output,a.stop_file,a.status_file)
  if len(set(paths))!=3 or any(path.exists() for path in paths):p.error('Output, stop and status paths must be distinct and must not already exist')
- if not 1<=a.seconds<=180 or not 0<=a.crop_top<=200 or not 320<=a.max_width<=3840:p.error('Duration must be 1–180 seconds; crop 0–200 pixels; maximum width 320–3840 pixels')
+ if not 1<=a.seconds<=900 or not 0<=a.crop_top<=200 or not 320<=a.max_width<=3840:p.error('Duration must be 1–900 seconds; crop 0–200 pixels; maximum width 320–3840 pixels')
  if a.region and (min(a.region[:2])<0 or min(a.region[2:])<2):p.error('Region needs nonnegative origin and dimensions of at least 2 pixels')
  return a
 

@@ -6,6 +6,12 @@ class RecorderTests(unittest.TestCase):
  def test_defaults_preserve_monitor_panel_and_native_width(self):
   with tempfile.TemporaryDirectory() as root:
    a=self.args(pathlib.Path(root));self.assertEqual(a.crop_top,0);self.assertEqual(a.max_width,3440)
+ def test_explicit_long_recording_is_bounded_without_changing_default(self):
+  with tempfile.TemporaryDirectory() as root:
+   root=pathlib.Path(root)
+   self.assertEqual(self.args(root).seconds,120)
+   self.assertEqual(self.args(root,'--seconds','600').seconds,600)
+   self.assertEqual(self.args(root,'--seconds','900').seconds,900)
  def test_constructor_failure_leaves_no_empty_video_and_reports_failure(self):
   with tempfile.TemporaryDirectory() as root:
    a=self.args(pathlib.Path(root))
@@ -30,7 +36,7 @@ class RecorderTests(unittest.TestCase):
  def test_colliding_existing_and_invalid_paths_are_rejected(self):
   with tempfile.TemporaryDirectory() as root:
    root=pathlib.Path(root)
-   for extra in (['--status-file',str(root/'stop')],['--seconds','181'],['--region','0','0','1','2']):
+   for extra in (['--status-file',str(root/'stop')],['--seconds','901'],['--region','0','0','1','2']):
     with patch('sys.stderr'):
      with self.assertRaises(SystemExit):self.args(root,*extra)
    (root/'demo.webm').write_bytes(b'keep')

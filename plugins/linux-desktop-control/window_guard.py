@@ -50,3 +50,32 @@ def pointer_local(context,geometry):
  x,y=pointer[0]-geometry['x'],pointer[1]-geometry['y']
  if not (0<=x<geometry['width'] and 0<=y<geometry['height']):raise RuntimeError('System pointer is outside the shared monitor; pointer input refused')
  return (x,y)
+
+def validate_monitor_move(action):
+ if action.get('type')!='keys' or set(action)!={'type','keys'} or action.get('keys') not in [ ['Super','Shift',d] for d in ('Left','Right','Up','Down') ]:
+  raise ValueError('Monitor move permits one canonical Super+Shift+Arrow chord only')
+ return action['keys'][-1]
+
+def monitor_shortcut_configured(direction):
+ from gi.repository import Gio
+ if direction not in ('Left','Right','Up','Down'):raise ValueError('Invalid monitor direction')
+ settings=Gio.Settings.new('org.gnome.desktop.wm.keybindings')
+ expected='<Super><Shift>'+direction
+ if list(settings.get_strv('move-to-monitor-'+direction.lower()))!=[expected]:
+  raise RuntimeError('Monitor shortcut is customized or unavailable; no input sent')
+
+def validate_monitor_arrival(context,window_id,rect):
+ WindowGuard.signature(context)
+ x,y,w,h=context['rect'];a,b,c,d=rect
+ if context['kind']!='window' or context['window_id']!=window_id or not (a<=x and b<=y and x+w<=a+c and y+h<=b+d):
+  raise RuntimeError('Same focused window did not arrive wholly on the expected monitor; no retry')
+
+def validate_normalize_for_move(action):
+ if action!={'type':'keys','keys':['Alt','F10']}:
+  raise ValueError('Window normalization permits one canonical Alt+F10 resize-toggle chord only')
+
+def normalize_shortcut_configured():
+ from gi.repository import Gio
+ settings=Gio.Settings.new('org.gnome.desktop.wm.keybindings')
+ if list(settings.get_strv('toggle-maximized'))!=['<Alt>F10']:
+  raise RuntimeError('Resize-toggle shortcut is customized or unavailable; no input sent')

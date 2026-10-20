@@ -1,3 +1,7 @@
+## Installed helper 0.8.6: bounded initial lease selection
+
+Default lease remains120seconds. One exact LEASE_nnn command (integer120–600) may be acknowledged before MODEYIELD/calibration while unarmed; duplicate, malformed, expired or later negotiation fails closed. The budget uses the original READY/session_time anchor, never negotiation time. Heartbeat remains1000ms and cannot renew the absolute cap. No new permissions or raw diagnostics are added. Installed binary/policy hashes match the reviewed package; 20 native fixtures and 438 Python tests pass. Initial live 600-second negotiation passed both readiness gates; complete ten-minute expiry is not yet verified.
+
 ## Installed helper 0.8.5: authorization-release settling
 
 CALIBRATE may remain unarmed for at most 5000 ms while held authorization input releases and primary/topology/owner queues become empty. Draining grants no challenge credit. Only the clean released boundary emits CALIBRATING and starts fresh calibration. Session health and the original 120-second lease remain required; timeout/query failure is terminal. Strict relative-stream calibration and post-ARM behavior are unchanged. This startup-race fix does not repair or explain missing live mouse delivery.
