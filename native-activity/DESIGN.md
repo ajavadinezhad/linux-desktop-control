@@ -1,5 +1,7 @@
 # Optional native physical-activity helper
 
+> Historical design proposal. Use [the helper guide](README.md) for the current implementation and [release status](../docs/RELEASE_STATUS.md) for acceptance.
+
 Status: implementation requirements and review boundary, not evidence of installed or
 tested behavior. This component supplements the consented GNOME portal backend. It
 does not replace GNOME sharing consent, application approvals, or explicit resume.

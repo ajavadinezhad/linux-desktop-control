@@ -1,5 +1,7 @@
 # Live 0.7.5 acceptance
 
+> Version-specific investigation record. Status statements below describe that checkpoint. See [current release status](RELEASE_STATUS.md) for installed versions and later acceptance.
+
 The human approved personal GNOME sharing before app input, after disclosure that optional actual cursor glow temporarily changes the desktop-wide theme. Five current tools were discovered on server 0.7.5. No app launch or focus occurred before consent; all app work used the observed GUI. No recorder was used.
 
 ## Native windows and saved file

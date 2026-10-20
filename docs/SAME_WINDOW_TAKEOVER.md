@@ -1,5 +1,7 @@
 # Same-window physical takeover boundary
 
+> Version-specific investigation record. Status statements below describe that checkpoint. See [current release status](RELEASE_STATUS.md) for installed versions and later acceptance.
+
 ## Current 0.8.0 native replacement
 
 The optional system helper is installed, but live same-window takeover remains **failed/unverified**. In the latest held-key typing attempt, the user confirmed a physical one-second key hold while text grew. The backend completed960characters without cancellation (result `0e2c7f56251f467c87cfde4c071a34a7`). Sharing subsequently closed with zero held virtual input and no cleanup warning. Drag interruption has not passed.

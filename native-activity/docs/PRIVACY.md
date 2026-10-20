@@ -9,7 +9,7 @@ Only fixed readiness/calibration/reset, ARMED, activity/fault/ALIVE notification
 over its private channel. No key codes, text, pointer deltas/coordinates, event
 timestamps, device identifiers, or raw file descriptors are exported to the
 backend or assistant. Event contents are not logged, persisted, or included in
-fault messages. The client can send only the fixed arming, heartbeat, and close
+fault messages. The client can send only fixed lease/mode negotiation, calibration, arming, heartbeat, report, resume and close
 commands; it cannot subscribe to events or request alternate devices.
 
 Administrator approval happens in the system's own dialog after personal GNOME
@@ -33,7 +33,7 @@ does not retain a root bus connection. Session changes and loss of verification
 fault conservatively. Monitored device-topology changes also fault.
 
 HB/ALIVE exchanges occur every 0.2 seconds, with a one-second deadline. The
-absolute 120-second lease is not extended by heartbeats. Channel loss, requester
+absolute selected lease (120 seconds by default, at most 600 chosen before calibration) is not extended by heartbeats. Channel loss, requester
 death, expiry, activity, or fault ends monitoring and closes descriptors. The
 backend must close its channel whenever sharing ends. The helper does not
 independently attest portal ownership; channel lifetime, pidfd, and lease provide
@@ -44,8 +44,6 @@ human identity or physical provenance. GNOME portal virtual input creates no
 evdev device, but actual deployment behavior remains to be tested live. GNOME's
 own sharing stop remains independent of the helper.
 
-The current evidence is a build and isolated tests. The helper is not yet
-installed or live-verified; do not infer verified device coverage, live cleanup,
-or assistant integration from these documents.
+The helper is installed on the reviewed host. Live evidence is scoped to recorded versions and devices; see [current release status](../../docs/RELEASE_STATUS.md). Passing isolated tests is not general physical-device acceptance.
 
 Activity kind is a fixed coarse enum: key/button, pointer, switch, metadata or held-state. It contains no event codes, identities, values or coordinates; key includes pointer/touch buttons. Terminal diagnostics contain only eight calibration booleans, sent after raw descriptors close. They cannot authorize control.
