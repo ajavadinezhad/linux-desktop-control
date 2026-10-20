@@ -6,9 +6,9 @@ ChatGPT, working through your Linux desktop. Open apps, create slides, and paint
 
 ## Look, ChatGPT is drawing a bear
 
-https://github.com/user-attachments/assets/84610a30-2aff-4836-b048-608dfcd90eef
+https://github.com/user-attachments/assets/d19dd61d-1065-4b88-8160-1ac383e79383
 
-**4 minutes 39 seconds of real desktop interaction.** Opening Kleki in Firefox, then drawing a bear with a face, paws, and a red scarf. No imported artwork. Setup waits are removed and the resumed session is labeled.
+**4 minutes 20 seconds of real GUI painting.** Drawing a bear with a face, paws, and a red scarf in Kleki. No imported artwork or playback speed-up. Private setup is removed, desktop edges are cropped, and download details are covered.
 
 ## What it can do
 
