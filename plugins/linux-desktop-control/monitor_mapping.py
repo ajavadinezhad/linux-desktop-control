@@ -213,6 +213,21 @@ class MonitorMapping:
             raise MappingError('Focused window origin and center must belong to the other monitor')
         return source
 
+    def window_fit_shared(self, context):
+        source,frame=self._other_window_monitor(context)
+        x,y,w,h=frame;a,b,c,d=self.rect
+        def inside(px,py):return a<=px<a+c and b<=py<b+d
+        def intersection(rect):
+            rx,ry,rw,rh=rect
+            return max(0,min(x+w,rx+rw)-max(x,rx))*max(0,min(y+h,ry+rh)-max(y,ry))
+        if a<=x and b<=y and x+w<=a+c and y+h<=b+d:
+            raise MappingError('Focused window already fits the shared monitor')
+        if not inside(x+w/2,y+h/2) or not inside(x+w/2,y):
+            raise MappingError('Focused window center and titlebar midpoint must identify the shared monitor')
+        if intersection(self.rect)<=0 or intersection(self.rect)<=intersection(source):
+            raise MappingError('Shared monitor must contain the unique largest window intersection')
+        return tuple(self.rect)
+
     def window_move_direction(self, context, direction):
         source,frame=self._other_window_monitor(context)
         x,y,w,h=frame;a,b,c,d=source

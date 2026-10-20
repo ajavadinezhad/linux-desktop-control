@@ -1,5 +1,10 @@
 # Changes
 
+## 0.8.16 candidate — fit oversized window on shared monitor
+
+- Dedicated single Alt+F10 resize toggle with center/titlebar midpoint and uniquely largest overlap identifying the shared monitor. Same identity and whole shared containment required around capture; no retry, focus reclaim or automatic follow-up.
+- Five new targeted tests and independent review pass; full suite pending. Not installed/live accepted; helper0.8.6 and native duration are unchanged.
+
 ## 0.8.15 installed — validation and scoped live startup
 
 - All 14 reviewed plugin files match; fresh actual provider build/disk/seven-tool verification passed. Helper 0.8.6 binary matches and policy is unchanged.

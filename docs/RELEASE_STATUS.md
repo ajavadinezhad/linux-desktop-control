@@ -1,4 +1,22 @@
-# Private review status — 0.8.15 installed
+# Private review status — 0.8.16 installed
+
+## Current installed 0.8.16 acceptance — 2026-10-19
+
+Plugin 0.8.16 is installed; all 14 reviewed plugin files match canonical source. The verified runtime build is `6845b46fa981e6a1e4ef30e5d254ce86de9d578f3337ffddde18461155396bbb`. The frozen Python suite passed 443 tests in 21.819 seconds and loader/schema validation passed. Helper 0.8.6 is unchanged, with the prior 20-native-fixture baseline.
+
+The dedicated shared-window fit passed live: the same Firefox window settled wholly inside the shared monitor at frame `[0,272,1920,1097]`. In a new Kleki tab, six observed GUI brush strokes produced a mountain/sun/lake scene and its screenshot was inspected. No PNG export was performed. A later optional batch beginning with a drag failed validation before any input; sharing then closed with zero held input and no cleanup warning. This is a scoped drawing/fit check, not acceptance of arbitrary action sequences.
+
+The five-slide presentation was additionally saved through the actual Impress GUI to `/home/aj/Documents/ChatGPT-Linux-Desktop-Control-Demo.pptx`; independent ZIP/XML checks verified five slides. The more complex bear drawing is a newly authorized take, not a completed result. The existing video edit remains 5:37; adding this newer footage is pending. No completed bear image or extended video is claimed.
+
+## Historical preparation and earlier acceptance
+
+## Current shared-window fit candidate — 2026-10-19
+
+Plugin 0.8.16 adds an explicit single Alt+F10 resize toggle for an oversized current foreground already unambiguously owned by the shared monitor: center and titlebar midpoint are inside it and its intersection is strictly largest. The frame origin may be outside. Same-window full shared containment and unchanged mapping are required around fresh capture; wrong/no arrival refuses without retry or follow-up. Flags are exclusive and require a deliberate focus transition. No focus reclaim, native-guard relaxation or helper change is added.
+
+Independent review and five new targeted fit tests pass; full frozen suite is pending. Candidate 0.8.16 is not installed or live accepted. Helper 0.8.6 and initial 120–600-second lease semantics are unchanged. Earlier installed 0.8.15 evidence, completed GUI demo and scoped 0.8.12–0.8.14 acceptance remain historical below.
+
+## Historical rollout and acceptance
 
 ## Completed five-slide GUI demo — 2026-10-19
 
