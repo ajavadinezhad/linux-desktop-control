@@ -39,6 +39,7 @@ static bool armed;
 static bool pointer_yield_mode, pointer_yielded, pointer_quiet;
 static bool pointer_strict_coverage, calibration_pointer_stream;
 static bool click_pause_mode, click_pause_sticky;
+static bool key_pause_mode, keyboard_frame_pending[MAX_DEVICES];
 static bool held_admitted_click, held_other_input;
 static unsigned click_notice_epoch;
 static bool touchpad_yield_mode, calibration_touchpad_motion;
@@ -293,6 +294,20 @@ static int drain(int fd) {
                 return -1;
             }
             if (kind == 2) continue; /* Known output feedback: no calibration credit. */
+            if(armed&&key_pause_mode&&!auth_waiting&&fd>=4&&fd<4+device_count&&
+               (device_categories[fd-4]&CATEGORY_KEYBOARD)) {
+                if(event.type==EV_SYN&&event.code==SYN_REPORT&&event.value==0)
+                    keyboard_frame_pending[fd-4]=false;
+                if((event.type==EV_KEY&&ordinary_key(event.code)&&event.value>=0&&event.value<=2)||
+                   (event.type==EV_MSC&&event.code==MSC_SCAN)) {
+                    long long stamp=(long long)event.time.tv_sec*1000+event.time.tv_usec/1000;
+                    long long current=now_ms();
+                    if(current<0||stamp<arm_time||stamp>current+1000)return -1;
+                    keyboard_frame_pending[fd-4]=true;
+                    if(pointer_click(current))return -1;
+                    continue;
+                }
+            }
             if(armed&&click_pause_mode&&admitted_click(fd-4,&event)) {
                 long long stamp=(long long)event.time.tv_sec*1000+event.time.tv_usec/1000;
                 long long current=now_ms();
@@ -470,6 +485,7 @@ static int held_state(void) {
             }
             any = true;
             if((device_categories[i]&CATEGORY_POINTER)&&(code==BTN_LEFT||code==BTN_RIGHT||code==BTN_MIDDLE))held_admitted_click=true;
+            else if(armed&&key_pause_mode&&!auth_waiting&&(device_categories[i]&CATEGORY_KEYBOARD)&&ordinary_key(code))held_admitted_click=true;
             else held_other_input=true;
             if (ordinary_key(code)) categories |= device_categories[i] & CATEGORY_KEYBOARD;
             if (code >= BTN_MISC) categories |= device_categories[i] & CATEGORY_POINTER;
@@ -706,6 +722,7 @@ static int calibration_release_tick(long long current) {
 }
 static int pointer_boundary(void) {
     if (held_state() != 0) return -1;
+    for(int i=0;i<device_count;i++)if(keyboard_frame_pending[i])return -1;
     if(touchpad_busy())return -1;
     struct pollfd boundary[MAX_DEVICES + 2];
     for (int i = 0; i < device_count + 2; ++i)
@@ -732,6 +749,7 @@ static int pointer_yield_tick(long long current) {
         return -1;
     }
     if(touchpad_busy())return 0;
+    for(int i=0;i<device_count;i++)if(keyboard_frame_pending[i])return 0;
     struct pollfd boundary[MAX_DEVICES + 2];
     for (int i = 0; i < device_count + 2; ++i)
         boundary[i] = (struct pollfd){4 + i, POLLIN, 0};
@@ -754,6 +772,12 @@ static int command(const char *line) {
     long long current = now_ms();
     if (current < 0) return -1;
     if (!strcmp(line, "CLOSE")) return 2;
+    if(!strcmp(line,"KEYPAUSE1")) {
+        if(key_pause_mode||!click_pause_mode||!pointer_yield_mode||armed||calibrating||calibrated||
+           calibration_release_pending||passive_selected||auth_waiting||expiry_phase(current,heartbeat,session_time))return -1;
+        key_pause_mode=true;
+        return send(CONTROL,"KEYPAUSE1_OK\n",13,MSG_NOSIGNAL|MSG_DONTWAIT)==13?0:-1;
+    }
     if(!strcmp(line,"CLICKPAUSE1")) {
         if(click_pause_mode||!pointer_yield_mode||!pointer_strict_coverage||armed||calibrating||calibrated||
            calibration_release_pending||passive_selected||auth_waiting||expiry_phase(current,heartbeat,session_time))return -1;

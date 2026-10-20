@@ -17,7 +17,7 @@ import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import Gio, GLib, Gst
 
-VERSION = '0.8.28'
+VERSION = '0.8.29'
 # Freeze identity at module load: old providers must never report a new disk build.
 _build_spec = importlib.util.spec_from_file_location('_desktop_runtime_build', os.path.join(os.path.dirname(__file__), 'runtime_build.py'))
 _runtime_build = importlib.util.module_from_spec(_build_spec)
@@ -759,7 +759,7 @@ ACTION_SCHEMA['properties']['stroke_batch']={'type':'boolean','default':False,'d
 
 def tools():
     specs=[
-      ('desktop_start','Request personal GNOME consent for one monitor, keyboard and pointer; return a fresh screenshot. Optional cursor_glow temporarily changes the desktop-wide cursor theme and restores it on close.',{'context_change_policy':{'type':'string','enum':['close','pause-recover'],'default':'close','description':'Explicit native retained-sharing opt-in: ordinary foreground changes cancel pending work and recover a stable fresh context without replay or focus reclaim. A fresh observation is required before more input; protected UI and faults remain terminal.'},'click_policy':{'type':'string','enum':['close','pause-return'],'default':'close','description':'Explicit native retained-sharing opt-in: ordinary left/right/middle clicks pause, then after released quiet recover from a fresh context; no action replay or forced focus. Keys, scrolling, protected UI and faults remain terminal.'},'allow_permission_wait':{'type':'boolean','default':False,'description':'Explicit native retained-sharing opt-in for trusted GNOME Polkit permission waiting for an already authorized task; human approval only. Requires helper AUTHMODE1 and observer protocol3.'},'startup_verification':{'type':'string','enum':['challenge','passive'],'default':'challenge','description':'Explicit passive supervised mode skips manual calibration and starts monitoring with coverage unverified. Requires native retained sharing and exact helper acknowledgement; automatic return additionally requires real selected-source motion in the current pause. Challenge retains diagnostic keyboard/pointer tests.'},'pointer_source':{'type':'string','enum':['mouse','touchpad'],'default':'mouse','description':'Retained native observation source. Touchpad requires physical_takeover and retain-sharing; verified single-finger indirect devices only.'},'session_seconds':{'type':'integer','minimum':120,'maximum':600,'default':120,'description':'Optional initial native-helper lease in seconds, physical_takeover required. Negotiated once before calibration; default120, hard maximum600. No active renewal; Stop and faults remain terminal.'},'physical_takeover':{'type':'boolean','default':False,'description':'Explicit opt-in to a separately installed native activity helper; administrator authorization follows personal GNOME sharing approval. Backend receives only coarse activity/fault notices, never raw input descriptors. Not human-provenance attestation.'},'cursor_glow':{'type':'boolean','description':'Explicit opt-in after explaining desktop-wide theme scope. Applies real themed cursor glow while active; custom app cursors may ignore it.'},'pointer_motion_return':{'type':'boolean','default':False,'description':'With retained sharing and native observation, yield on mouse movement and return once to the last confirmed point after physical quiet in the same app. No action replay.'},'interruption_policy':{'type':'string','enum':['close','retain-sharing'],'default':'close','description':'Opt-in retained consent for explicit pause/resume; physical observer faults remain terminal. No automatic cursor return or replay.'}}),
+      ('desktop_start','Request personal GNOME consent for one monitor, keyboard and pointer; return a fresh screenshot. Optional cursor_glow temporarily changes the desktop-wide cursor theme and restores it on close.',{'context_change_policy':{'type':'string','enum':['close','pause-recover'],'default':'close','description':'Explicit native retained-sharing opt-in: ordinary foreground changes cancel pending work and recover a stable fresh context without replay or focus reclaim. A fresh observation is required before more input; protected UI and faults remain terminal.'},'keyboard_policy':{'type':'string','enum':['close','pause-recover'],'default':'close','description':'Explicit physical keyboard intervention recovery after released quiet. Requires native retained sharing and click_policy pause-return with exact helper KEYPAUSE1 acknowledgement. Fresh ordinary context and no replay. All click/key interventions refresh context without pointer reclaim while enabled; Stop, locks and faults remain terminal.'},'click_policy':{'type':'string','enum':['close','pause-return'],'default':'close','description':'Explicit native retained-sharing opt-in: ordinary left/right/middle clicks pause, then after released quiet recover from a fresh context; no action replay or forced focus. Keys remain terminal unless keyboard_policy is selected; scrolling, protected UI and faults remain terminal.'},'allow_permission_wait':{'type':'boolean','default':False,'description':'Explicit native retained-sharing opt-in for trusted GNOME Polkit permission waiting for an already authorized task; human approval only. Requires helper AUTHMODE1 and observer protocol3.'},'startup_verification':{'type':'string','enum':['challenge','passive'],'default':'challenge','description':'Explicit passive supervised mode skips manual calibration and starts monitoring with coverage unverified. Requires native retained sharing and exact helper acknowledgement; automatic return additionally requires real selected-source motion in the current pause. Challenge retains diagnostic keyboard/pointer tests.'},'pointer_source':{'type':'string','enum':['mouse','touchpad'],'default':'mouse','description':'Retained native observation source. Touchpad requires physical_takeover and retain-sharing; verified single-finger indirect devices only.'},'session_seconds':{'type':'integer','minimum':120,'maximum':600,'default':120,'description':'Optional initial native-helper lease in seconds, physical_takeover required. Negotiated once before calibration; default120, hard maximum600. No active renewal; Stop and faults remain terminal.'},'physical_takeover':{'type':'boolean','default':False,'description':'Explicit opt-in to a separately installed native activity helper; administrator authorization follows personal GNOME sharing approval. Backend receives only coarse activity/fault notices, never raw input descriptors. Not human-provenance attestation.'},'cursor_glow':{'type':'boolean','description':'Explicit opt-in after explaining desktop-wide theme scope. Applies real themed cursor glow while active; custom app cursors may ignore it.'},'pointer_motion_return':{'type':'boolean','default':False,'description':'With retained sharing and native observation, yield on mouse movement and return once to the last confirmed point after physical quiet in the same app. No action replay.'},'interruption_policy':{'type':'string','enum':['close','retain-sharing'],'default':'close','description':'Opt-in retained consent for explicit pause/resume; physical observer faults remain terminal. No automatic cursor return or replay.'}}),
       ('desktop_observe','Return a fresh screenshot and dimensions. Optional inspect_target binds a single-use editable accessibility identity; inspect before input.',{'inspect_target':{'type':'boolean'}}),
       ('desktop_action','Perform bounded input and return a fresh screenshot. Text/keys need same-call focus or a sequence beginning with a target click/focus shortcut. Coordinates use logical_size. Discrete wheel steps only. Text uses GNOME Unicode composition by default; verify actual results. Never replay uncertain input.',{'action':ACTION_SCHEMA,'target_id':{'type':'string','minLength':32,'maxLength':32},'recovery_observation_id':{'type':'string'},'window_observation_id':{'type':'string','minLength':32,'maxLength':32},'window_fit_shared':{'type':'boolean','description':'Separate opt-in Alt+F10 resize toggle fitting the current oversized focused window to the shared monitor. Exactly two verified monitors; center/titlebar midpoint and strictly largest intersection must identify the shared monitor. Same-window full containment required after; no focus activation or retry.'},'window_normalize_for_move':{'type':'boolean','description':'Separate opt-in Alt+F10 resize toggle of the currently focused window on the other of two verified monitors before a later monitor move. Only a frame not wholly source-contained is admitted; origin and center must identify that source; same-window full source containment required after. No focus activation or content observation.'},'window_move_to_shared':{'type':'boolean','description':'Opt-in single Super+Shift+Arrow move of the currently focused window from the other monitor to the shared monitor; exactly two unambiguous monitors and unchanged configured shortcut required. No focus activation or unseen-content claim.'},'wait_for_permission':{'type':'boolean','description':'One observed package Install left click then capture/input-free trusted GNOME authentication waiting; requires startup allow_permission_wait, native retained sharing and recording_stopped=true. No approval automation or action replay.'},'recording_stopped':{'type':'boolean','description':'Explicit operator attestation all owned recorders are stopped and finalized before a permission-wait gesture; not proof about external recorders.'},'await_context_change':{'type':'boolean','description':'Explicit launch-only opt-in with focus_transition: one left click or Return, then require an actual foreground context change within a hard five-second budget before publishing an image. No replay or app-identity guarantee.'},'focus_transition':{'type':'boolean','description':'Only one explicit left click, launcher/Return or Ctrl+s/Ctrl+Shift+s/Ctrl+o gesture may change foreground; no remaining batch. Inspect its returned image before further input.'}}),
       ('desktop_pause','Cancel current work, release virtual input and stop capture. Retaining sharing requires interruption_policy=retain-sharing at startup.',{}),
@@ -849,7 +849,7 @@ class Server:
         self.return_state='disabled';self.return_attempted=set();self.return_record=None
         self.recovery=RecoveryLedger();self.target_provider=None;self.target_record=None
         self.cursor_glow=None;self.cursor_glow_pending=None;self.cursor_glow_warning=None;self.cursor_glow_last=None
-        self.physical_takeover=False;self.physical_takeover_warning=None;self.native_activity=None;self.native_activity_last=None;self.native_session_seconds=120;self.native_pointer_source="mouse";self.native_click_policy="close";self.context_change_policy='close';self.context_recovery=None;self.context_observation_required=False;self.native_startup_verification='challenge';self.native_allow_permission_wait=False;self.permission_wait_stage=None;self.permission_wait_reason=None;self.permission_wait_failure_stage=None
+        self.physical_takeover=False;self.physical_takeover_warning=None;self.native_activity=None;self.native_activity_last=None;self.native_session_seconds=120;self.native_pointer_source="mouse";self.native_click_policy="close";self.native_keyboard_policy="close";self.context_change_policy='close';self.context_recovery=None;self.context_observation_required=False;self.native_startup_verification='challenge';self.native_allow_permission_wait=False;self.permission_wait_stage=None;self.permission_wait_reason=None;self.permission_wait_failure_stage=None
         self.target_cleanup_warning=None;self.indicator=None;self.indicator_warning=None;self.window_record=None
 
     def own_observer(self,attribute,owner):
@@ -876,8 +876,9 @@ class Server:
             if conditional and self.backend:self.backend.cancelled.set()
             # Fixed categories only: keep the initiating cause through cleanup
             # and downstream observer authorization loss; never export context.
-            category=reason if reason in ('foreground-context-changed','requested-close','publication-foreground-fault') else ('native-observer-fault' if warning=='native' else ('foreground-observer-fault' if warning=='indicator' else 'session-invalidated'))
+            category=reason if reason in ('foreground-context-changed','requested-close','publication-foreground-fault','physical-activity') else ('native-observer-fault' if warning=='native' else ('foreground-observer-fault' if warning=='indicator' else 'session-invalidated'))
             if self.closure_reason is None:self.closure_reason=category
+            if self.context_recovery is not None and self.context_recovery.get('phase') in ('admitting','settling','capturing'):self.context_recovery['phase']='cancelled'
             if self.state=='auth-waiting':
                 cause={'native-observer-fault':'native-observer-ended','foreground-observer-fault':'observer-unavailable',
                     'foreground-context-changed':'origin-changed','requested-close':'cancelled'}.get(category)
@@ -1097,7 +1098,9 @@ class Server:
         if context.get('kind')!='window':raise RuntimeError('Click recovery requires an ordinary foreground window')
         record=self.return_record
         mapping=getattr(self.backend,'monitor_mapping',None) or getattr(self.backend,'mapping_guard',None)
-        eligible=(record is not None and record.get('consent_id')==self.consent_id and
+        # The coarse intervention token deliberately carries no key identity.
+        # Keyboard opt-in therefore suppresses pointer reclaim for every such token.
+        eligible=(self.native_keyboard_policy=='close' and record is not None and record.get('consent_id')==self.consent_id and
                   record.get('session')==self.backend.session and record.get('mapping') is mapping and record.get('context')==signature)
         if eligible:
             try:module.pointer_local(context,self.backend.monitor_geometry())
@@ -1367,7 +1370,7 @@ class Server:
         # Only coarse Python-owned fields: no backend/GUI calls or authority writes.
         if not self.state_lock.acquire(blocking=False):return None
         try:
-            if self.context_recovery is not None and self.context_recovery.get('phase') in ('admitting','settling'):
+            if self.state in ('active','pausing','paused','resuming') and self.context_recovery_owned() and self.context_recovery.get('phase') in ('admitting','settling'):
                 return {'server_version':VERSION,'server_build':SERVER_BUILD,'session_state':'context-settling','active':False,
                     'capture_allowed':False,'input_allowed':False,'snapshot_kind':'context-recovery-read-only',
                     'fresh_observation_required':True,'portal_closed_confirmed':False,'held_input_count':None}
@@ -1442,6 +1445,7 @@ class Server:
     def require_native_ready(self):
         status=self.native_activity.status() if self.native_activity is not None else {}
         if status.get('active') is not True:raise RuntimeError('Native activity observer did not arm')
+        if self.native_keyboard_policy=='pause-recover' and (status.get('keyboard_policy')!='pause-recover' or status.get('keyboard_wait_supported') is not True):raise RuntimeError('Keyboard recovery acknowledgement is unavailable')
         if self.native_startup_verification=='passive':
             if (status.get('startup_verification')!='passive' or status.get('readiness_kind')!='passive-unverified' or
                 status.get('passive_acknowledged') is not True or status.get('monitor_armed') is not True or
@@ -1471,6 +1475,7 @@ class Server:
             **({'session_seconds':self.native_session_seconds} if self.native_session_seconds!=120 else {}),
             **({'pointer_source':self.native_pointer_source} if self.native_pointer_source!='mouse' else {}),
             **({'click_policy':self.native_click_policy,'on_intervention':self.physical_intervention} if self.native_click_policy!='close' else {}),
+            **({'keyboard_policy':self.native_keyboard_policy} if self.native_keyboard_policy!='close' else {}),
             **({'startup_verification':self.native_startup_verification} if self.native_startup_verification!='challenge' else {}),
             **({'allow_permission_wait':True} if self.native_allow_permission_wait else {}))
         # Publish ownership atomically with callback invalidation checks.
@@ -1484,7 +1489,7 @@ class Server:
             if self.native_startup_verification=='passive' else None)
 
     def native_activity_lost(self,expected,error=None):
-        if not self.invalidate(expected_native=expected,warning='native' if error else None):return
+        if not self.invalidate(expected_native=expected,warning='native' if error else None,reason='physical-activity' if error is None else None):return
         def cleanup():
             self.close_backend(expected_native=expected)
         threading.Thread(target=cleanup,daemon=True).start()
@@ -1934,6 +1939,9 @@ class Server:
             click_policy=args.get('click_policy','close')
             if type(click_policy) is not str or click_policy not in ('close','pause-return'):raise ValueError('Invalid click_policy')
             if click_policy=='pause-return' and (not physical or policy!='retain-sharing'):raise ValueError('Click pause requires physical_takeover and retained sharing')
+            keyboard_policy=args.get('keyboard_policy','close')
+            if type(keyboard_policy) is not str or keyboard_policy not in ('close','pause-recover'):raise ValueError('Invalid keyboard_policy')
+            if keyboard_policy=='pause-recover' and (not physical or policy!='retain-sharing' or click_policy!='pause-return'):raise ValueError('Keyboard recovery requires retained physical click recovery')
             pointer_source=args.get('pointer_source','mouse')
             if not isinstance(pointer_source,str) or pointer_source not in ('mouse','touchpad'):raise ValueError('Invalid pointer_source')
             if pointer_source=='touchpad' and (not physical or policy!='retain-sharing'):raise ValueError('Touchpad observation requires physical_takeover and retained sharing')
@@ -1963,7 +1971,7 @@ class Server:
                         self.backend.cancelled=threading.Event()
                         self.backend.operation_cancelled=threading.Event()
                         self.native_session_seconds=session_seconds
-                        self.native_pointer_source=pointer_source;self.native_click_policy=click_policy;self.context_change_policy=context_policy;self.context_recovery=None;self.context_observation_required=False
+                        self.native_pointer_source=pointer_source;self.native_click_policy=click_policy;self.native_keyboard_policy=keyboard_policy;self.context_change_policy=context_policy;self.context_recovery=None;self.context_observation_required=False
                         self.native_startup_verification=startup_verification;self.native_allow_permission_wait=allow_permission_wait;self.permission_wait_stage=None;self.permission_wait_reason=None;self.permission_wait_failure_stage=None
                         self.interruption_policy=policy;self.pause_id=None;self.pause_reason=None
                         self.pointer_motion_return=auto_return;self.consent_id=uuid.uuid4().hex;self.backend.consent_id=self.consent_id
@@ -1999,6 +2007,7 @@ class Server:
             if 'startup_verification' in args and startup_verification!=self.native_startup_verification:raise ValueError('An active startup verification mode cannot be changed')
             if 'pointer_source' in args and pointer_source!=self.native_pointer_source:raise ValueError('An active input source cannot be changed')
             if 'context_change_policy' in args and context_policy!=self.context_change_policy:raise ValueError('An active context recovery policy cannot change')
+            if 'keyboard_policy' in args and keyboard_policy!=self.native_keyboard_policy:raise ValueError('An active keyboard policy cannot be changed')
             if 'click_policy' in args and click_policy!=self.native_click_policy:raise ValueError('An active click policy cannot be changed')
             if 'session_seconds' in args and session_seconds!=self.native_session_seconds:raise ValueError('An active native lease cannot be changed; close before selecting a new initial limit')
             if physical and not self.physical_takeover:raise RuntimeError('Device-source observation must be selected before a new consent session')

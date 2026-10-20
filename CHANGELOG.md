@@ -2,6 +2,13 @@
 
 Current status: see [release status](docs/RELEASE_STATUS.md). Older entries below are checkpoint records.
 
+## 0.8.29 — recover from ordinary keyboard intervention
+
+- Add explicit keyboard recovery with exact helper acknowledgement; ordinary keys, modifiers and scan framing pause capture/input until release and quiet.
+- Refresh the current ordinary window without replay or pointer/focus reclaim. Manual Pause remains sticky; protected UI, Stop, revocation, faults and original expiry remain terminal.
+- Prevent stale recovery records from masking a closed session and retain a fixed physical-activity closure reason.
+- Keep default keyboard-close policy and trusted password waiting separate. No key values leave the native helper.
+
 ## 0.8.28 — retain pauses during screenshot publication
 
 - Preserve typed retained pauses at both final foreground publication checks; discard stale images without closing healthy sharing or replaying input.
