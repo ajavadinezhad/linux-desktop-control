@@ -131,6 +131,8 @@ class MonitorMapping:
             owner,state=self._read()
             binding,self.rect,self.scale=validate_state(state,self.props)
             self.owner=owner;self.binding=binding
+            self.props_binding=_normalize(self.props)
+            self.geometry_binding=_normalize((self.rect,self.scale))
         except Exception:
             self.failed=True;_fail()
 
@@ -159,8 +161,14 @@ class MonitorMapping:
         if self.failed:_fail()
         try:
             owner,state=self._read()
-            binding,rect,scale=validate_state(state,self.props)
-            if owner!=self.owner or binding!=self.binding or rect!=self.rect or scale!=self.scale:_fail()
+            # Still query the owner/state/owner on every check. Exact typed
+            # equality with the fully validated initial state proves unchanged
+            # geometry without re-deriving every inactive display mode. Never
+            # use Python's untyped equality (True == 1), a serial-only cache, or
+            # a time-based cache as authority.
+            if (owner!=self.owner or _normalize(state)!=self.binding[1] or
+                    _normalize(self.props)!=self.props_binding or
+                    _normalize((self.rect,self.scale))!=self.geometry_binding):_fail()
         except Exception:
             self.failed=True;_fail()
         return True

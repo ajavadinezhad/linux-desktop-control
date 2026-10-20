@@ -17,7 +17,7 @@ import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import Gio, GLib, Gst
 
-VERSION = '0.8.16'
+VERSION = '0.8.17'
 # Freeze identity at module load: old providers must never report a new disk build.
 _build_spec = importlib.util.spec_from_file_location('_desktop_runtime_build', os.path.join(os.path.dirname(__file__), 'runtime_build.py'))
 _runtime_build = importlib.util.module_from_spec(_build_spec)
@@ -262,6 +262,7 @@ class Desktop:
                 return png
 
     def _capture_once(self,new_stream=False):
+        capture_started=time.monotonic()
         self.check()
         # Require a frame captured after a settling fence, not merely the next
         # PNG emitted by an encoder that may still be processing older input.
@@ -279,7 +280,8 @@ class Desktop:
                 age_ms=max(0,(clock.get_time()-self.pipeline.get_base_time()-buf.pts)/Gst.MSECOND)
                 if age_ms>750:continue
                 self.capture_info={'frame_id':self.frames+1,'settling_ms':350,
-                    'frame_age_ms':age_ms,'freshness':'new_stream' if new_stream else 'post_settle_frame'}
+                    'frame_age_ms':age_ms,'freshness':'new_stream' if new_stream else 'post_settle_frame',
+                    'capture_duration_ms':max(0,round((time.monotonic()-capture_started)*1000))}
                 png = buf.extract_dup(0, buf.get_size())
                 self.frames += 1
                 return png
@@ -374,7 +376,6 @@ class Desktop:
         start=getattr(self,'pointer_position',None)
         if start is None or seconds==0:
             self.position(x,y)
-            self.confirm_pointer_endpoint(x,y)
             return
         deadline=time.monotonic()+seconds
         while True:
@@ -384,7 +385,8 @@ class Desktop:
             self.position(start[0]+(x-start[0])*blend,start[1]+(y-start[1])*blend)
             if t>=1:break
             self.wait_interruptibly(min(.016,max(0,deadline-time.monotonic())))
-        self.confirm_pointer_endpoint(x,y)
+        # position() already confirms every interpolated point, including the
+        # final one. Effects still take their own fresh pre-press observation.
 
     def state(self, kind, code, down):
         method = 'NotifyKeyboardKeysym' if kind == 'key' else 'NotifyPointerButton'
@@ -548,6 +550,7 @@ class Desktop:
             reader=getattr(self,'pointer_reader',None)
             if reader is not None and any(step['type'] in ('move','click','drag','scroll') or 'focus' in step for step in steps):self.pointer_position=reader()
             self.action_deadline=time.monotonic()+15
+            input_started=time.monotonic()
             try:
                 for index,step in enumerate(steps):
                     self.transaction_info['failed_step']=index+1
@@ -569,6 +572,7 @@ class Desktop:
             finally:
                 self.action_deadline=None
                 self.release()
+                self.transaction_info['input_duration_ms']=max(0,round((time.monotonic()-input_started)*1000))
 
     def _primitive(self, a):
         with self.lock:
@@ -632,7 +636,6 @@ class Desktop:
                     self.state('button',272,True)
                     for point in path[1:]:
                         self.position(*point)
-                        self.confirm_pointer_endpoint(*point)
                         self.wait_interruptibly(.02)
                     self.state('button',272,False)
                 elif kind == 'wait':
@@ -642,7 +645,11 @@ class Desktop:
                     self.wait_interruptibly(seconds)
                 elif kind != 'move' and kind not in ('click','scroll'):
                     raise ValueError('Unknown action type')
-                self.wait_interruptibly(.1)
+                # Pointer arrival is already observed. Capture applies its own
+                # settling fence; do not add a blanket wait after every stroke,
+                # move, wheel operation or an explicitly requested wait.
+                if kind in ('click','keys','text'):
+                    self.wait_interruptibly(.1)
             finally:
                 if self.release():
                     raise RuntimeError('Input release failed; session closed and portal closure attempted. Check desktop_status and GNOME sharing indicator.')

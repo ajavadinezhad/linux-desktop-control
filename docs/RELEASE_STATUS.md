@@ -2,12 +2,14 @@
 
 **Preview, GNOME-only:** currently targets GNOME Shell 51 on Wayland. Other platforms are planned and are not yet supported.
 
-As reviewed on 19 October 2026: plugin **0.8.16**, optional native helper **0.8.6**. The repository is public; this remains a supervised beta, not a broadly verified release.
+Installed performance update: plugin **0.8.17**, optional native helper **0.8.6** unchanged. The repository is public; this remains a supervised beta, not a broadly verified release.
+
+The performance update passes 450 isolated regression checks and seven-tool loader validation. All 14 installed plugin files match reviewed source; a fresh provider confirmed the expected build and matching disk sources. Live speed measurement remains unperformed. See [performance measurements](PERFORMANCE.md). The live workflows below were recorded with earlier versions.
 
 ## Verified
 
 - All 14 installed plugin files matched the reviewed source; a fresh provider loaded the expected seven tools and build.
-- The frozen suite passed **443 Python tests** and loader/schema validation. The unchanged native helper has a **20-fixture** baseline.
+- The frozen suite passed **450 Python tests** and loader/schema validation. The unchanged native helper has a **20-fixture** baseline.
 - Firefox fitting and window relocation worked in the tested two-monitor GNOME setup.
 - Five slides were created and saved through Impress, including a separate five-slide PowerPoint copy.
 - The [4:39 bear demo](demo/README.md) shows actual browser opening and GUI painting. The edit removes setup waits, labels its resumed session, and hides unrelated tabs. It is not an uninterrupted session.
@@ -24,3 +26,7 @@ Routine invocation errors can still close sharing and require new consent. Calib
 The demo sessions ended with confirmed portal closure, zero held input and no cleanup warning. GPL-3.0-or-later now covers original code; third-party notices remain applicable. The owner made the repository public.
 
 See [beta acceptance](BETA_ACCEPTANCE.md), [validation](VALIDATION.md), and [compatibility](COMPATIBILITY.md). Earlier results remain in version-specific documents and Git history.
+
+## Live performance attempt
+
+A first startup attempt delivered its calibration cue late because of an operator orchestration error. A corrected retry delivered the cue promptly but did not obtain strict relative-motion calibration credit despite coarse keyboard and pointer evidence. Both attempts closed before capture or task input, with confirmed portal closure, zero held input and no cleanup warning. No bear was drawn and no live speed comparison is claimed.

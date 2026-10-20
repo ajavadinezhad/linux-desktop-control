@@ -111,4 +111,20 @@ class MappingTests(unittest.TestCase):
         bus.value[2].append([240,0,1.,0,False,[identity],{}])
         with self.assertRaises(m.MappingError):self.bind(bus)
 
+
+class ExactStateFastPathTests(unittest.TestCase):
+ bind=MappingTests.bind
+ def test_unchanged_state_is_requeried_but_not_rederived(self):
+  bus=Bus();guard=self.bind(bus);calls=len(bus.calls)
+  with mock.patch.object(m,'validate_state',side_effect=AssertionError('must not rederive unchanged state')):
+   self.assertTrue(guard.check())
+  self.assertEqual(len(bus.calls)-calls,3)
+ def test_equal_but_differently_typed_state_refuses(self):
+  bus=Bus();guard=self.bind(bus);bus.value[2][0][4]=1
+  with self.assertRaises(m.MappingError):guard.check()
+ def test_mutated_cached_geometry_or_props_refuses(self):
+  for mutate in (lambda g:setattr(g,'rect',(0,0,1,1)),lambda g:setattr(g,'scale',1.),lambda g:g.props.update(position=(0,0))):
+   guard=self.bind();mutate(guard)
+   with self.assertRaises(m.MappingError):guard.check()
+
 if __name__=='__main__':unittest.main()
