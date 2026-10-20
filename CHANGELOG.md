@@ -2,6 +2,10 @@
 
 Current status: see [release status](docs/RELEASE_STATUS.md). Older entries below are checkpoint records.
 
+## 0.8.34 — faster routine capture and direct operation
+
+Reduce the routine fresh-frame settling fence from350ms to200ms while preserving cancellation, context, mapping and publication checks. Prefer direct live operation and existing bounded batches; delegate live control only on explicit user request. This trims capture overhead, not model deliberation or application latency. Native helper and GNOME observer are unchanged.
+
 ## 0.8.33 — handle verified touchpad tool metadata
 
 - Accept finger tool-type metadata on active verified slots without movement credit.
