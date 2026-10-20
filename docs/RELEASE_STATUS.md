@@ -6,7 +6,7 @@ A new presentation was saved at `/home/aj/Documents/ChatGPT-Linux-Desktop-Contro
 
 The final successful session ran about 206 seconds after ARM, exceeding the old 120-second cap under the acknowledged initial 600-second lease. No renewal occurred; about 381 seconds remained at clean closure. Portal closure was confirmed, held input was zero, warnings were null, helper exit was 0 and capture/input were disabled. This is not a full 600-second expiry test. Current-build physical keyboard, held-drag and emergency Stop repeat checks and broader hardware/app coverage remain pending.
 
-The recording source is 668.25 seconds; the planned 328-second edit removes waits and labels resumed sessions. It must not be described as one continuous uninterrupted workflow. Earlier attempts and safe refusals remain in the local evidence, including an invocation error, a harmless save-dialog path error and endpoint refusal, and an initial calibration timeout. Evidence wrapper: `work/demo-0812/GUI_FIVE_SLIDE_RESULT.json` in the workspace outside the canonical Git source.
+The recording source is 668.25 seconds; the completed 320.33-second edit removes waits and labels resumed sessions. It must not be described as one continuous uninterrupted workflow. Earlier attempts and safe refusals remain in the local evidence, including an invocation error, a harmless save-dialog path error and endpoint refusal, and an initial calibration timeout. Evidence wrapper: `work/demo-0812/GUI_FIVE_SLIDE_RESULT.json` in the workspace outside the canonical Git source.
 
 ## Earlier rollout observations
 
@@ -193,3 +193,5 @@ A fresh actual 0.8.12 provider verified build `cd15c911aab846b0e04cbdddd8b845bdd
 
 
 Installation verification: plugin 0.8.13 is installed, and all 14 reviewed plugin files match canonical source. A fresh actual provider verified the expected build, matching disk sources, all seven tools and the window_move_to_shared schema. Sharing is closed with confirmed portal closure, zero held input and capture/input disabled. The real monitor move has not been tested live. Earlier candidate installation statements above describe the pre-install checkpoint.
+
+Final edited WebM passed a complete decode and sampled visual review, including the session cut and final cover. The original source and media remain local, outside this source repository.
