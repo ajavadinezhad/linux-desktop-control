@@ -2,6 +2,10 @@
 
 **Preview, GNOME-only:** currently targets GNOME Shell 51 on Wayland. Other platforms are planned and are not yet supported.
 
+Current installed update: plugin **0.8.19**, helper **0.8.7** unchanged. The drawing-only expanded batch and pacing skill pass **463 Python tests**, independent review, and seven-tool loading. All14 installed plugin files match source; read-only runtime verification confirms matching sources, closed sharing and zero held input. Larger-batch live speed improvement remains unmeasured. See [performance](PERFORMANCE.md).
+
+### Earlier performance checkpoint
+
 Installed performance update: plugin **0.8.17**, optional native helper **0.8.6** unchanged. The repository is public; this remains a supervised beta, not a broadly verified release.
 
 The performance update passes 450 isolated regression checks and seven-tool loader validation. All 14 installed plugin files match reviewed source; a fresh provider confirmed the expected build and matching disk sources. Live speed measurement remains unperformed. See [performance measurements](PERFORMANCE.md). The live workflows below were recorded with earlier versions.

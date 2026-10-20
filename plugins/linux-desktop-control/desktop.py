@@ -17,7 +17,7 @@ import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import Gio, GLib, Gst
 
-VERSION = '0.8.18'
+VERSION = '0.8.19'
 # Freeze identity at module load: old providers must never report a new disk build.
 _build_spec = importlib.util.spec_from_file_location('_desktop_runtime_build', os.path.join(os.path.dirname(__file__), 'runtime_build.py'))
 _runtime_build = importlib.util.module_from_spec(_build_spec)
@@ -463,11 +463,21 @@ class Desktop:
     def validate_action(self, a, in_sequence=False):
         if not isinstance(a, dict): raise ValueError('Action must be an object')
         kind = a.get('type')
+        stroke_batch=a.get('stroke_batch',False)
+        if type(stroke_batch) is not bool:raise ValueError('stroke_batch must be boolean')
+        if 'stroke_batch' in a and (kind!='sequence' or in_sequence):raise ValueError('stroke_batch requires an outer sequence')
         if kind == 'sequence':
             steps = a.get('steps')
-            if in_sequence or not isinstance(steps,list) or not 1 <= len(steps) <= 8:
-                raise ValueError('Provide 1..8 non-nested steps')
+            limit=24 if stroke_batch else 8
+            if in_sequence or not isinstance(steps,list) or not 1 <= len(steps) <= limit:
+                raise ValueError('Provide 1..'+str(limit)+' non-nested steps')
             if any(not isinstance(step,dict) for step in steps):raise ValueError('Each step must be an object')
+            if stroke_batch:
+                first=steps[0]
+                if len(steps)<2 or first.get('type')!='click' or first.get('button','left')!='left' or first.get('count',1)!=1 or set(first)-{'type','x','y','button','count'}:
+                    raise ValueError('Stroke batch requires one observed single left focus click')
+                if any(step.get('type')!='drag' or step.get('button','left')!='left' or set(step)-{'type','path','button'} for step in steps[1:]):
+                    raise ValueError('Stroke batch permits only left-button drag strokes after focus')
             if not getattr(self,'target_guard',None) and steps[0].get('type') != 'click' and not self.activates_focus(steps[0]):
                 raise ValueError('Sequence must begin with a target click or focus-acquiring shortcut')
             for step in steps: self.validate_action(step, True)
@@ -740,7 +750,8 @@ ACTION_SCHEMA = {'type':'object','required':['type'],'properties':{
 import copy
 STEP_SCHEMA=copy.deepcopy(ACTION_SCHEMA)
 ACTION_SCHEMA['properties']['type']['enum'].append('sequence')
-ACTION_SCHEMA['properties']['steps']={'type':'array','items':STEP_SCHEMA,'minItems':1,'maxItems':8}
+ACTION_SCHEMA['properties']['steps']={'type':'array','items':STEP_SCHEMA,'minItems':1,'maxItems':24}
+ACTION_SCHEMA['properties']['stroke_batch']={'type':'boolean','default':False,'description':'Explicit stable-canvas drawing batch: one harmless observed single left focus click followed by up to23 left drag strokes. Same canvas, brush, colour and layout only; no UI transitions. Existing10-second estimated/15-second actual input budgets and interruption guards remain. Default sequences still max8.'}
 
 def tools():
     specs=[
