@@ -27,6 +27,7 @@ struct tp_state {
     int x,y,old_x,old_y,slot;
     bool slot_selected;
     int tracking[TP_MAX_SLOTS];
+    bool palm[TP_MAX_SLOTS];
 };
 static enum tp_result tp_reject(struct tp_state *s,enum tp_reject_reason reason) {
     if(s&&s->reject_reason==TP_REJECT_NONE)s->reject_reason=reason;
@@ -42,6 +43,10 @@ static bool tp_active(const struct tp_state *s) {
     return false;
 }
 static bool tp_incomplete(const struct tp_state *s) { return s->pending; }
+static bool tp_palm_active(const struct tp_state *s) {
+    for(int i=0;i<TP_MAX_SLOTS;i++)if(s->tracking[i]>=0&&s->palm[i])return true;
+    return false;
+}
 static void tp_new_contact(struct tp_state *s) {
     s->baseline=false;s->x_seen=s->y_seen=false;
 }
@@ -58,8 +63,18 @@ static enum tp_result tp_event_contacts(struct tp_state *s,const struct input_ev
         int tools=(s->finger?1:0)+(s->double_finger?1:0)+(s->triple_finger?1:0)+(s->quad_finger?1:0);
         int expected=s->quad_finger?4:(s->triple_finger?3:(s->double_finger?2:(s->finger?1:0)));
         if(tools>1)return tp_reject(s,TP_REJECT_TOOLS);
-        if(s->touch!=(tools==1))return tp_reject(s,TP_REJECT_STATE);
         if(expected>max_contacts)return tp_reject(s,TP_REJECT_LIMIT);
+        /* Firmware may exclude palms from pointer-emulation tool/touch bits.
+         * This exception is inert only: every active palm keeps the stream
+         * busy, and no quiet/resume authority exists until all contacts lift. */
+        if(max_contacts==4&&tp_palm_active(s)) {
+            if(contacts>max_contacts)return tp_reject(s,TP_REJECT_LIMIT);
+            if(expected>contacts)return tp_reject(s,TP_REJECT_COUNT);
+            if(tools&&!s->touch)return tp_reject(s,TP_REJECT_STATE);
+            s->pending=false;s->frame_had_contact=s->coordinate_frame=false;
+            s->gesture_sticky=true;tp_new_contact(s);return TP_INTERVENTION;
+        }
+        if(s->touch!=(tools==1))return tp_reject(s,TP_REJECT_STATE);
         if(l->mt&&contacts!=expected)return tp_reject(s,TP_REJECT_COUNT);
         if(!s->touch&&s->coordinate_frame&&!s->frame_had_contact)return tp_reject(s,TP_REJECT_COORDINATE_CONTACT);
         s->pending=false;
@@ -108,7 +123,8 @@ static enum tp_result tp_event_contacts(struct tp_state *s,const struct input_ev
         if(slot<l->slot_min||slot>l->slot_max)return tp_reject(s,TP_REJECT_SLOT);
         if(e->value==-1) {
             if(s->tracking[slot]<0)return tp_reject(s,TP_REJECT_RELEASE);
-            s->tracking[slot]=-1;tp_new_contact(s);return TP_NONE;
+            s->tracking[slot]=-1;s->palm[slot]=false;tp_new_contact(s);
+            return s->gesture_sticky?TP_INTERVENTION:TP_NONE;
         }
         if(s->tracking[slot]>=0)return tp_reject(s,TP_REJECT_DUPLICATE_CONTACT);
         int count=0;
@@ -118,7 +134,14 @@ static enum tp_result tp_event_contacts(struct tp_state *s,const struct input_ev
         }
         if(count>=max_contacts)return tp_reject(s,TP_REJECT_LIMIT);
         if(count)s->gesture_sticky=true;
-        s->tracking[slot]=e->value;tp_new_contact(s);s->frame_had_contact=true;return s->gesture_sticky?TP_INTERVENTION:TP_CONTACT;
+        s->tracking[slot]=e->value;s->palm[slot]=false;tp_new_contact(s);s->frame_had_contact=true;return s->gesture_sticky?TP_INTERVENTION:TP_CONTACT;
+    }
+    case ABS_MT_TOOL_TYPE: {
+        int slot=s->slot_selected?s->slot:0;
+        if(!l->mt||slot<l->slot_min||slot>l->slot_max||s->tracking[slot]<0)return tp_reject(s,TP_REJECT_CONTACT_SLOT);
+        if(e->value==MT_TOOL_FINGER){s->palm[slot]=false;return TP_NONE;}
+        if(e->value!=MT_TOOL_PALM||max_contacts!=4)return tp_reject(s,TP_REJECT_VALUE);
+        s->palm[slot]=true;s->gesture_sticky=true;tp_new_contact(s);return TP_INTERVENTION;
     }
     case ABS_MT_POSITION_X: case ABS_MT_POSITION_Y:
         if(!l->mt||s->tracking[s->slot_selected?s->slot:0]<0)return tp_reject(s,TP_REJECT_CONTACT_SLOT);

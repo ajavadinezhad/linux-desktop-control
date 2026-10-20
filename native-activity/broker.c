@@ -483,7 +483,8 @@ static int held_state(void) {
             bool three=multi_contact_mode&&(keys[BTN_TOOL_TRIPLETAP/8]&(1U<<(BTN_TOOL_TRIPLETAP%8)))!=0;
             bool four=multi_contact_mode&&(keys[BTN_TOOL_QUADTAP/8]&(1U<<(BTN_TOOL_QUADTAP%8)))!=0;
             int tools=finger+two+three+four;
-            if(tools<=1&&touch==(tools==1))break;
+            bool palm=multi_contact_mode&&tp_palm_active(&touchpad_states[i]);
+            if(tools<=1&&(palm||touch==(tools==1)))break;
             bool other=false;
             for(unsigned code=0;code<=KEY_MAX;++code)
                 if(!admitted_contact_code(code)&&
@@ -513,9 +514,10 @@ static int held_state(void) {
         if(touchpad_yield_mode&&device_touchpad[i]) {
             /* An inconsistent snapshot is not a single-finger permission. */
             int tools=finger+two+three+four;
-            if(tools>1||touch!=(tools==1))return -1;
-            touchpad_snapshot_contact[i]=contact;
-            if(contact&&armed&&((two||three||four)?pointer_click(now_ms()):pointer_motion(now_ms())))return -1;
+            bool palm=armed&&multi_contact_mode&&tp_palm_active(&touchpad_states[i]);
+            if(tools>1||(!palm&&touch!=(tools==1)))return -1;
+            touchpad_snapshot_contact[i]=contact||palm;
+            if(armed&&((palm||two||three||four)?pointer_click(now_ms()):(contact?pointer_motion(now_ms()):0)))return -1;
             if(contact&&calibrating)calibration_note_kind(0,now_ms(),'H');
         }
         if (any) {

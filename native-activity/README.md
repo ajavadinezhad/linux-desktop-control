@@ -1,6 +1,6 @@
 # Optional native activity helper
 
-Helper **0.8.15** adds physical-input monitoring to explicitly protected sessions. It is off by default and is separate from ordinary portal control. See [release status](../docs/RELEASE_STATUS.md) for scoped live evidence and unpassed checks.
+Helper **0.8.16** adds physical-input monitoring to explicitly protected sessions. It is off by default and is separate from ordinary portal control. See [release status](../docs/RELEASE_STATUS.md) for scoped live evidence and unpassed checks.
 
 ## Consent and startup
 
@@ -50,3 +50,5 @@ Optional KEYPAUSE1 negotiation permits ordinary keyboard intervention to use the
 MULTICONTACT1 explicitly extends armed touchpad intervention handling through four consistent contacts, retaining pause until all contacts lift. It never exports raw events or supplies multi-contact motion credit; default and authentication paths stay strict.
 
 Terminal parser rejection evidence is a fixed optional category emitted after descriptor closure. It cannot authorize input or establish live gesture acceptance.
+
+Verified active-slot ABS_MT_TOOL_TYPE finger metadata is not motion evidence. In explicit multi-contact mode, palm classification pauses inertly until all contact ends. Pens and unknown types remain refused. See https://docs.kernel.org/input/multi-touch-protocol.html .
