@@ -1,5 +1,7 @@
 # Consent-first foreground guard — 0.7.1
 
+> Version-specific investigation record. Status statements below describe that checkpoint. See [current release status](RELEASE_STATUS.md) for installed versions and later acceptance.
+
 The preceding Firefox test confirmed a real gap: the user deliberately used Alt+Tab, and an unfenced sequence continued. The earlier app launch was performed by a command runner before consent; this bypassed the intended orchestration boundary, not the portal's consent enforcement. Both behaviors are now prohibited/guarded. No new live test has run for this version.
 
 The observer reads GNOME51's focus-window, a stable window sequence number, frame rectangle and Shell context. It subscribes to focus, window position/size, lifecycle/workspace/monitor-scale and overview/session-mode changes. A monotonic epoch invalidates switching away and back. It reads no window titles, app content or key/mouse events and never grabs focus or modifies the cursor. Geometry and context are also polled at event fences, so lock/overview/foreign modal changes cannot be handled merely by hiding the label.

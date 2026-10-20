@@ -21,4 +21,4 @@ Sharing requires your GNOME approval. Foreground, monitor, and pointer checks gu
 
 **Private supervised beta.** Tested on the current setup; broader device and app coverage remains unfinished. Independent integration, not an official OpenAI product.
 
-[Install](docs/INSTALLATION.md) · [Compatibility](docs/COMPATIBILITY.md) · [Current status](docs/RELEASE_STATUS.md) · [Privacy](docs/PRIVACY.md) · [Architecture](docs/ARCHITECTURE.md)
+[Install](docs/INSTALLATION.md) · [All guides](docs/README.md) · [Compatibility](docs/COMPATIBILITY.md) · [Current status](docs/RELEASE_STATUS.md) · [Privacy](docs/PRIVACY.md) · [Architecture](docs/ARCHITECTURE.md)

@@ -1,5 +1,7 @@
 # Fresh scenario audit
 
+> Version-specific investigation record. Status statements below describe that checkpoint. See [current release status](RELEASE_STATUS.md) for installed versions and later acceptance.
+
 This audit restarts from the current source and prior failed evidence. Passing isolated tests does not establish physical input coverage, universal application support, or every possible timing interleaving. No live sharing was started during this code audit.
 
 Final verification: **304 Python tests and eight native fixture tests pass**. The real plugin loader discovers version **0.8.4** and all five tools. The installed native helper binary matches its reviewed 0.8.0 package; no native package update or administrator grant was needed for these Python repairs.

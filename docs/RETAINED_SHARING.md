@@ -1,6 +1,6 @@
-# Retained sharing and one cursor return — 0.8.9 candidate
+# Retained sharing and cursor return
 
-This mode is implemented and covered by offline tests, including a fake-channel native-controller-to-production-pointer-return integration. Installed 0.8.8/helper 0.8.2 failed live mouse-motion detection despite later human confirmation. Installed candidate 0.8.9/helper 0.8.3 requires strict MODEYIELD2 relative-motion calibration; reviewed runtime files and a fresh actual 0.8.9 provider/build match, but this does not establish an event-delivery repair or live acceptance. Live automatic return remains blocked/unverified. Read [the coverage correction](STRICT_RELATIVE_COVERAGE.md) before attempting this mode. Earlier 0.8.7 typing interruption and drag-release evidence proves scoped stop/cleanup behavior, not this new persistent observer or automatic return.
+Opt-in behavior, with scoped mouse-yield and return evidence on the tested host. See [current status](RELEASE_STATUS.md) for versions, live evidence and limits.
 
 ## Opt-in and consent
 
@@ -12,7 +12,7 @@ A new session chooses:
 
 Default `interruption_policy="close"` remains unchanged. `retain-sharing` without `pointer_motion_return` supports explicit pause/resume and native motion yielding without automatic return. Automatic return additionally requires native monitoring; supervised mode does not pretend to detect physical movement.
 
-Personal GNOME sharing approval, the separate administrator authorization, physical calibration and ARM are still required. No password or approval dialog is automated. A pause keeps that original consent and observer alive; it neither creates a new portal nor renews the original 120-second native lease. GNOME privacy Stop, lock, revocation and closure always remain terminal. A later new session needs new personal consent.
+Personal GNOME sharing approval, the separate administrator authorization, physical calibration and ARM are still required. No password or approval dialog is automated. A pause keeps that original consent and observer alive; it neither creates a new portal nor renews the original selected native lease (120 seconds by default, up to 600 chosen before calibration). GNOME privacy Stop, lock, revocation and closure always remain terminal. A later new session needs new personal consent.
 
 ## Motion, quiet and return
 

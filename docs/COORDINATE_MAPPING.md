@@ -1,5 +1,7 @@
 # Coordinate mapping investigation
 
+> Version-specific investigation record. Status statements below describe that checkpoint. See [current release status](RELEASE_STATUS.md) for installed versions and later acceptance.
+
 ## Observed scope
 
 The 0.8.5 physical calibration and ARM handshake passed on the selected primary monitor at logical origin `(0,0)` with size `1920×1200`. The captured image was `3840×2400`. A guarded Super transition produced an overview observation with frame `(0,0,1920,1200)`.

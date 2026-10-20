@@ -1,5 +1,7 @@
 # Post-ARM mouse readiness — 0.8.11 candidate
 
+> Version-specific investigation record. Status statements below describe that checkpoint. See [current release status](RELEASE_STATUS.md) for installed versions and later acceptance.
+
 This candidate adds a readiness gate in the desktop controller for retained MODEYIELD2 sessions. It does not change helper package 0.8.4, device permissions, calibration, stream delivery or the original 120-second helper lease. Default close-policy startup is unchanged. Event delivery and live automatic return remain unresolved; this prevents a false READY claim rather than repairing the underlying cause.
 
 ## Two distinct challenge stages

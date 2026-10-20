@@ -1,5 +1,7 @@
 # ZapZap startup diagnosis
 
+> Version-specific investigation record. Status statements below describe that checkpoint. See [current release status](RELEASE_STATUS.md) for installed versions and later acceptance.
+
 Inspection and consented live startup verification on 2026-10-18. No account
 setup, chat inspection, message sending or application-data deletion occurred.
 A reversible user-only launcher override was installed after visible startup.

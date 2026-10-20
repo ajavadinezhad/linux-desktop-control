@@ -1,5 +1,7 @@
 # Authorization-release settling — installed 0.8.12 / helper 0.8.5
 
+> Version-specific investigation record. Status statements below describe that checkpoint. See [current release status](RELEASE_STATUS.md) for installed versions and later acceptance.
+
 A synthetic fixture reproduced READY and MODEYIELD2 acknowledgement followed by FAULT/exit146 when CALIBRATE raced with a still-held authorization key/button. This establishes a legitimate startup fragility. It does not identify the unique cause of previous live failures or repair missing mouse-event delivery.
 
 The candidate waits at most five seconds for authorization input to be released and primary queues to be clean before beginning calibration. It emits no CALIBRATING cue, shows no challenge notice and grants no calibration credit during that settling interval. Authorization input is drained without credit. Only a released, clean boundary starts the ordinary fresh keyboard/relative-pointer challenge and its original calibration deadline.

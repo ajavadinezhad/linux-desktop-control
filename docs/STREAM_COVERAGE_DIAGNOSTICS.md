@@ -1,5 +1,7 @@
 # Terminal stream evidence — 0.8.10 candidate / helper 0.8.4
 
+> Version-specific investigation record. Status statements below describe that checkpoint. See [current release status](RELEASE_STATUS.md) for installed versions and later acceptance.
+
 Diagnostic-only plugin 0.8.10/helper 0.8.4 is installed and reviewed files match. The strict MODEYIELD2 requirement introduced by 0.8.9/helper 0.8.3 stays in force. Mouse-event delivery is unresolved; no live test, permission change, input grab probe or activation fallback is part of this update. A physical USB/Bluetooth device description does not establish that its records reach the selected evdev reader.
 
 ## Evidence contract

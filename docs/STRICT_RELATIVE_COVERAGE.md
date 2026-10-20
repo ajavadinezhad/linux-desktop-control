@@ -1,5 +1,7 @@
 # Strict relative-motion coverage — 0.8.9 candidate / helper 0.8.3
 
+> Version-specific investigation record. Status statements below describe that checkpoint. See [current release status](RELEASE_STATUS.md) for installed versions and later acceptance.
+
 ## Reproduced gap
 
 The installed 0.8.8 third mouse-return trial reached calibration, ARM, a fresh primary-monitor image and the confirmed assistant endpoint. No native yield epoch was observed before the original native lease expired. The human subsequently confirmed physical mouse movement during the trial. Thus automatic mouse return failed live; it is not a passed feature. Sharing closed with zero held virtual input and no cleanup warning. The adjacent `release/LIVE_0_8_8_MOUSE_RETURN_ATTEMPT3.json` initially recorded the human answer as pending; the later confirmation supplies that timing evidence.
