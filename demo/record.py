@@ -1,16 +1,32 @@
 #!/usr/bin/python3
-"""Explicitly consented, silent demo recording. Separate from desktop control.
+"""Explicitly consented demo recording. Silent by default; optional system audio.
 
 Only run with the clean scratch scene visible. Stop before switching apps.
 The recorder is independent of the desktop input session.
 """
-import argparse,json,os,signal,threading,time,uuid,tempfile
+import argparse,json,os,signal,threading,time,uuid,tempfile,importlib.util,re
 from pathlib import Path
 import gi
 gi.require_version('Gst','1.0')
 from gi.repository import Gio,GLib,Gst
 DEST='org.freedesktop.portal.Desktop';PATH='/org/freedesktop/portal/desktop'
 SC='org.freedesktop.portal.ScreenCast'
+_guard_spec=importlib.util.spec_from_file_location('demo_recording_guard',Path(__file__).with_name('recording_guard.py'))
+guard=importlib.util.module_from_spec(_guard_spec);_guard_spec.loader.exec_module(guard)
+
+def confirm_pipeline_started(pipe,args,done,timeout=3):
+ # A PLAYING request alone does not prove the selected audio/video branches ran.
+ result=pipe.set_state(Gst.State.PLAYING)
+ if result==Gst.StateChangeReturn.FAILURE:raise RuntimeError('Recording pipeline refused startup')
+ result,current,_=pipe.get_state(int(timeout*Gst.SECOND))
+ if result==Gst.StateChangeReturn.FAILURE or current!=Gst.State.PLAYING:raise RuntimeError('Recording pipeline did not reach PLAYING')
+ bus=pipe.get_bus();deadline=time.monotonic()+timeout
+ while True:
+  if done.is_set() or args.stop_file.exists():raise RuntimeError('Recording startup cancelled')
+  if bus.pop_filtered(Gst.MessageType.ERROR|Gst.MessageType.EOS):raise RuntimeError('Recording pipeline failed during startup')
+  if args.output.stat().st_size>0:return
+  if time.monotonic()>=deadline:raise RuntimeError('Recording output did not start')
+  done.wait(.05)
 class Recorder:
  def __init__(self,args):
   self.args=args;self.session=None;self.pipe=None;self.fd=None;self.sub=None
@@ -56,12 +72,17 @@ class Recorder:
    cw,ch=rw,rh
   else:filters=f'videocrop top={crop}';cw,ch=w,h-crop
   scale=min(1,self.args.max_width/cw);ow=max(2,int(cw*scale)//2*2);oh=max(2,int(ch*scale)//2*2)
-  self.pipe=Gst.parse_launch(f'pipewiresrc name=source do-timestamp=true ! queue max-size-buffers=3 max-size-bytes=0 max-size-time=0 leaky=downstream ! videorate ! video/x-raw,framerate=15/1 ! {filters} ! videoconvert ! videoscale ! video/x-raw,width={ow},height={oh},pixel-aspect-ratio=1/1 ! vp8enc deadline=1 cpu-used=4 target-bitrate=2500000 ! webmmux ! filesink name=output')
+  audio=''
+  if self.args.system_audio_device:
+   audio=' pulsesrc name=playback do-timestamp=true ! queue ! audioconvert ! audioresample ! audio/x-raw,rate=48000,channels=2 ! opusenc ! queue ! mux.'
+  self.pipe=Gst.parse_launch(f'pipewiresrc name=source do-timestamp=true ! queue max-size-buffers=3 max-size-bytes=0 max-size-time=0 leaky=downstream ! videorate ! video/x-raw,framerate=15/1 ! {filters} ! videoconvert ! videoscale ! video/x-raw,width={ow},height={oh},pixel-aspect-ratio=1/1 ! vp8enc deadline=1 cpu-used=4 target-bitrate=2500000 ! webmmux name=mux ! filesink name=output'+audio)
+  if self.args.system_audio_device:self.pipe.get_by_name('playback').set_property('device',self.args.system_audio_device)
   source=self.pipe.get_by_name('source');source.set_property('fd',self.fd);source.set_property('path',str(node))
   if props.get('pipewire-serial'):source.set_property('target-object',str(props['pipewire-serial']))
   self.pipe.get_by_name('output').set_property('location',str(self.args.output))
-  self.pipe.set_state(Gst.State.PLAYING);self.pipe.get_state(3*Gst.SECOND)
-  print(json.dumps({'recording':True,'silent':True,'width':ow,'height':oh,'stop_file':str(self.args.stop_file),'maximum_seconds':self.args.seconds}),flush=True)
+  write_status(self.args,recording=False,state='starting')
+  confirm_pipeline_started(self.pipe,self.args,self.done)
+  print(json.dumps({'recording':True,'silent':not bool(self.args.system_audio_device),'audio_mode':'system-playback-monitor' if self.args.system_audio_device else 'silent','recording_id':self.args._recording_identity['recording_id'],'width':ow,'height':oh,'stop_file':str(self.args.stop_file),'maximum_seconds':self.args.seconds}),flush=True)
   started=time.monotonic();bus=self.pipe.get_bus();self.stop_reason=None;last_status=0
   def progress():
    elapsed=time.monotonic()-started
@@ -93,7 +114,7 @@ def write_status(args,**state):
  path=args.status_file
  fd,name=tempfile.mkstemp(prefix='.'+path.name+'-',dir=path.parent)
  try:
-  with os.fdopen(fd,'w') as stream:json.dump(state,stream);stream.write('\n')
+  with os.fdopen(fd,'w') as stream:json.dump(dict(guard.status_metadata(args),**state),stream);stream.write('\n')
   os.replace(name,path)
  finally:
   try:os.unlink(name)
@@ -104,7 +125,9 @@ def parse_args(argv=None):
  p.add_argument('--output',type=Path,required=True);p.add_argument('--stop-file',type=Path,required=True)
  p.add_argument('--status-file',type=Path);p.add_argument('--seconds',type=int,default=120)
  p.add_argument('--crop-top',type=int,default=0);p.add_argument('--region',type=int,nargs=4,metavar=('X','Y','WIDTH','HEIGHT'))
+ p.add_argument('--system-audio-device',help='Explicit PulseAudio/PipeWire playback source ending in .monitor; no microphone fallback')
  p.add_argument('--max-width',type=int,default=3440);a=p.parse_args(argv)
+ if a.system_audio_device is not None and not re.fullmatch(r'[A-Za-z0-9_.:-]+\.monitor',a.system_audio_device):p.error('System audio requires an explicit playback monitor source ending in .monitor')
  a.output=a.output.resolve();a.stop_file=a.stop_file.resolve()
  a.status_file=(a.status_file or Path(str(a.output)+'.status.json')).resolve()
  paths=(a.output,a.stop_file,a.status_file)

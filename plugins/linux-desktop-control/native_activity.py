@@ -54,7 +54,7 @@ class Controller:
     def __init__(self, active, on_activity, on_fault, runtime_dir=None,
                  launcher=subprocess.Popen, validator=validate_helper,
                  credentials=peer_credentials, startup_timeout=60, notice=None,
-                 retain_sharing=False, on_yield=None, on_quiet=None, session_seconds=120, pointer_source="mouse"):
+                 retain_sharing=False, on_yield=None, on_quiet=None, session_seconds=120, pointer_source="mouse", startup_verification="challenge", allow_permission_wait=False, click_policy='close', on_intervention=None):
         # Dependency injections are for isolated tests, never model tool arguments.
         if type(session_seconds) is not int or not 120<=session_seconds<=600:
             raise ValueError("session_seconds must be an integer from 120 to 600")
@@ -113,7 +113,23 @@ class Controller:
             raise ValueError("Invalid pointer_source")
         if pointer_source=="touchpad" and not retain_sharing:
             raise ValueError("Touchpad observation requires retained sharing")
+        if type(allow_permission_wait) is not bool or (allow_permission_wait and not retain_sharing):raise ValueError('Permission waiting requires retained native observation')
+        self.allow_permission_wait=allow_permission_wait;self.auth_mode_acknowledged=False
+        self.auth_condition=threading.Condition(threading.RLock());self.auth_command_lock=threading.Lock()
+        self.auth_epoch=0;self.auth_waiting=False;self.auth_pending=None;self.auth_reply=None;self.auth_deadline=None
         self.pointer_source=pointer_source
+        if type(click_policy) is not str or click_policy not in ('close','pause-return') or (click_policy!='close' and not retain_sharing):raise ValueError('Click return requires retained native observation')
+        self.click_policy=click_policy;self.click_mode_acknowledged=False
+        self.intervention_epoch=None;self.on_intervention=on_intervention;self.resume_click_return=False
+        if not isinstance(startup_verification,str) or startup_verification not in ('challenge','passive'):
+            raise ValueError('Invalid startup_verification')
+        if startup_verification=='passive' and not retain_sharing:
+            raise ValueError('Passive supervision requires retained sharing')
+        self.startup_verification=startup_verification
+        self.monitor_armed=False
+        self.readiness_kind='not-ready'
+        self.passive_acknowledged=False
+        self.motion_epoch=None
         self.retain_sharing=retain_sharing
         self.on_yield=on_yield
         self.on_quiet=on_quiet
@@ -221,6 +237,10 @@ class Controller:
             if self.requested_session_seconds!=120:self._negotiate_lease()
             if self.retain_sharing:
                 self._negotiate_yield()
+            if self.click_policy=='pause-return':self._negotiate_click()
+            if self.allow_permission_wait:self._negotiate_auth()
+            if self.startup_verification=='passive':
+                return self._start_passive()
             self._send('CALIBRATE')
             self._wait_calibration_start()
             self.calibration_state='waiting'
@@ -258,6 +278,8 @@ class Controller:
                 self.last_peer = time.monotonic()
                 self.armed_at_monotonic = self.last_peer
                 self.calibration_verified=True
+                self.monitor_armed=True
+                self.readiness_kind='challenge-verified'
                 self.calibration_state='verified'
                 self.post_arm_gate=self.retain_sharing
                 self.post_arm_state='waiting-motion' if self.retain_sharing else 'not-started'
@@ -270,6 +292,41 @@ class Controller:
         except BaseException:
             self.close()
             raise
+
+    def _start_passive(self):
+        # Separate opt-in protocol: monitoring is armed, source coverage is not
+        # attested. No calibration notice or human challenge is synthesized.
+        deadline=time.monotonic()+6
+        self.calibration_state='not-requested'
+        self.readiness_kind='passive-settling'
+        self._send('ARM_PASSIVE')
+        peer_seen=time.monotonic();next_heartbeat=peer_seen
+        while True:
+            now=time.monotonic()
+            if not self._yield_authorized():raise NativeFailure('session-ended','Passive observer authorization ended')
+            if now>=deadline:raise NativeFailure('helper-fault','Passive observer did not acknowledge startup')
+            if now>=next_heartbeat:
+                self._send('HB');next_heartbeat=now+.2
+            message=self._read(min(.05,max(0,deadline-time.monotonic())))
+            if not self._yield_authorized() or time.monotonic()>=deadline:
+                raise NativeFailure('session-ended','Passive startup acknowledgement expired')
+            if message=='PASSIVE_ARMED':break
+            if message=='ALIVE':peer_seen=time.monotonic()
+            elif message is not None:raise NativeFailure('protocol-invalid','Passive observer response invalid')
+            if self.process.poll() is not None:raise NativeFailure('helper-fault','Passive observer exited')
+            if time.monotonic()-peer_seen>=1:raise NativeFailure('heartbeat-timeout','Passive observer heartbeat expired')
+        with self.close_lock:
+            if not self._yield_authorized() or time.monotonic()>=deadline:
+                raise NativeFailure('session-ended','Passive observer authorization ended')
+            self.passive_acknowledged=True
+            self.monitor_armed=True
+            self.readiness_kind='passive-unverified'
+            self.post_arm_state='not-required-passive'
+            self.last_peer=self.armed_at_monotonic=time.monotonic()
+            self.ready=True
+            self.thread=threading.Thread(target=self._monitor,daemon=True,name='native-activity-observer')
+            self.thread.start()
+        return self
 
     def _wait_post_arm(self):
         # The monitor is the sole reader after ARM. This gate never authorizes
@@ -530,6 +587,38 @@ class Controller:
             finally:self.close()
 
     def _consume(self,message):
+        if isinstance(message,str) and message.startswith(('AUTHWAIT_','AUTHREADY_')):
+            with self.auth_condition:
+                if (not self.auth_mode_acknowledged or self.auth_pending!=message or self.auth_reply is not None or
+                    self.auth_deadline is None or time.monotonic()>=self.auth_deadline or not self._yield_authorized()):
+                    raise NativeFailure('protocol-invalid','Permission wait acknowledgement invalid')
+                self.auth_waiting=message.startswith('AUTHWAIT_')
+                self.auth_reply=message;self.last_peer=time.monotonic();self.auth_condition.notify_all()
+            return False
+        if (self.auth_waiting or self.auth_pending is not None) and isinstance(message,str) and message.startswith(('MOTION_','YIELDED_','QUIET_','ARMED_','CLICKED_')):
+            raise NativeFailure('protocol-invalid','Pointer authority token during permission waiting')
+        if isinstance(message,str) and message.startswith('CLICKED_'):
+            number=message[8:]
+            with self.yield_condition:
+                if (not self.click_mode_acknowledged or self.click_policy!='pause-return' or self.post_arm_gate or
+                    not number.isascii() or not number.isdigit() or number.startswith('0') or not 1<=int(number)<=64 or
+                    not self.is_current_yield(int(number)) or self.quiet_epoch is not None or self.intervention_epoch==int(number)):
+                    raise NativeFailure('protocol-invalid','Native click epoch invalid')
+                self.intervention_epoch=int(number);self.last_peer=time.monotonic()
+                self.yield_condition.notify_all()
+            if self.on_intervention is not None:self.on_intervention(self,int(number))
+            return False
+        if isinstance(message,str) and message.startswith('MOTION_'):
+            number=message[7:]
+            with self.yield_condition:
+                if (self.startup_verification!='passive' or not self.passive_acknowledged or not self.monitor_armed or
+                    not self._yield_authorized() or not number.isascii() or not number.isdigit() or
+                    number.startswith('0') or not 1<=int(number)<=64 or not self.yielded or
+                    int(number)!=self.yield_epoch or self.quiet_epoch is not None or self.motion_epoch==int(number)):
+                    raise NativeFailure('protocol-invalid','Passive motion epoch invalid')
+                self.motion_epoch=int(number)
+                self.last_peer=time.monotonic()
+            return False
         if isinstance(message,str) and message.startswith(('YIELDED_','QUIET_','ARMED_')):
             self._consume_yield(message)
             return False
@@ -546,6 +635,40 @@ class Controller:
         elif message is not None:
             raise NativeFailure('protocol-invalid','Native observer invalid response')
         return False
+
+    def _negotiate_auth(self):
+        deadline=time.monotonic()+1
+        if not self._yield_authorized():raise NativeFailure('session-ended','Permission observer authorization ended')
+        self._send('AUTHMODE1')
+        reply=self._read(max(0,deadline-time.monotonic()))
+        if reply!='AUTHMODE1_OK' or time.monotonic()>=deadline or not self._yield_authorized():
+            raise NativeFailure('protocol-invalid','Permission observer negotiation failed')
+        self.auth_mode_acknowledged=True
+
+    def _auth_exchange(self,ending=False):
+        # The monitor is the sole socket reader after startup. Callers wait on
+        # exact acknowledgements delivered by _consume, never read the socket.
+        with self.auth_command_lock:
+            with self.auth_condition:
+                if not self.auth_mode_acknowledged or not self.ready or not self._yield_authorized():raise NativeFailure('session-ended','Permission waiting is unavailable')
+                if self.auth_pending is not None or (ending and not self.auth_waiting) or (not ending and (self.auth_waiting or self.yielded or self.auth_epoch>=64)):
+                    raise NativeFailure('protocol-invalid','Permission wait state invalid')
+                if not ending:self.auth_epoch+=1
+                epoch=self.auth_epoch;deadline=time.monotonic()+(6 if ending else 1)
+                self.auth_pending=('AUTHREADY_'+str(epoch)) if ending else ('AUTHWAIT_'+str(epoch)+'_OK')
+                self.auth_reply=None;self.auth_deadline=deadline
+                self._send(('AUTHEND_' if ending else 'AUTHWAIT_')+str(epoch))
+                while self.auth_reply is None:
+                    if not self.ready or not self._yield_authorized() or time.monotonic()>=deadline:raise NativeFailure('session-ended','Permission wait acknowledgement expired')
+                    self.auth_condition.wait(min(.05,max(0,deadline-time.monotonic())))
+                if time.monotonic()>=deadline or not self._yield_authorized():raise NativeFailure('session-ended','Permission wait acknowledgement expired')
+                self.auth_pending=None;self.auth_deadline=None
+                return epoch
+
+    def begin_auth_wait(self):return self._auth_exchange(False)
+    def end_auth_wait(self,epoch):
+        if type(epoch) is not int or epoch!=self.auth_epoch:raise NativeFailure('protocol-invalid','Permission wait epoch changed')
+        return self._auth_exchange(True)
 
     def _negotiate_lease(self):
         # One initial negotiation, before mode/calibration; no active renewal.
@@ -574,6 +697,14 @@ class Controller:
         if time.monotonic()>=deadline or not self._yield_authorized():
             raise NativeFailure('session-ended','Native observer authorization ended')
 
+    def _negotiate_click(self):
+        deadline=time.monotonic()+1
+        if not self._yield_authorized():raise NativeFailure('session-ended','Click observer authorization ended')
+        self._send('CLICKPAUSE1')
+        reply=self._read(max(0,deadline-time.monotonic()))
+        if reply!='CLICKPAUSE1_OK' or time.monotonic()>=deadline or not self._yield_authorized():raise NativeFailure('protocol-invalid','Click observer negotiation failed')
+        self.click_mode_acknowledged=True
+
     def _yield_authorized(self):
         # Authorization callbacks may revoke/close reentrantly; their returned
         # value cannot resurrect a stopped owner or renew the original lease.
@@ -589,6 +720,11 @@ class Controller:
                     self.yield_epoch==epoch and (not quiet or self.quiet_epoch==epoch) and
                     self._yield_authorized())
 
+    def is_current_intervention(self,epoch,quiet=False):
+        with self.yield_condition:
+            return (self.click_mode_acknowledged and self.intervention_epoch==epoch and
+                    self.is_current_yield(epoch,quiet=quiet))
+
     def _consume_yield(self,message):
         kind,number=message.split('_',1)
         if (not self.retain_sharing or not number.isascii() or not number.isdigit() or
@@ -603,12 +739,14 @@ class Controller:
             if kind=='YIELDED':
                 if epoch!=self.yield_epoch+1:raise NativeFailure('protocol-invalid','Native pointer epoch out of order')
                 self.yield_epoch=epoch;self.yielded=True;self.quiet_epoch=None
+                self.motion_epoch=None
                 self.ready=False;self.resume_ack=None
                 if self.post_arm_gate:self.post_arm_state='waiting-quiet'
                 else:callback=self.on_yield
             elif kind=='QUIET':
                 if not self.yielded or epoch!=self.yield_epoch or self.quiet_epoch is not None:
                     raise NativeFailure('protocol-invalid','Native quiet epoch invalid')
+                if self.intervention_epoch is not None and self.intervention_epoch!=epoch:raise NativeFailure('protocol-invalid','Native click epoch notice missing')
                 self.quiet_epoch=epoch
                 if not self.post_arm_gate:callback=self.on_quiet
             elif kind=='ARMED':
@@ -616,23 +754,31 @@ class Controller:
                 if (pending is None or pending[0]!=epoch or epoch!=self.yield_epoch or
                         not self.yielded or self.quiet_epoch!=epoch or time.monotonic()>=pending[1]):
                     raise NativeFailure('protocol-invalid','Native resume acknowledgement invalid')
+                if self.intervention_epoch is not None and (not self.resume_click_return or self.intervention_epoch!=epoch):raise NativeFailure('protocol-invalid','Native click resume acknowledgement invalid')
                 self.resume_ack=epoch;self.yielded=False;self.quiet_epoch=None;self.ready=not self.post_arm_gate
+                self.motion_epoch=None;self.intervention_epoch=None
             self.last_peer=time.monotonic()
             self.yield_condition.notify_all()
         if callback is not None:callback(self,epoch)
 
-    def resume_from_pause(self,expected_epoch,timeout=1):
+    def resume_from_pause(self,expected_epoch,timeout=1,click_return=False):
         if threading.current_thread() is self.thread:
             raise NativeFailure('protocol-invalid','Native monitor cannot wait for its own acknowledgement')
         if isinstance(timeout,bool) or not isinstance(timeout,(int,float)) or not 0<timeout<=1:
             raise ValueError('Native resume timeout must be bounded')
+        if type(click_return) is not bool:raise ValueError('click_return must be boolean')
         deadline=time.monotonic()+timeout
         try:
             with self.yield_condition:
                 if not self.is_current_yield(expected_epoch,quiet=True) or self.resume_pending is not None:
                     raise NativeFailure('protocol-invalid','Native pointer resume is stale or busy')
+                clicked=self.intervention_epoch is not None
+                if clicked and (not click_return or not self.is_current_intervention(expected_epoch,quiet=True)):
+                    raise NativeFailure('protocol-invalid','Native click requires click-aware recovery')
+                if click_return and not clicked:raise NativeFailure('protocol-invalid','Native click recovery is stale')
                 self.resume_pending=(expected_epoch,deadline);self.resume_ack=None
-                self._send('RESUME_'+str(expected_epoch))
+                self.resume_click_return=click_return
+                self._send(('RESUMECLICK_' if click_return else 'RESUME_')+str(expected_epoch))
                 while True:
                     if not self._yield_authorized():raise NativeFailure('session-ended','Native pointer authorization ended')
                     if time.monotonic()>=deadline:raise NativeFailure('helper-fault','Native pointer resume acknowledgement expired')
@@ -645,7 +791,7 @@ class Controller:
             self._notify(error='Native pointer resume failed; desktop must close',reason='protocol-invalid')
             raise
         finally:
-            with self.yield_condition:self.resume_pending=None;self.yield_condition.notify_all()
+            with self.yield_condition:self.resume_pending=None;self.resume_click_return=False;self.yield_condition.notify_all()
 
     def _drain_final(self):
         # The authenticated helper may notify then immediately close/exit. Read
@@ -689,7 +835,12 @@ class Controller:
         lease_start=self.helper_ready_at_monotonic or self.armed_at_monotonic
         lease_elapsed=None if lease_start is None else max(0,(self.ended_at_monotonic or time.monotonic())-lease_start)
         return {'active': self.ready and not self.stop.is_set(), 'supported': self.ready,
-                'observer_alive':self.calibration_verified and not self.stop.is_set() and not self.closed,
+                'observer_alive':(self.monitor_armed or self.calibration_verified) and not self.stop.is_set() and not self.closed,
+                'monitor_armed':self.monitor_armed,'startup_verification':self.startup_verification,
+                'readiness_kind':self.readiness_kind,'passive_acknowledged':self.passive_acknowledged,
+                'coverage_verified':self.calibration_verified and (not self.retain_sharing or self.post_arm_verified),
+                'motion_epoch':self.motion_epoch,'auth_wait_supported':self.auth_mode_acknowledged,'auth_waiting':self.auth_waiting,
+                'click_policy':self.click_policy,'click_wait_supported':self.click_mode_acknowledged,'intervention_epoch':self.intervention_epoch,
                 'yielded':self.yielded,'yield_epoch':self.yield_epoch,'quiet_epoch':self.quiet_epoch,
                 'retain_sharing':self.retain_sharing,'pointer_source':self.pointer_source,
                 'post_arm_verified':self.post_arm_verified,'post_arm_state':self.post_arm_state,
@@ -719,7 +870,10 @@ class Controller:
         with self.close_lock:
             self.stop.set()
             self.ready = False
-        with self.yield_condition:self.yield_condition.notify_all()
+        with self.auth_condition:self.auth_condition.notify_all()
+        with self.yield_condition:
+            self.motion_epoch=None;self.intervention_epoch=None
+            self.yield_condition.notify_all()
         self._close_notice()
         # Socket shutdown wakes an independent reader before any join.
         connection = self.connection

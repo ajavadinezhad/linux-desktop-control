@@ -4,13 +4,15 @@ import GLib from 'gi://GLib';
 import St from 'gi://St';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import * as Config from 'resource:///org/gnome/shell/misc/config.js';
 const PATH='/org/codex/DesktopIndicator', IFACE='org.codex.DesktopIndicator';
-const XML=`<node><interface name="${IFACE}"><method name="Bind"><arg type="s" direction="in"/><arg type="b" direction="out"/></method><method name="Update"><arg type="s" direction="in"/><arg type="b" direction="in"/><arg type="b" direction="out"/></method><method name="Unbind"><arg type="s" direction="in"/><arg type="b" direction="out"/></method><method name="GetContext"><arg type="s" direction="in"/><arg type="s" direction="out"/></method><signal name="ContextChanged"><arg type="s"/><arg type="u"/></signal><method name="SetPhysicalGuard"><arg type="s" direction="in"/><arg type="b" direction="in"/><arg type="b" direction="out"/></method><method name="GetDiagnostics"><arg type="s" direction="out"/></method></interface></node>`;
+const XML=`<node><interface name="${IFACE}"><method name="Bind"><arg type="s" direction="in"/><arg type="b" direction="out"/></method><method name="Update"><arg type="s" direction="in"/><arg type="b" direction="in"/><arg type="b" direction="out"/></method><method name="Unbind"><arg type="s" direction="in"/><arg type="b" direction="out"/></method><method name="GetContext"><arg type="s" direction="in"/><arg type="s" direction="out"/></method><signal name="ContextChanged"><arg type="s"/><arg type="u"/></signal><method name="SetPhysicalGuard"><arg type="s" direction="in"/><arg type="b" direction="in"/><arg type="b" direction="out"/></method><method name="GetAuthState"><arg type="s" direction="in"/><arg type="s" direction="out"/></method><method name="GetDiagnostics"><arg type="s" direction="out"/></method></interface></node>`;
 export default class DesktopIndicator extends Extension {
     enable() {
         this._owner=null;this._nonce=null;this._active=false;this._watch=0;this._failed=false;
         this._physicalGuard=false;this._physicalActivity=false;this._physicalFilter=0;
         this._focusEpoch=0;this._windowSignals=[];this._contextStamp='';
+        this._authOriginWindow=null;this._authDialog=null;this._authAttemptId=null;
         this._focusSignal=global.display.connect('notify::focus-window',()=>this._contextChanged(true));
         this._overviewSignals=['showing','hiding'].map(name=>Main.overview.connect(name,()=>this._contextChanged(false,true)));
         this._modeSignal=Main.sessionMode.connect('updated',()=>this._contextChanged(false,true));
@@ -77,11 +79,76 @@ export default class DesktopIndicator extends Extension {
         const width=this._label.get_preferred_width(-1)[1],height=this._label.get_preferred_height(width)[1];
         this._label.set_position(Math.max(m.x,Math.min(x-width/2,m.x+m.width-width)),Math.max(m.y,Math.min(y+26,m.y+m.height-height)));this._label.show();
     }
+    _authCapable(){
+        // GNOME 51 private internals, deliberately version gated. No wrapping,
+        // method invocation, authentication signal or session interaction.
+        try {
+            return typeof Config!=='undefined'&&/^51(?:\.|$)/.test(Config.PACKAGE_VERSION)&&
+                Main.componentManager?._allComponents?.polkitAgent!==undefined&&
+                Object.hasOwn(Main.componentManager._allComponents.polkitAgent,'_currentDialog')&&
+                Array.isArray(Main.modalActorFocusStack)&&
+                typeof Main.sessionMode.isLocked==='boolean'&&typeof Main.sessionMode.isGreeter==='boolean';
+        } catch (_) {return false;}
+    }
+    _authStateData(){
+        const blocked=reason=>({auth_state:'blocked',auth_available:false,reason,action_category:'none',attempt_id:null,origin_window_id:null,dialog_phase:'none',epoch:this._focusEpoch});
+        if(this._failed)return blocked('observer-unavailable');
+        if(Main.sessionMode.isLocked)return blocked('locked');
+        if(Main.sessionMode.isGreeter)return blocked('greeter');
+        if(!this._authCapable())return blocked('auth-observer-unsupported');
+        try {
+            let dialog=Main.componentManager._allComponents.polkitAgent._currentDialog;
+            const stack=Main.modalActorFocusStack;
+            const w=global.display.focus_window;
+            // GNOME clears _currentDialog immediately after close(), before
+            // the closing actor's fade completes. Retain only our trusted actor.
+            if(dialog===null&&this._authDialog){
+                const previous=this._authDialog;
+                if(previous.state===3&&previous.visible===true)dialog=previous;
+                else if(previous.state!==1&&previous.visible!==false)return blocked('modal-mismatch');
+            }
+            if(Main.modalCount===0&&stack.length===0&&dialog===null&&!Main.overview.visible){
+                const origin=w&&w!==this._invalidWindow?String(w.get_stable_sequence()):null;
+                return {auth_state:'none',auth_available:false,reason:'none',action_category:'none',attempt_id:this._authAttemptId,origin_window_id:origin,dialog_phase:'none',epoch:this._focusEpoch};
+            }
+            // Trust the exact GNOME Polkit agent actor, never an action-name
+            // allowlist. This authorizes waiting only: the human alone approves.
+            const category='system-authentication';
+            const sole=Main.modalCount===1&&stack.length===1&&stack[0]?.actor===dialog;
+            const noModal=Main.modalCount===0&&stack.length===0;
+            const phase=dialog?.state===0?'opened':dialog?.state===2?'opening':
+                dialog?.state===3?'closing':dialog?.state===1?'pending':null;
+            if(!dialog)return blocked('polkit-dialog-unavailable');
+            if(!this._authOriginWindow||this._authOriginWindow===this._invalidWindow)return blocked('origin-unavailable');
+            if(w!==null&&w!==this._authOriginWindow)return blocked('origin-changed');
+            if(Main.overview.visible||!phase||
+                ((phase==='opened'||phase==='opening')?(!sole||dialog.visible!==true):!(sole||noModal)))
+                return blocked('modal-mismatch');
+            if(this._authDialog!==dialog){
+                const token=GLib.uuid_string_random().replaceAll('-','');
+                if(!/^[a-f0-9]{32}$/.test(token))return blocked('auth-observer-unavailable');
+                this._authDialog=dialog;this._authAttemptId=token;
+            }
+            const visible=phase==='opened'||phase==='opening';
+            return {auth_state:visible?'visible':'pending',auth_available:true,reason:'auth-prompt',action_category:category,attempt_id:this._authAttemptId,origin_window_id:String(this._authOriginWindow.get_stable_sequence()),dialog_phase:phase,epoch:this._focusEpoch};
+        } catch (_) {return blocked('auth-observer-unavailable');}
+    }
+    GetAuthStateAsync([nonce],invocation){
+        const data=this._authorized(nonce,invocation)?this._authStateData():{auth_state:'blocked',auth_available:false,reason:'unavailable',action_category:'none',attempt_id:null,origin_window_id:null,dialog_phase:'none',epoch:this._focusEpoch};
+        invocation.return_value(new GLib.Variant('(s)',[JSON.stringify(data)]));
+    }
     _contextData(){
+        if(this._failed)return {available:false,epoch:this._focusEpoch,reason:'unavailable'};
+        if(Main.sessionMode.isLocked)return {available:false,epoch:this._focusEpoch,reason:'locked'};
+        if(Main.sessionMode.isGreeter)return {available:false,epoch:this._focusEpoch,reason:'greeter'};
         if(this._physicalActivity)return {available:false,epoch:this._focusEpoch,reason:'device-source-activity'};
-        if(this._failed||Main.sessionMode.isLocked||Main.sessionMode.isGreeter||Main.modalCount>1||(Main.modalCount>0&&!Main.overview.visible))return {available:false,epoch:this._focusEpoch,reason:'system-ui'};
+        if(Main.modalCount>1||(Main.modalCount>0&&!Main.overview.visible)){
+            const auth=this._authStateData();
+            return auth.auth_available?{available:false,epoch:this._focusEpoch,reason:'auth-prompt',auth_available:true,auth_attempt_id:auth.attempt_id,auth_action_category:auth.action_category,auth_origin_window_id:auth.origin_window_id}:{available:false,epoch:this._focusEpoch,reason:'system-ui'};
+        }
         if(Main.overview.visible){const m=Main.layoutManager.primaryMonitor;if(!m)return {available:false,epoch:this._focusEpoch};return {available:true,window_id:'shell-overview',epoch:this._focusEpoch,kind:'overview',rect:[m.x,m.y,m.width,m.height]};}
         const w=global.display.focus_window;if(!w||w===this._invalidWindow)return {available:false,epoch:this._focusEpoch,reason:'no-foreground-window'};
+        this._authOriginWindow=w;
         const r=w.get_frame_rect();return {available:true,window_id:String(w.get_stable_sequence()),epoch:this._focusEpoch,kind:'window',rect:[r.x,r.y,r.width,r.height]};
     }
     _contextChanged(rebind,force=false){
@@ -101,8 +168,8 @@ export default class DesktopIndicator extends Extension {
         if(!this._authorized(nonce,invocation)||this._failed){invocation.return_value(new GLib.Variant('(s)',[JSON.stringify({available:false,reason:'unavailable'})]));return;}
         this._contextChanged(false);const data=this._contextData();if(data.available)data.pointer=global.get_pointer().slice(0,2);invocation.return_value(new GLib.Variant('(s)',[JSON.stringify(data)]));
     }
-    GetDiagnostics(){return JSON.stringify({protocol_version:2,pointer_snapshot:true,physical_activity_candidate:this._physicalCapable(),physical_activity_opt_in:this._physicalGuard,physical_activity_latched:this._physicalActivity,failed:this._failed,active:this._active,visible:this._label.visible,reactive:false,can_focus:false,owner:this._owner,cursor_style:'system_unchanged',text:'Mouse is being controlled by ChatGPT'});}
-    _clear(){this._physicalGuard=false;this._removePhysicalFilter();this._physicalActivity=false;const watch=this._watch;this._watch=0;this._owner=null;this._nonce=null;this._active=false;this._label?.hide();if(watch){try{Gio.bus_unwatch_name(watch);}catch(_){/* Visibility and ownership are already cleared. */}}}
+    GetDiagnostics(){return JSON.stringify({protocol_version:2,pointer_snapshot:true,auth_wait_protocol:this._authCapable()?3:0,auth_origin_binding:'contextual-window-only',physical_activity_candidate:this._physicalCapable(),physical_activity_opt_in:this._physicalGuard,physical_activity_latched:this._physicalActivity,failed:this._failed,active:this._active,visible:this._label.visible,reactive:false,can_focus:false,owner:this._owner,cursor_style:'system_unchanged',text:'Mouse is being controlled by ChatGPT'});}
+    _clear(){this._authOriginWindow=null;this._authDialog=null;this._authAttemptId=null;this._physicalGuard=false;this._removePhysicalFilter();this._physicalActivity=false;const watch=this._watch;this._watch=0;this._owner=null;this._nonce=null;this._active=false;this._label?.hide();if(watch){try{Gio.bus_unwatch_name(watch);}catch(_){/* Visibility and ownership are already cleared. */}}}
     disable(){
         const clean=fn=>{try{fn();}catch(_){}};
         clean(()=>this._clear());

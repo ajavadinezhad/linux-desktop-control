@@ -38,6 +38,9 @@ static int collector_phase;
 static bool armed;
 static bool pointer_yield_mode, pointer_yielded, pointer_quiet;
 static bool pointer_strict_coverage, calibration_pointer_stream;
+static bool click_pause_mode, click_pause_sticky;
+static bool held_admitted_click, held_other_input;
+static unsigned click_notice_epoch;
 static bool touchpad_yield_mode, calibration_touchpad_motion;
 static bool observation_touchpad_motion_after_arm;
 /* Opener-only admission; neither requester nor event payload sets these. */
@@ -54,6 +57,21 @@ enum { CATEGORY_KEYBOARD = 1, CATEGORY_POINTER = 2 };
 /* Filled only by the verified opener, not accepted from the requester. */
 static unsigned device_categories[MAX_DEVICES];
 static bool calibrating, calibrated, calibration_release_pending;
+/* Explicit supervised startup has no challenge credit. Selection is latched
+ * through the session and cannot be converted into challenge ARM authority. */
+static bool passive_selected, passive_pending, passive_tracking, passive_armed;
+static bool passive_release_frame_pending[MAX_DEVICES];
+static long long passive_started_at, passive_tracking_at, passive_deadline, passive_last_activity;
+static unsigned passive_motion_epoch;
+/* Explicit expected-authentication suspension; never input provenance or a
+ * permission-dialog identity. The controller must fence capture beforehand. */
+static bool auth_mode, auth_waiting, auth_ending;
+static unsigned auth_epoch;
+static bool auth_frame_pending[MAX_DEVICES];
+static long long auth_started_at,auth_deadline,auth_last_activity;
+#define AUTH_WAIT_MS 120000
+#define AUTH_END_MS 5000
+#define PASSIVE_SETTLE_MS 5000
 static long long calibration_release_deadline;
 #define CALIBRATION_RELEASE_MS 5000
 static unsigned calibration_seen;
@@ -186,9 +204,30 @@ static int pointer_motion(long long current) {
     if (!pointer_yielded || pointer_quiet) {
         if (++pointer_epoch > POINTER_YIELD_MAX_EPOCH) return -1;
         pointer_yielded = true; pointer_quiet = false;
+        passive_motion_epoch=0;
         if (pointer_token("YIELDED")) return -1;
     }
     pointer_last_motion = current;
+    if(click_pause_sticky&&click_notice_epoch!=pointer_epoch) {
+        if(pointer_token("CLICKED"))return -1;
+        click_notice_epoch=pointer_epoch;
+    }
+    return 0;
+}
+static bool admitted_click(int device,const struct input_event *event) {
+    return device>=0&&device<device_count&&(device_categories[device]&CATEGORY_POINTER)&&
+        event->type==EV_KEY&&(event->code==BTN_LEFT||event->code==BTN_RIGHT||event->code==BTN_MIDDLE)&&
+        (event->value==0||event->value==1);
+}
+static int pointer_click(long long current) {
+    click_pause_sticky=true;
+    return pointer_motion(current);
+}
+static int passive_motion_notice(void) {
+    if(!passive_armed||!pointer_yielded||pointer_quiet||!pointer_epoch)return 0;
+    if(passive_motion_epoch==pointer_epoch)return 0;
+    if(pointer_token("MOTION"))return -1;
+    passive_motion_epoch=pointer_epoch;
     return 0;
 }
 static void touchpad_reset_all(void) {
@@ -201,6 +240,12 @@ static bool touchpad_busy(void) {
     if(!touchpad_yield_mode)return false;
     for(int i=0;i<device_count;i++)if(device_touchpad[i]&&
         (touchpad_snapshot_contact[i]||tp_active(&touchpad_states[i])||tp_incomplete(&touchpad_states[i])))return true;
+    return false;
+}
+static bool touchpad_contact_active(void) {
+    if(!touchpad_yield_mode)return false;
+    for(int i=0;i<device_count;i++)if(device_touchpad[i]&&
+        (touchpad_snapshot_contact[i]||tp_active(&touchpad_states[i])))return true;
     return false;
 }
 /* Drain with a strict bound: an unbounded producer must not starve control. */
@@ -248,24 +293,101 @@ static int drain(int fd) {
                 return -1;
             }
             if (kind == 2) continue; /* Known output feedback: no calibration credit. */
-            if(touchpad_yield_mode&&fd>=4&&fd<4+device_count&&device_touchpad[fd-4]&&(armed||calibrating||calibrated)) {
+            if(armed&&click_pause_mode&&admitted_click(fd-4,&event)) {
+                long long stamp=(long long)event.time.tv_sec*1000+event.time.tv_usec/1000;
+                long long current=now_ms();
+                if(current<0||stamp<arm_time||stamp>current+1000)return -1;
+                if(pointer_click(current))return -1;
+                continue;
+            }
+            if(auth_waiting) {
+                long long current=now_ms();
+                long long stamp=(long long)event.time.tv_sec*1000+event.time.tv_usec/1000;
+                if(current<0||stamp<auth_started_at||stamp>current+1000)return -1;
+                bool pad=touchpad_yield_mode&&fd>=4&&fd<4+device_count&&device_touchpad[fd-4];
+                if(fd<4||fd>=4+device_count)return -1;
+                if(event.type==EV_SYN) {
+                    if(event.code!=SYN_REPORT||event.value!=0)return -1;
+                    auth_frame_pending[fd-4]=false;
+                } else auth_frame_pending[fd-4]=true;
+                if(event.type==EV_KEY&&event.value>=0&&event.value<=2&&
+                   (ordinary_key(event.code)||(event.code>=BTN_MOUSE&&event.code<=BTN_TASK))) {
+                    auth_last_activity=current;continue;
+                }
+                if(pad) {
+                    enum tp_result result=tp_event(&touchpad_states[fd-4],&event,&touchpad_limits[fd-4]);
+                    if(result==TP_UNSUPPORTED)return -1;
+                    if(result==TP_CONTACT||result==TP_MOTION||event.type==EV_KEY)auth_last_activity=current;
+                    continue;
+                }
+                if(event.type==EV_SYN&&event.code==SYN_REPORT&&event.value==0)continue;
+                /* Ordinary keyboard scan metadata is private framing only;
+                 * never export, interpret, or use its value as activity credit. */
+                if(event.type==EV_MSC&&event.code==MSC_SCAN&&fd>=4&&fd<4+device_count&&
+                   (device_categories[fd-4]&CATEGORY_KEYBOARD))continue;
+                if(event.type==EV_KEY&&event.value>=0&&event.value<=2&&
+                   (ordinary_key(event.code)||(event.code>=BTN_MOUSE&&event.code<=BTN_TASK))) {
+                    auth_last_activity=current;continue;
+                }
+                if(event.type==EV_REL&&(event.code==REL_X||event.code==REL_Y||
+                   event.code==REL_WHEEL||event.code==REL_HWHEEL)) {auth_last_activity=current;continue;}
+                return -1;
+            }
+            if(passive_pending) {
+                long long stamp=(long long)event.time.tv_sec*1000+event.time.tv_usec/1000;
+                long long current=now_ms();
+                if(current<0||stamp<0||(passive_tracking&&stamp<passive_tracking_at)||stamp>current+1000){collector_phase=45;return -1;}
+                if(event.type==EV_SYN&&(event.code!=SYN_REPORT||event.value!=0)){collector_phase=51;return -1;}
+                if(!passive_tracking) {
+                    /* Initial authentication release is drained without
+                     * manufacturing a parser contact or motion baseline. */
+                    bool pad=touchpad_yield_mode&&fd>=4&&fd<4+device_count&&device_touchpad[fd-4];
+                    if(event.type==EV_SYN){if(pad)passive_release_frame_pending[fd-4]=false;continue;}
+                    if(pad&&event.type==EV_MSC&&event.code==MSC_TIMESTAMP)continue;
+                    if(pad)passive_release_frame_pending[fd-4]=true;
+                    if(event.type==EV_KEY&&(event.value==0||event.value==1||event.value==2)) {
+                        passive_last_activity=current;continue;
+                    }
+                    if(positional_mouse_motion(fd-4,&event)) {passive_last_activity=current;continue;}
+                    if(pad&&event.type==EV_ABS) {
+                        const struct tp_limits *l=&touchpad_limits[fd-4];
+                        bool axis=(event.code==ABS_X&&event.value>=l->x_min&&event.value<=l->x_max)||
+                            (event.code==ABS_Y&&event.value>=l->y_min&&event.value<=l->y_max)||
+                            (l->mt&&event.code==ABS_MT_POSITION_X&&event.value>=l->x_min&&event.value<=l->x_max)||
+                            (l->mt&&event.code==ABS_MT_POSITION_Y&&event.value>=l->y_min&&event.value<=l->y_max)||
+                            (l->mt&&event.code==ABS_MT_SLOT&&event.value>=l->slot_min&&event.value<=l->slot_max)||
+                            (l->mt&&event.code==ABS_MT_TRACKING_ID&&event.value>=-1&&event.value<=l->tracking_max);
+                        bool metadata=(event.code==ABS_PRESSURE||event.code==ABS_TOOL_WIDTH||
+                            (l->mt&&(event.code==ABS_MT_PRESSURE||event.code==ABS_MT_TOUCH_MAJOR||event.code==ABS_MT_TOUCH_MINOR||
+                                     event.code==ABS_MT_WIDTH_MAJOR||event.code==ABS_MT_WIDTH_MINOR)))&&event.value>=0;
+                        if(axis||metadata){if(axis)passive_last_activity=current;continue;}
+                    }
+                    collector_phase=51;return -1;
+                }
+            }
+            if(touchpad_yield_mode&&fd>=4&&fd<4+device_count&&device_touchpad[fd-4]&&(armed||calibrating||calibrated||passive_pending)) {
                 long long current=now_ms();
                 long long stamp=(long long)event.time.tv_sec*1000+event.time.tv_usec/1000;
                 if(current<0||stamp>current+1000||(armed&&stamp<arm_time)) {collector_phase=45;return -1;}
                 if(calibrated&&!armed){collector_phase=46;return -1;}
                 /* Pre-challenge records may not establish a new baseline. */
                 if(calibrating&&(calibration_reset_pending||stamp<=calibration_time))continue;
+                bool was_active=tp_active(&touchpad_states[fd-4]);
                 enum tp_result result=tp_event(&touchpad_states[fd-4],&event,&touchpad_limits[fd-4]);
                 if(result==TP_UNSUPPORTED){collector_phase=50;return -1;}
                 if(armed) {
                     if(result==TP_MOTION)observation_touchpad_motion_after_arm=true;
                     if((result==TP_CONTACT||result==TP_MOTION)&&pointer_motion(current))return -1;
+                    if(result==TP_MOTION&&passive_motion_notice())return -1;
                 } else if(calibrating) {
                     if(result==TP_MOTION)calibration_touchpad_motion=calibration_pointer_stream=true;
                     /* Any actual contact/frame activity refreshes quiet, but
                      * metadata-only clock records supply neither credit nor busy. */
-                    if(event.type!=EV_MSC)calibration_note_kind(
+                    if(result==TP_CONTACT||result==TP_MOTION||(was_active&&!tp_active(&touchpad_states[fd-4])))calibration_note_kind(
                         result==TP_MOTION?CATEGORY_POINTER:0,current,calibration_event_kind(&event));
+                } else if(passive_pending&&(result==TP_CONTACT||result==TP_MOTION||
+                           (was_active&&!tp_active(&touchpad_states[fd-4])))) {
+                    passive_last_activity=current;
                 }
                 continue;
             }
@@ -276,12 +398,18 @@ static int drain(int fd) {
                     if (positional_mouse_motion(fd - 4, &event)) observation_relative_after_arm = true;
                     if (pointer_yield_mode && !touchpad_yield_mode && positional_mouse_motion(fd - 4, &event)) {
                         if (pointer_motion(now_ms())) return -1;
+                        if(passive_motion_notice())return -1;
                         continue;
                     }
                     stream_activity_message = activity_message(&event);
                     return 1;
                 }
                 if (calibrated) { collector_phase = 46; return -1; }
+                if(passive_pending) {
+                    if((event.type==EV_KEY&&(event.value==0||event.value==1||event.value==2))||
+                       positional_mouse_motion(fd-4,&event)) {passive_last_activity=now_ms();continue;}
+                    collector_phase=51;return -1;
+                }
                 if (calibrating) {
                     long long stamp = (long long)event.time.tv_sec * 1000 + event.time.tv_usec / 1000;
                     long long current = now_ms();
@@ -305,6 +433,7 @@ static int drain(int fd) {
  * It can miss a complete press/release between polls and keyless motion. */
 static int held_state(void) {
     bool held = false;
+    held_admitted_click=held_other_input=false;
     for (int i = 0; i < device_count; ++i) {
         unsigned char keys[(KEY_MAX + 8) / 8] = {0};
         /* EVIOCGKEY flushes this client's queued EV_KEY. Never query the
@@ -318,6 +447,8 @@ static int held_state(void) {
                 contact=true;touch|=code==BTN_TOUCH;finger|=code==BTN_TOOL_FINGER;continue;
             }
             any = true;
+            if((device_categories[i]&CATEGORY_POINTER)&&(code==BTN_LEFT||code==BTN_RIGHT||code==BTN_MIDDLE))held_admitted_click=true;
+            else held_other_input=true;
             if (ordinary_key(code)) categories |= device_categories[i] & CATEGORY_KEYBOARD;
             if (code >= BTN_MISC) categories |= device_categories[i] & CATEGORY_POINTER;
         }
@@ -338,6 +469,123 @@ static int held_state(void) {
         calibration_diag.held_seen |= held;
     }
     return held ? 1 : 0;
+}
+static int held_intervention(void) {
+    if(click_pause_mode&&held_admitted_click&&!held_other_input)
+        return pointer_click(now_ms());
+    return 1; /* Keyboard, unadmitted/other buttons remain terminal. */
+}
+static int passive_tick(long long current) {
+    if(!passive_pending)return 0;
+    int expired=expiry_phase(current,heartbeat,session_time);
+    if(expired){collector_phase=expired;return -1;}
+    if(current<passive_started_at||current>=passive_deadline){collector_phase=52;return -1;}
+    for(int i=0;i<device_count;i++)if(drain(4+i))return -1;
+    int held=held_state();
+    if(held<0)return -1;
+    long long checked=now_ms();expired=expiry_phase(checked,heartbeat,session_time);
+    if(expired){collector_phase=expired;return -1;}
+    if(checked<current||checked>=passive_deadline){collector_phase=52;return -1;}
+    current=checked;
+    if(held||touchpad_contact_active()){passive_last_activity=current;return 0;}
+    if(touchpad_busy())return 0;
+    for(int i=0;i<device_count;i++)if(passive_release_frame_pending[i])return 0;
+    struct pollfd boundary[MAX_DEVICES+2];
+    for(int i=0;i<device_count+2;i++)boundary[i]=(struct pollfd){4+i,POLLIN,0};
+    int pending=poll(boundary,device_count+2,0);
+    if(pending<0)return -1;
+    if(boundary[device_count].revents||boundary[device_count+1].revents)return -1;
+    if(pending)return 0;
+#ifdef LDC_NATIVE_WATCH
+    if(!session_watch_ok())return -1;
+#endif
+    checked=now_ms();expired=expiry_phase(checked,heartbeat,session_time);
+    if(expired){collector_phase=expired;return -1;}
+    if(checked<current||checked>=passive_deadline){collector_phase=52;return -1;}
+    current=checked;
+    if(!passive_tracking) {
+        /* A clean released boundary, never a saved calibration result. */
+        touchpad_reset_all();passive_tracking=true;passive_tracking_at=passive_last_activity=current;
+        return 0;
+    }
+    if(current<passive_last_activity)return -1;
+    if(current-passive_last_activity<CALIBRATION_QUIET_MS)return 0;
+    /* Recheck physical/session state after potentially blocking queries. */
+    held=held_state();
+    if(held<0)return -1;
+    checked=now_ms();expired=expiry_phase(checked,heartbeat,session_time);
+    if(expired){collector_phase=expired;return -1;}
+    if(checked<current||checked>=passive_deadline){collector_phase=52;return -1;}
+    current=checked;
+    if(held||touchpad_contact_active()){passive_last_activity=current;return 0;}
+    if(touchpad_busy())return 0;
+    pending=poll(boundary,device_count+2,0);
+    if(pending<0||boundary[device_count].revents||boundary[device_count+1].revents)return -1;
+    if(pending)return 0;
+#ifdef LDC_NATIVE_WATCH
+    if(!session_watch_ok())return -1;
+#endif
+    pending=poll(boundary,device_count+2,0);
+    if(pending<0||boundary[device_count].revents||boundary[device_count+1].revents)return -1;
+    if(pending)return 0;
+    long long ready=now_ms();expired=expiry_phase(ready,heartbeat,session_time);
+    if(expired){collector_phase=expired;return -1;}
+    if(ready<current||ready>=passive_deadline){collector_phase=52;return -1;}
+    passive_pending=false;passive_armed=true;armed=true;arm_time=ready;
+    return send(CONTROL,"PASSIVE_ARMED\n",14,MSG_NOSIGNAL|MSG_DONTWAIT)==14?0:-1;
+}
+static int auth_reply(const char *prefix) {
+    char response[32];int n=snprintf(response,sizeof response,"%s_%u%s\n",prefix,auth_epoch,!strcmp(prefix,"AUTHWAIT")?"_OK":"");
+    return n>0&&(size_t)n<sizeof response&&send(CONTROL,response,(size_t)n,MSG_NOSIGNAL|MSG_DONTWAIT)==n?0:-1;
+}
+static int auth_tick(long long current) {
+    if(!auth_waiting)return 0;
+    int expired=expiry_phase(current,heartbeat,session_time);
+    if(expired){collector_phase=expired;return -1;}
+    if(current<auth_started_at||current>=auth_deadline)return -1;
+    for(int i=0;i<device_count;i++)if(drain(4+i))return -1;
+    int held=held_state();if(held<0)return -1;
+    long long checked=now_ms();expired=expiry_phase(checked,heartbeat,session_time);
+    if(expired){collector_phase=expired;return -1;}
+    if(checked<current||checked>=auth_deadline)return -1;
+    if(held||touchpad_contact_active()){auth_last_activity=checked;return 0;}
+    if(touchpad_busy())return 0;
+    for(int i=0;i<device_count;i++)if(auth_frame_pending[i])return 0;
+    if(!auth_ending||checked-auth_last_activity<CALIBRATION_QUIET_MS)return 0;
+    struct pollfd boundary[MAX_DEVICES+2];
+    for(int i=0;i<device_count+2;i++)boundary[i]=(struct pollfd){4+i,POLLIN,0};
+    int pending=poll(boundary,device_count+2,0);
+    if(pending<0||boundary[device_count].revents||boundary[device_count+1].revents)return -1;
+    if(pending)return 0;
+#ifdef LDC_NATIVE_WATCH
+    if(!session_watch_ok())return -1;
+#endif
+    held=held_state();if(held<0)return -1;
+    if(held||touchpad_contact_active()){auth_last_activity=now_ms();return 0;}
+    if(touchpad_busy())return 0;
+    pending=poll(boundary,device_count+2,0);
+    if(pending<0||boundary[device_count].revents||boundary[device_count+1].revents)return -1;
+    if(pending)return 0;
+#ifdef LDC_NATIVE_WATCH
+    if(!session_watch_ok())return -1;
+#endif
+    pending=poll(boundary,device_count+2,0);
+    if(pending<0||boundary[device_count].revents||boundary[device_count+1].revents)return -1;
+    if(pending)return 0;
+    long long ready=now_ms();expired=expiry_phase(ready,heartbeat,session_time);
+    if(expired){collector_phase=expired;return -1;}
+    if(ready<checked||ready>=auth_deadline)return -1;
+    auth_waiting=auth_ending=false;armed=true;arm_time=ready;
+    pointer_yielded=pointer_quiet=false;passive_motion_epoch=0;
+    return auth_reply("AUTHREADY");
+}
+static unsigned auth_parse_epoch(const char *digits) {
+    unsigned value=0;if(!*digits||*digits=='0')return 0;
+    for(const char *p=digits;*p;p++) {
+        if(*p<'0'||*p>'9'||value>64)return 0;
+        value=value*10+(unsigned)(*p-'0');
+    }
+    return value>=1&&value<=64?value:0;
 }
 static int calibration_tick(long long current) {
     if (!calibrating) return 0;
@@ -444,14 +692,23 @@ static int pointer_boundary(void) {
 #ifdef LDC_NATIVE_WATCH
     if (!session_watch_ok()) return -1;
 #endif
+    /* The session query can block while new input/topology/owner events
+     * arrive. Click-aware resume requires a final clean queue boundary. */
+    if(click_pause_mode&&poll(boundary,device_count+2,0)!=0)return -1;
     return 0;
 }
 static int pointer_yield_tick(long long current) {
     if (!pointer_yielded || pointer_quiet) return 0;
     if (current < pointer_last_motion) return -1;
     if (current - pointer_last_motion < POINTER_QUIET_MS) return 0;
-    /* A busy source is not proof of quiet. Main loop drains it first. */
-    if (held_state() != 0) return -1;
+    /* Held admitted clicks keep the opted-in pause busy. Other held input
+     * remains terminal, including a simultaneous keyboard key. */
+    int held=held_state();
+    if(held<0)return -1;
+    if(held>0) {
+        if(click_pause_mode&&held_admitted_click&&!held_other_input)return pointer_click(now_ms());
+        return -1;
+    }
     if(touchpad_busy())return 0;
     struct pollfd boundary[MAX_DEVICES + 2];
     for (int i = 0; i < device_count + 2; ++i)
@@ -462,6 +719,12 @@ static int pointer_yield_tick(long long current) {
 #ifdef LDC_NATIVE_WATCH
     if (!session_watch_ok()) return -1;
 #endif
+    if(click_pause_mode) {
+        long long checked=now_ms();
+        int expired=expiry_phase(checked,heartbeat,session_time);
+        if(expired){collector_phase=expired;return -1;}
+        if(checked<current)return -1;
+    }
     pointer_quiet = true;
     return pointer_token("QUIET");
 }
@@ -469,8 +732,36 @@ static int command(const char *line) {
     long long current = now_ms();
     if (current < 0) return -1;
     if (!strcmp(line, "CLOSE")) return 2;
+    if(!strcmp(line,"CLICKPAUSE1")) {
+        if(click_pause_mode||!pointer_yield_mode||!pointer_strict_coverage||armed||calibrating||calibrated||
+           calibration_release_pending||passive_selected||auth_waiting||expiry_phase(current,heartbeat,session_time))return -1;
+        click_pause_mode=true;
+        return send(CONTROL,"CLICKPAUSE1_OK\n",15,MSG_NOSIGNAL|MSG_DONTWAIT)==15?0:-1;
+    }
+    if(!strcmp(line,"AUTHMODE1")) {
+        if(auth_mode||armed||calibrating||calibrated||calibration_release_pending||passive_selected||expiry_phase(current,heartbeat,session_time))return -1;
+        auth_mode=true;
+        return send(CONTROL,"AUTHMODE1_OK\n",13,MSG_NOSIGNAL|MSG_DONTWAIT)==13?0:-1;
+    }
+    if(!strncmp(line,"AUTHWAIT_",9)) {
+        unsigned epoch=auth_parse_epoch(line+9);
+        if(!auth_mode||!armed||auth_waiting||pointer_yielded||epoch!=auth_epoch+1||!epoch||expiry_phase(current,heartbeat,session_time))return -1;
+        auth_epoch=epoch;auth_waiting=true;auth_ending=false;armed=false;
+        auth_started_at=auth_last_activity=current;auth_deadline=current+AUTH_WAIT_MS;
+        touchpad_reset_all();memset(auth_frame_pending,0,sizeof auth_frame_pending);passive_motion_epoch=0;
+        return auth_reply("AUTHWAIT");
+    }
+    if(!strncmp(line,"AUTHEND_",8)) {
+        unsigned epoch=auth_parse_epoch(line+8);
+        if(!auth_mode||!auth_waiting||auth_ending||!epoch||epoch!=auth_epoch||expiry_phase(current,heartbeat,session_time)||current>=auth_deadline)return -1;
+        auth_ending=true;
+        if(current+AUTH_END_MS<auth_deadline)auth_deadline=current+AUTH_END_MS;
+        auth_last_activity=current;
+        return 0;
+    }
+    if(auth_waiting&&strcmp(line,"HB"))return -1;
     if (!strncmp(line, "LEASE_", 6)) {
-        if (lease_negotiated || pointer_yield_mode || armed || calibrating || calibrated || calibration_release_pending ||
+        if (lease_negotiated || pointer_yield_mode || armed || calibrating || calibrated || calibration_release_pending || passive_selected ||
             expiry_phase(current, heartbeat, session_time)) return -1;
         const char *digits = line + 6;
         if (strlen(digits) != 3 || digits[0] < '1' || digits[0] > '6' ||
@@ -486,7 +777,7 @@ static int command(const char *line) {
         return send(CONTROL,reply,(size_t)length,MSG_NOSIGNAL | MSG_DONTWAIT)==length ? 0 : -1;
     }
     if (!strcmp(line, "MODEYIELD") || !strcmp(line, "MODEYIELD2") || !strcmp(line,"MODEYIELD3")) {
-        if (pointer_yield_mode || armed || calibrating || calibrated || calibration_release_pending) return -1;
+        if (pointer_yield_mode || armed || calibrating || calibrated || calibration_release_pending || passive_selected) return -1;
         bool want_touchpad=!strcmp(line,"MODEYIELD3");
         if(want_touchpad) {
             if(expiry_phase(current,heartbeat,session_time))return -1;
@@ -502,8 +793,10 @@ static int command(const char *line) {
         size_t length = strlen(reply);
         return send(CONTROL,reply,length,MSG_NOSIGNAL | MSG_DONTWAIT) == (ssize_t)length ? 0 : -1;
     }
-    if (!strncmp(line, "RESUME_", 7)) {
-        const char *epoch = line + 7; unsigned value = 0;
+    bool click_resume=!strncmp(line,"RESUMECLICK_",12);
+    if (!strncmp(line, "RESUME_", 7)||click_resume) {
+        const char *epoch = line + (click_resume?12:7); unsigned value = 0;
+        if(click_resume?(!click_pause_mode||!click_pause_sticky):click_pause_sticky)return -1;
         if (!*epoch || *epoch == '0') return -1;
         for (const char *p = epoch; *p; ++p) {
             if (*p < '0' || *p > '9' || value > POINTER_YIELD_MAX_EPOCH) return -1;
@@ -517,6 +810,8 @@ static int command(const char *line) {
         long long resumed_at = now_ms();
         if (expiry_phase(resumed_at, heartbeat, session_time)) return -1;
         pointer_yielded = pointer_quiet = false;
+        click_pause_sticky=false;click_notice_epoch=0;
+        passive_motion_epoch=0;
         arm_time = resumed_at;
         return pointer_token("ARMED");
     }
@@ -545,14 +840,24 @@ static int command(const char *line) {
         return 3; /* terminal report already closed every source descriptor */
     }
     if (!strcmp(line, "CALIBRATE")) {
-        if (armed || calibrating || calibrated || calibration_release_pending) return -1;
+        if (armed || calibrating || calibrated || calibration_release_pending || passive_selected) return -1;
         calibration_release_pending = true;
         calibration_release_deadline = current + CALIBRATION_RELEASE_MS;
         return calibration_release_tick(current);
 
     }
+    if(!strcmp(line,"ARM_PASSIVE")) {
+        if(passive_selected||armed||calibrating||calibrated||calibration_release_pending||calibration_reset_pending||
+           !pointer_yield_mode||!pointer_strict_coverage||expiry_phase(current,heartbeat,session_time))return -1;
+        passive_selected=passive_pending=true;passive_tracking=false;passive_armed=false;
+        passive_tracking_at=0;
+        passive_started_at=passive_last_activity=current;passive_deadline=current+PASSIVE_SETTLE_MS;
+        memset(passive_release_frame_pending,0,sizeof passive_release_frame_pending);
+        passive_motion_epoch=0;
+        return passive_tick(current);
+    }
     if (!strcmp(line, "ARM")) {
-        if (armed || calibrating || calibration_release_pending || calibration_reset_pending || !calibrated ||
+        if (passive_selected || armed || calibrating || calibration_release_pending || calibration_reset_pending || !calibrated ||
             (pointer_strict_coverage && !calibration_pointer_stream)) return -1;
         for (int i = 0; i < device_count; ++i) if (calibration_resync[i]) return -1;
 #ifdef LDC_NATIVE_WATCH
@@ -686,11 +991,17 @@ int main(int argc, char **argv) {
         collector_phase = 30;
         if (calibration_release_tick(current)) return fail();
         if (calibration_tick(current)) return fail();
+        if(passive_tick(current))return fail();
+        if(auth_tick(current))return fail();
         if (armed) {
             collector_phase = 31;
             int held = held_state();
             if (held < 0) return fail();
-            if (held > 0) return report("ACTIVITY_HELD\n") ? 1 : 0;
+            if (held > 0) {
+                int intervention=held_intervention();
+                if(intervention<0)return fail();
+                if(intervention>0)return report("ACTIVITY_HELD\n") ? 1 : 0;
+            }
         }
         collector_phase = 22;
         int ready = poll(fds, poll_count, 20);
@@ -707,7 +1018,11 @@ int main(int argc, char **argv) {
             collector_phase = 31;
             int held = held_state();
             if (held < 0) return fail();
-            if (held > 0) return report("ACTIVITY_HELD\n") ? 1 : 0;
+            if (held > 0) {
+                int intervention=held_intervention();
+                if(intervention<0)return fail();
+                if(intervention>0)return report("ACTIVITY_HELD\n") ? 1 : 0;
+            }
         }
         /* Source activity takes priority over new control commands. */
         for (int i = 1; i <= device_count; ++i) {
@@ -722,6 +1037,8 @@ int main(int argc, char **argv) {
         collector_phase = 30;
         if (calibration_release_tick(now_ms())) return fail();
         if (calibration_tick(now_ms())) return fail();
+        if(passive_tick(now_ms()))return fail();
+        if(auth_tick(now_ms()))return fail();
         if (pointer_yield_tick(now_ms())) return fail();
         collector_phase = 29;
         if (fds[0].revents & (POLLERR | POLLHUP | POLLNVAL)) return fail();

@@ -2,7 +2,17 @@
 
 **Preview, GNOME-only:** currently targets GNOME Shell 51 on Wayland. Other platforms are planned and are not yet supported.
 
-Current installed update: plugin **0.8.19**, helper **0.8.7** unchanged. The drawing-only expanded batch and pacing skill pass **463 Python tests**, independent review, and seven-tool loading. All14 installed plugin files match source; read-only runtime verification confirms matching sources, closed sharing and zero held input. A recorded larger-batch trial completed and saved a bear, using actual groups of8–10 strokes before capture. Drawing-to-save took about207seconds; raw recording passed full decode. This is not a controlled speed comparison. See [performance](PERFORMANCE.md).
+Current update: plugin **0.8.26**, native helper **0.8.10**, GNOME authentication observer protocol **3**. The frozen build passed **565 controller/recorder tests**, the seven-tool loader check, and independent review. The helper's latest separate run passed **51 native checks**. Installed plugin files match the reviewed source.
+
+New opt-in behavior includes supervised startup without manual calibration, ordinary click recovery, trusted human-only password waiting, and bounded recovery through ordinary window changes. Recovery cancels pending input and requires a fresh inspected screen; it never replays interrupted work. Passive startup honestly reports input coverage as unverified. Stop, revoked consent, protected screens, faults, and the original session deadline remain terminal.
+
+Scoped live checks on this machine confirmed a package-install password wait and an LMMS tempo-dialog recovery without closing sharing. A later recorded LMMS take created and saved a short piano/cello/drum sketch and exported a WAV. This does not establish universal application or device support. The recorder readiness check verifies a live recording and advancing output with explicit system audio; operators must run it before creative edits and after recovery.
+
+See [startup](PASSIVE_STARTUP.md), [click recovery](CLICK_RETURN.md), [permission waiting](PERMISSION_WAIT.md), and [recording workflow](../demo/README.md). The existing privacy-edited bear demo remains unchanged. Music recordings are local and are not published here.
+
+### Earlier drawing checkpoint
+
+Plugin **0.8.19** passed **463 Python tests** and a scoped recorded bear trial with groups of 8–10 strokes per capture. Drawing through saving took approximately 207 seconds; this was not a controlled speed comparison. See [performance](PERFORMANCE.md).
 
 ### Earlier performance checkpoint
 
