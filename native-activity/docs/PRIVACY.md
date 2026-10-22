@@ -33,7 +33,7 @@ does not retain a root bus connection. Session changes and loss of verification
 fault conservatively. Monitored device-topology changes also fault.
 
 HB/ALIVE exchanges occur every 0.2 seconds, with a one-second deadline. The
-absolute selected lease (120 seconds by default, at most 600 chosen before calibration) is not extended by heartbeats. Channel loss, requester
+absolute selected lease (120 seconds by default, at most 1200 chosen before calibration) is not extended by heartbeats. Channel loss, requester
 death, expiry, activity, or fault ends monitoring and closes descriptors. The
 backend must close its channel whenever sharing ends. The helper does not
 independently attest portal ownership; channel lifetime, pidfd, and lease provide

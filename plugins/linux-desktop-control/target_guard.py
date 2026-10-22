@@ -34,9 +34,10 @@ class AtspiTarget:
             s=self.states(node)
             if s.contains(A.DEFUNCT) or not s.contains(A.VISIBLE) or not s.contains(A.SHOWING):
                 raise TargetUnavailable('Observed target vanished or is hidden; inspect a new observation before input')
-        if self.call(self.node.get_role)==self.api.Role.PASSWORD_TEXT or not self.states(self.node).contains(A.EDITABLE):
+        role=self.call(self.node.get_role)
+        if role==self.api.Role.PASSWORD_TEXT or not self.states(self.node).contains(A.EDITABLE):
             raise TargetUnavailable('Target became protected or noneditable; input refused')
-        if self.call(self.node.get_role).value_nick!=self.role:raise TargetUnavailable('Target role changed')
+        if role.value_nick!=self.role:raise TargetUnavailable('Target role changed')
         if (self.node.app.bus_name,self.node.path,self.window.path,self.call(self.node.get_process_id))!=self.identity:
             raise TargetUnavailable('Target identity changed; inspect again')
         if self.rect(self.window)!=self.window_bounds or self.rect(self.node)!=self.bounds:

@@ -142,7 +142,7 @@ class FocusTests(unittest.TestCase):
         class Sample:
             def __init__(self,pts):self.buffer=Buffer(pts)
             def get_buffer(self):return self.buffer
-        samples=[Sample(100*m.Gst.MSECOND),Sample(349*m.Gst.MSECOND),Sample(360*m.Gst.MSECOND)]
+        samples=[Sample(100*m.Gst.MSECOND),Sample(199*m.Gst.MSECOND),Sample(210*m.Gst.MSECOND)]
         class Clock:
             def get_time(self):return 0
         class Pipeline:
@@ -153,7 +153,7 @@ class FocusTests(unittest.TestCase):
         d.pipeline=Pipeline();d.sink=Sink()
         self.assertEqual(d.capture(),b'PNG')
         self.assertFalse(samples)
-        self.assertEqual(d.capture_info['settling_ms'],350)
+        self.assertEqual(d.capture_info['settling_ms'],200)
 
 
 

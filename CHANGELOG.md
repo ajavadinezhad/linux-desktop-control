@@ -2,6 +2,18 @@
 
 Current status: see [release status](docs/RELEASE_STATUS.md). Older entries below are checkpoint records.
 
+## 0.8.36 — faster input checks and twenty-minute sessions
+
+Remove a redundant 100ms click wait, consolidate fresh pointer and foreground queries, avoid duplicate role queries, and simplify active skill guidance. Explicit initial sessions now support up to 1200 seconds with native helper 0.8.17; recording remains capped at 900 seconds. All 625 controller/recorder tests, 83 native checks, and tool loading pass. Installed operation and 1200-second startup were verified; a controlled overall speed comparison remains pending.
+
+## 0.8.35 — skip cosmetic click and scroll approaches
+
+Routine clicks and positioned scrolls move directly to their destination instead of animating a200ms approach. Arrival still requires two compositor observations, followed by an independent pre-effect endpoint check. Explicit moves and drags retain their pacing; cancellation, takeover, mapping, and capture checks remain intact. Overall live speed has not been measured.
+
+## 0.8.34 — faster routine capture and direct operation
+
+Reduce the routine fresh-frame settling fence from350ms to200ms while preserving cancellation, context, mapping and publication checks. Prefer direct live operation and existing bounded batches; delegate live control only on explicit user request. This trims capture overhead, not model deliberation or application latency. Native helper and GNOME observer are unchanged.
+
 ## 0.8.33 — handle verified touchpad tool metadata
 
 - Accept finger tool-type metadata on active verified slots without movement credit.

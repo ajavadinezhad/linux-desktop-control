@@ -56,8 +56,8 @@ class Controller:
                  credentials=peer_credentials, startup_timeout=60, notice=None,
                  retain_sharing=False, on_yield=None, on_quiet=None, session_seconds=120, pointer_source="mouse", startup_verification="challenge", allow_permission_wait=False, click_policy='close', on_intervention=None, keyboard_policy='close', multi_contact_policy='close'):
         # Dependency injections are for isolated tests, never model tool arguments.
-        if type(session_seconds) is not int or not 120<=session_seconds<=600:
-            raise ValueError("session_seconds must be an integer from 120 to 600")
+        if type(session_seconds) is not int or not 120<=session_seconds<=1200:
+            raise ValueError("session_seconds must be an integer from 120 to 1200")
         self.requested_session_seconds=session_seconds
         self.session_seconds=120
         self.lease_negotiation_started=False
