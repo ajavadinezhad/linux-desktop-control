@@ -366,7 +366,13 @@ static int drain(int fd) {
                     /* Initial authentication release is drained without
                      * manufacturing a parser contact or motion baseline. */
                     bool pad=touchpad_yield_mode&&fd>=4&&fd<4+device_count&&device_touchpad[fd-4];
-                    if(event.type==EV_SYN){if(pad)passive_release_frame_pending[fd-4]=false;continue;}
+                    if(event.type==EV_SYN){passive_release_frame_pending[fd-4]=false;continue;}
+                    /* Scan framing is not activity credit, but its unfinished
+                     * keyboard frame must block the released boundary. */
+                    if(!pad&&event.type==EV_MSC&&event.code==MSC_SCAN&&
+                       (device_categories[fd-4]&CATEGORY_KEYBOARD)) {
+                        passive_release_frame_pending[fd-4]=true;continue;
+                    }
                     if(pad&&event.type==EV_MSC&&event.code==MSC_TIMESTAMP)continue;
                     if(pad)passive_release_frame_pending[fd-4]=true;
                     if(event.type==EV_KEY&&(event.value==0||event.value==1||event.value==2)) {
@@ -381,10 +387,12 @@ static int drain(int fd) {
                             (l->mt&&event.code==ABS_MT_POSITION_Y&&event.value>=l->y_min&&event.value<=l->y_max)||
                             (l->mt&&event.code==ABS_MT_SLOT&&event.value>=l->slot_min&&event.value<=l->slot_max)||
                             (l->mt&&event.code==ABS_MT_TRACKING_ID&&event.value>=-1&&event.value<=l->tracking_max);
+                        bool tool=l->mt&&event.code==ABS_MT_TOOL_TYPE&&
+                            (event.value==MT_TOOL_FINGER||(multi_contact_mode&&event.value==MT_TOOL_PALM));
                         bool metadata=(event.code==ABS_PRESSURE||event.code==ABS_TOOL_WIDTH||
                             (l->mt&&(event.code==ABS_MT_PRESSURE||event.code==ABS_MT_TOUCH_MAJOR||event.code==ABS_MT_TOUCH_MINOR||
                                      event.code==ABS_MT_WIDTH_MAJOR||event.code==ABS_MT_WIDTH_MINOR)))&&event.value>=0;
-                        if(axis||metadata){if(axis)passive_last_activity=current;continue;}
+                        if(axis||metadata||tool){if(axis)passive_last_activity=current;continue;}
                     }
                     collector_phase=51;return -1;
                 }

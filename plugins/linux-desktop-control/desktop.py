@@ -17,7 +17,7 @@ import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import Gio, GLib, Gst
 
-VERSION = '0.8.36'
+VERSION = '0.8.38'
 CAPTURE_SETTLING_MS = 200
 # Freeze identity at module load: old providers must never report a new disk build.
 _build_spec = importlib.util.spec_from_file_location('_desktop_runtime_build', os.path.join(os.path.dirname(__file__), 'runtime_build.py'))
@@ -445,7 +445,9 @@ class Desktop:
 
     @staticmethod
     def text_cost(value,mode='gnome_unicode'):
-        return sum(.28+.015*len(format(ord(c),'x')) if ord(c)>127 and mode=='gnome_unicode' else .005 for c in value)
+        # Include per-character portal/guard overhead observed in real typing,
+        # not just the explicit 5ms sleep. Reject oversized input before effects.
+        return sum(.28+.015*len(format(ord(c),'x')) if ord(c)>127 and mode=='gnome_unicode' else .02 for c in value)
 
     def type_character(self,char,mode):
         code=ord(char)
@@ -745,11 +747,31 @@ def text(value):
 def image(png):
     return {'type':'image','mimeType':'image/png','data':base64.b64encode(png).decode()}
 
+def action_argument_diagnostic(error):
+    # Only static corrective guidance; never echo unknown key names, text,
+    # accessibility data or other model-controlled values from exceptions.
+    reason=str(error)
+    rules=(
+        ('Position outside selected monitor','invalid-position','Move, click and scroll require finite x and y logical coordinates inside the shared monitor. Move is pointer movement, not a window move; dx/dy are scroll steps only.'),
+        ('Sequence must begin','focus-required','Start a sequence with a visible target click or supported focus-acquiring shortcut.'),
+        ('Input focus may have changed','focus-required','Keys and text require focus:{x,y}, a focused sequence, or a separately inspected editable target identity.'),
+        ('Text exceeds','input-budget-exceeded','Split text into shorter independently observed calls before sending input.'),
+        ('Sequence exceeds','input-budget-exceeded','Split this sequence into shorter independently observed calls before sending input.'),
+        ('Invalid button/count','invalid-click-options','Use button left, right or middle and integer count from 1 to 3.'),
+        ('Wheel steps must','invalid-scroll-steps','Scroll dx/dy must be integers from -50 to 50; x/y identify the observed scroll destination.'),
+        ('Unknown key:','unknown-key','Use individual supported key names in keys, such as ["Ctrl","s"], rather than a combined shortcut string.'),
+        ('Invalid drag','invalid-drag-path','Drag requires path containing 2 to 200 [x,y] logical-coordinate pairs inside the shared monitor.'),
+        ('Unknown action type','unsupported-action','Use move, click, scroll, keys, text, drag, wait or a bounded sequence.'),
+    )
+    for prefix,code,message in rules:
+        if reason.startswith(prefix):return {'code':code,'message':message}
+    return {'code':'invalid-action-arguments','message':'Check the advertised schema for this action type. No input was sent; inspect the returned image and choose a corrected request.'}
+
 ACTION_SCHEMA = {'type':'object','required':['type'],'properties':{
-    'type':{'type':'string','enum':['move','click','scroll','keys','text','drag','wait']},
+    'type':{'type':'string','enum':['move','click','scroll','keys','text','drag','wait'],'description':'move moves the pointer to x/y; click and scroll also require x/y. Window repositioning requires an observed title-bar drag, not move dx/dy.'},
     'unit':{'type':'string','enum':['steps']},
     'text_mode':{'type':'string','enum':['gnome_unicode','keysyms']},
-    'x':{'type':'number'},'y':{'type':'number'},'dx':{'type':'number'},'dy':{'type':'number'},
+    'x':{'type':'number','description':'Required for move/click/scroll: observed destination in logical monitor coordinates, not screenshot pixels.'},'y':{'type':'number','description':'Required for move/click/scroll: observed destination in logical monitor coordinates.'},'dx':{'type':'integer','minimum':-50,'maximum':50,'description':'Scroll only: discrete horizontal wheel steps, not pointer motion.'},'dy':{'type':'integer','minimum':-50,'maximum':50,'description':'Scroll only: discrete vertical wheel steps; positive is down.'},
     'button':{'type':'string','enum':['left','right','middle']},'count':{'type':'integer','minimum':1,'maximum':3},
     'keys':{'type':'array','items':{'type':'string'},'minItems':1,'maxItems':8},
     'text':{'type':'string','maxLength':4000},
@@ -2224,6 +2246,20 @@ class Server:
                 if self.indicator:self.indicator.armed=None
                 self.recovery.finish(getattr(self.backend,'transaction_info',{}),failed=True)
                 progress=getattr(self.backend,'transaction_info',{})
+                if (isinstance(action_error,ValueError) and window is None and not permission and
+                    self.interruption_policy=='retain-sharing' and self.native_activity is not None and
+                    getattr(self.backend,'requires_window_guard',False) and window_record and
+                    args.get('window_observation_id')==window_record['id'] and
+                    window_record['generation']==self.generation and time.monotonic()-window_record['issued']<=60 and
+                    progress.get('input_events_attempted')==0 and progress.get('completed_steps')==0):
+                    # Top-level option validation can fail before binding the
+                    # guard. Re-establish that exact fresh observed context;
+                    # unknown tokens or a changed foreground gain no exception.
+                    def cancel_validation_window():
+                        if self.context_change_policy=='pause-recover':self.foreground_lost(self.indicator)
+                        else:self.backend.cancelled.set()
+                    window=self.make_window_guard(self.indicator,window_record['context'],cancel_validation_window)
+                    window.check()
                 if (isinstance(action_error,ValueError) and not permission and window is not None and
                     self.interruption_policy=='retain-sharing' and self.native_activity is not None and
                     progress.get('input_events_attempted')==0 and progress.get('completed_steps')==0):
@@ -2236,6 +2272,7 @@ class Server:
                     self.backend.mapping_guard();window.check();status=native.status()
                     if self.native_activity is not native or not native._yield_authorized() or status.get('active') is not True or status.get('observer_alive') is not True:raise RuntimeError('Native readiness changed before validation image')
                     metadata=json.loads(content[0]['text']);metadata['action_refused']='Invalid action arguments; zero input was sent. Inspect the fresh image before choosing a corrected action.'
+                    metadata['action_argument_error']=action_argument_diagnostic(action_error)
                     content[0]=text(metadata);return content
                 if permission:
                     if self.permission_wait_reason is None:

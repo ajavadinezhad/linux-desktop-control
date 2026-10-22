@@ -1,5 +1,11 @@
 # Release status
 
+Reliability update **0.8.38** adds fixed corrective action diagnostics, zero-input refusal recovery for malformed top-level options with a fresh matching guarded context, and more conservative text-batch admission. The change does not relax Stop, native health, mapping, foreground or screenshot-publication fences. Broader LM Studio/model reliability is not established by these targeted repairs.
+
+Native helper **0.8.18** repairs initial passive-release handling for keyboard scan framing and supported multitouch tool metadata. Reproduced fixtures reject those records before the patch and admit them afterward without motion credit or incomplete-frame readiness. Live LM Studio acceptance remains pending.
+
+Diagnostic update **0.8.37** adds bounded helper-launch stderr classification after cleanup, returning only fixed categories and never raw error text. All629 controller/recorder tests and seven-tool loading pass. Native helper remains0.8.17. The LM Studio launch failure remains unresolved pending a new diagnostic attempt.
+
 Current installed release: plugin **0.8.36**, native helper **0.8.17**. Fresh pointer/foreground queries and role checks are consolidated, a redundant 100ms click wait is removed, and active skill guidance is shortened. Explicit initial sessions support up to 1200 seconds; defaults and shorter safety timers are unchanged. All625 controller/recorder tests,83 native checks and tool loading pass. Installed source matches the reviewed build and1200-second startup succeeded. Full-duration expiry and controlled overall speed comparison remain unverified. Recording remains capped at900 seconds.
 
 **Preview, GNOME-only:** currently targets GNOME Shell 51 on Wayland. Other platforms are planned and are not yet supported.

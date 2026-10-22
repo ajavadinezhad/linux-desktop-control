@@ -2,6 +2,18 @@
 
 Current status: see [release status](docs/RELEASE_STATUS.md). Older entries below are checkpoint records.
 
+## 0.8.38 — recoverable argument mistakes
+
+Return fixed corrective argument guidance with guarded refusal images. Invalid top-level options may retain sharing only after re-establishing the exact fresh observed context with zero input; stale/unknown contexts and faults retain their existing refusals. Text preflight now includes per-character portal overhead to reject oversized batches before input rather than running into the action deadline. Tool descriptions distinguish pointer destinations, scroll steps and window dragging.
+
+## Native helper 0.8.18 — passive release metadata
+
+The initial release drain now admits keyboard scan framing and supported multitouch finger/palm metadata already handled by later monitoring. Partial frames still block readiness, metadata grants no movement credit, and unsupported tools/records remain terminal. Tests reproduce the omitted records; the precise record from the LM Studio failure was not captured.
+
+## 0.8.37 — private launcher failure diagnostics
+
+Drain helper-launch stderr with bounded transient memory and expose only recognized fixed categories after cleanup. Unknown errors remain unknown; no raw stderr, account names or paths are returned. Authorization, readiness and cleanup checks are unchanged. This improves diagnosis, not the underlying LM Studio startup failure.
+
 ## 0.8.36 — faster input checks and twenty-minute sessions
 
 Remove a redundant 100ms click wait, consolidate fresh pointer and foreground queries, avoid duplicate role queries, and simplify active skill guidance. Explicit initial sessions now support up to 1200 seconds with native helper 0.8.17; recording remains capped at 900 seconds. All 625 controller/recorder tests, 83 native checks, and tool loading pass. Installed operation and 1200-second startup were verified; a controlled overall speed comparison remains pending.
