@@ -1,0 +1,54 @@
+{
+  "scope": "Synthetic images only; no desktop capture or input. Literal recognition checks, not general accuracy.",
+  "date": "2026-10-23",
+  "model": "desktop-observer-local",
+  "cases": [
+    {
+      "fixture": "paused",
+      "seconds": 4.53,
+      "checks": {
+        "result_recognized": true,
+        "state_recognized": true,
+        "app_recognized": true
+      },
+      "description": "The screenshot shows a Calculator test fixture displaying \u201c135\u201d as the current value. At the bottom it indicates \u201cAutomation: paused,\u201d meaning any automated interaction with this instance is currently halted.",
+      "expected_result": "135"
+    },
+    {
+      "fixture": "active",
+      "seconds": 5.71,
+      "checks": {
+        "result_recognized": true,
+        "state_recognized": true,
+        "app_recognized": true
+      },
+      "description": "The screenshot shows a dark-themed calculator interface labeled \u201cCalculator \u2014 test fixture\u201d with the number 42 displayed prominently in the center. Below it, the text \u201cAutomation: active\u201d indicates that automated testing or control is currently enabled for this instance.",
+      "expected_result": "42"
+    },
+    {
+      "fixture": "paused",
+      "seconds": 8.55,
+      "checks": {
+        "result_recognized": true,
+        "state_recognized": true,
+        "app_recognized": true
+      },
+      "description": "The screenshot shows a dark-themed calculator interface labeled \u201cCalculator \u2014 test fixture\u201d with the number 126 displayed prominently in the center. Below it, the status line reads \u201cAutomation: paused,\u201d indicating that any automated interaction is currently halted.",
+      "expected_result": "126"
+    },
+    {
+      "fixture": "active",
+      "seconds": 8.89,
+      "checks": {
+        "result_recognized": true,
+        "state_recognized": true,
+        "app_recognized": true
+      },
+      "description": "The screenshot shows a dark-themed calculator interface labeled \u201cCalculator \u2014 test fixture\u201d with the number 15 displayed prominently in the center. At the bottom, it reads \u201cAutomation: active,\u201d indicating this is likely part of an automated testing environment rather than normal user interaction.",
+      "expected_result": "15"
+    }
+  ],
+  "checks_passed": 12,
+  "checks_total": 12,
+  "adapter_and_observer_tests_passed": 43
+}

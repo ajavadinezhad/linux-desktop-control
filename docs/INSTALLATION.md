@@ -41,7 +41,7 @@ Ordinary control does not require the native activity helper. For physical-input
 
 The default protected startup uses keyboard/pointer calibration. An explicitly selected supervised passive startup skips manual challenges while reporting source coverage as unverified; see [passive startup](PASSIVE_STARTUP.md). Retained-sharing mode adds a mouse-only readiness check before capture. Calibration lasts only while that observer stays alive. Do not cache a pass across new sessions or skip a failed check.
 
-Default sessions last 120 seconds. Native-protected sessions may explicitly choose an initial 120–600-second limit before calibration; pause and heartbeat do not renew it. Automatic cursor return is opt-in and limited to covered relative movement in the same verified context. See [retained sharing](RETAINED_SHARING.md).
+Default sessions last 120 seconds. Native-protected sessions may explicitly choose an initial 120–1200-second limit before calibration; pause and heartbeat do not renew it. Automatic cursor return is opt-in and limited to covered relative movement in the same verified context. See [retained sharing](RETAINED_SHARING.md).
 
 ## Troubleshooting
 
@@ -55,3 +55,13 @@ Default sessions last 120 seconds. Native-protected sessions may explicitly choo
 | Sharing keeps restarting | Invocation or safety faults can still close sessions; a longer lease does not fix those errors |
 
 For validation commands, see [validation](VALIDATION.md). For data handling, see [privacy](PRIVACY.md). Do not delete a registered marketplace used by other projects while troubleshooting.
+
+## Optional read-only local-model adapter
+
+After installing the plugin, you can install the separate adapter without starting sharing:
+
+```sh
+install -Dm755 examples/notification_observer.py "$HOME/.local/share/linux-desktop-control/notification_observer.py"
+```
+
+Run that script with `--runtime` pointing to the reviewed installed `desktop.py` and `--model` naming your loaded local vision model. The default API is loopback-only. Each run still needs personal GNOME consent; it grants no mouse/keyboard actions and does not auto-start on login. See [the adapter contract](CONTINUOUS_OBSERVER.md#read-only-lm-studio-adapter) for bounds and limitations.

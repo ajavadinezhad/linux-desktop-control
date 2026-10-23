@@ -2,6 +2,22 @@
 
 Current status: see [release status](docs/RELEASE_STATUS.md). Older entries below are checkpoint records.
 
+## Adapter reliability and acceptance checkpoint
+
+Add a bounded read-only local-model client, synthetic recognition benchmark and explicit reliability acceptance matrix. Reject invalid frame identity before inference and discard results after observation loss, stream replacement or revision regression. Add notification/buffer stress coverage. Combined regression: 689 tests; seven-tool loading passes. One scoped live Calculator/Pause/resume/cleanup check passed; broad real-app and long-session acceptance remain open.
+
+## 0.8.41 — coalesced observation-change notifications
+
+Add explicit, consent-scoped MCP resource subscriptions and automatic metadata-only change hints, capped at one per second with no frame backlog. Expose the age/revision of the last published observation without claiming the model inspected it. Notices grant no input authority. The seven tools remain unchanged. Host-side automatic model wake is not implemented or claimed; the documented cloud webhook event path is a separate integration.
+
+## 0.8.40 — observation during physical takeover
+
+Add an explicit continuous-observation mode that keeps read-only frames during ordinary physical takeover without resuming input or issuing action tokens. Manual Pause and protected contexts still stop capture. Read-only publication checks bind consent, lease, stream, pause and foreground. Move compositor permission checks outside the frame-buffer lock so Stop remains bounded when a query stalls. Native helper unchanged. Live acceptance remains pending.
+
+## 0.8.39 — opt-in continuous frame observer
+
+Continuously consume the existing consented capture stream through one owner into a bounded latest-frame slot, with content revisions and interruptible change waiting through desktop_observe. Existing screenshot freshness and publication guards still apply. Pause, reconnect and close clear pixels and retire stream identity. The observer core has no compositor or model dependency; GNOME remains the only supported backend. All652 controller tests passed. A200-frame synthetic benchmark measured notification p50 0.014ms and p95 0.024ms, excluding capture and model latency; live acceptance and overall speed improvement remain unverified.
+
 ## 0.8.38 — recoverable argument mistakes
 
 Return fixed corrective argument guidance with guarded refusal images. Invalid top-level options may retain sharing only after re-establishing the exact fresh observed context with zero input; stale/unknown contexts and faults retain their existing refusals. Text preflight now includes per-character portal overhead to reject oversized batches before input rather than running into the action deadline. Tool descriptions distinguish pointer destinations, scroll steps and window dragging.
