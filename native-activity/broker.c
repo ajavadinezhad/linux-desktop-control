@@ -25,7 +25,7 @@
 #define MAX_DEVICES 64
 #define HEARTBEAT_MS 1000
 #define SESSION_BUDGET_MS 120000
-#define SESSION_MAX_MS 600000
+#define SESSION_MAX_MS 1200000
 static long long session_budget_ms = SESSION_BUDGET_MS;
 static bool lease_negotiated;
 #define CALIBRATION_QUIET_MS 1500
@@ -366,7 +366,13 @@ static int drain(int fd) {
                     /* Initial authentication release is drained without
                      * manufacturing a parser contact or motion baseline. */
                     bool pad=touchpad_yield_mode&&fd>=4&&fd<4+device_count&&device_touchpad[fd-4];
-                    if(event.type==EV_SYN){if(pad)passive_release_frame_pending[fd-4]=false;continue;}
+                    if(event.type==EV_SYN){passive_release_frame_pending[fd-4]=false;continue;}
+                    /* Scan framing is not activity credit, but its unfinished
+                     * keyboard frame must block the released boundary. */
+                    if(!pad&&event.type==EV_MSC&&event.code==MSC_SCAN&&
+                       (device_categories[fd-4]&CATEGORY_KEYBOARD)) {
+                        passive_release_frame_pending[fd-4]=true;continue;
+                    }
                     if(pad&&event.type==EV_MSC&&event.code==MSC_TIMESTAMP)continue;
                     if(pad)passive_release_frame_pending[fd-4]=true;
                     if(event.type==EV_KEY&&(event.value==0||event.value==1||event.value==2)) {
@@ -381,10 +387,12 @@ static int drain(int fd) {
                             (l->mt&&event.code==ABS_MT_POSITION_Y&&event.value>=l->y_min&&event.value<=l->y_max)||
                             (l->mt&&event.code==ABS_MT_SLOT&&event.value>=l->slot_min&&event.value<=l->slot_max)||
                             (l->mt&&event.code==ABS_MT_TRACKING_ID&&event.value>=-1&&event.value<=l->tracking_max);
+                        bool tool=l->mt&&event.code==ABS_MT_TOOL_TYPE&&
+                            (event.value==MT_TOOL_FINGER||(multi_contact_mode&&event.value==MT_TOOL_PALM));
                         bool metadata=(event.code==ABS_PRESSURE||event.code==ABS_TOOL_WIDTH||
                             (l->mt&&(event.code==ABS_MT_PRESSURE||event.code==ABS_MT_TOUCH_MAJOR||event.code==ABS_MT_TOUCH_MINOR||
                                      event.code==ABS_MT_WIDTH_MAJOR||event.code==ABS_MT_WIDTH_MINOR)))&&event.value>=0;
-                        if(axis||metadata){if(axis)passive_last_activity=current;continue;}
+                        if(axis||metadata||tool){if(axis)passive_last_activity=current;continue;}
                     }
                     collector_phase=51;return -1;
                 }
@@ -839,9 +847,13 @@ static int command(const char *line) {
         if (lease_negotiated || pointer_yield_mode || armed || calibrating || calibrated || calibration_release_pending || passive_selected ||
             expiry_phase(current, heartbeat, session_time)) return -1;
         const char *digits = line + 6;
-        if (strlen(digits) != 3 || digits[0] < '1' || digits[0] > '6' ||
-            digits[1] < '0' || digits[1] > '9' || digits[2] < '0' || digits[2] > '9') return -1;
-        unsigned seconds = (unsigned)(digits[0]-'0')*100 + (unsigned)(digits[1]-'0')*10 + (unsigned)(digits[2]-'0');
+        size_t digit_count = strlen(digits);
+        if ((digit_count != 3 && digit_count != 4) || digits[0] < '1' || digits[0] > '9') return -1;
+        unsigned seconds = 0;
+        for (size_t i = 0; i < digit_count; ++i) {
+            if (digits[i] < '0' || digits[i] > '9') return -1;
+            seconds = seconds * 10 + (unsigned)(digits[i] - '0');
+        }
         if (seconds < 120 || seconds > SESSION_MAX_MS/1000) return -1;
         char reply[16];
         int length = snprintf(reply,sizeof reply,"LEASE_%u_OK\n",seconds);

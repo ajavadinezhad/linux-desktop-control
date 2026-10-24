@@ -1,0 +1,15 @@
+# Authorization-release settling — installed 0.8.12 / helper 0.8.5
+
+> Version-specific investigation record. Status statements below describe that checkpoint. See [current release status](../RELEASE_STATUS.md) for installed versions and later acceptance.
+
+A synthetic fixture reproduced READY and MODEYIELD2 acknowledgement followed by FAULT/exit146 when CALIBRATE raced with a still-held authorization key/button. This establishes a legitimate startup fragility. It does not identify the unique cause of previous live failures or repair missing mouse-event delivery.
+
+The candidate waits at most five seconds for authorization input to be released and primary queues to be clean before beginning calibration. It emits no CALIBRATING cue, shows no challenge notice and grants no calibration credit during that settling interval. Authorization input is drained without credit. Only a released, clean boundary starts the ordinary fresh keyboard/relative-pointer challenge and its original calibration deadline.
+
+The controller waits at most six seconds for CALIBRATING while maintaining heartbeat, cancellation, owner/session and original lease checks. Startup snapshots may report calibration_state=settling, with capture/input disabled. Settling is not a request to press a key or move the mouse; only the subsequent acknowledged waiting-phase cue permits the calibration instructions. Missing release, timeout, helper/heartbeat failure, cancellation or revoked authority still closes without capture/input.
+
+Strict MODEYIELD2 relative-stream requirements, pre-ARM release/quiet checks and the separate retained post-ARM mouse-only readiness gate remain unchanged. No old authorization credit, synthetic challenge, weaker activation, lease extension, permission change or grab probe is allowed. Default close-policy control semantics remain unchanged; this only bounds the transition into calibration.
+
+This is a startup-race repair, not a demonstrated live event-delivery solution. Mouse delivery and automatic return remain unresolved. Frozen validation passed 419 Python tests in 19.613 seconds and 18 native fixtures in 15.478 seconds, plus seven-tool loader/schema discovery and skill validation. Plugin 0.8.12 and helper 0.8.5 installed successfully, with all 14 reviewed plugin files matching canonical source. Helper package SHA256: `571350f65cf0ab0439cea6657a9f04339f4505980827971edd085d1c6743ddd3`; native binary SHA256: `aee9a02cb46c4b6d341e192c96a2cf53a010bbdd4c542f0a565f72dfd9c1e344`. The package has only the root-owned binary and unchanged policy, with no service or maintainer scripts. No new live sharing trial was performed.
+
+A fresh actual 0.8.12 provider verified build `cd15c911aab846b0e04cbdddd8b845bddd7439211b779bd9dd492ebd58c7b249`, matching disk sources and all seven tools, with the portal closed, zero held input and capture/input disabled. Installed helper 0.8.5 binary and policy hashes match the reviewed package. This read-only verification is not live event-delivery or automatic-return acceptance; no new sharing trial was performed.

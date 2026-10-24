@@ -2,7 +2,7 @@
 
 The owner selected **GPL-3.0-or-later** for original project code and documentation. See [licensing scope](../LICENSING.md) and the full [license](../LICENSE). This replaces the earlier deferred-license plan; it does not impose commercial-use royalties.
 
-Third-party Yaru cursor assets retain the notices in [SOURCE-LICENSE.txt](../cursor-theme/CodexGlow-Yaru-candidate/SOURCE-LICENSE.txt). Their terms are not replaced by the project license. Source and redistribution obligations must be respected when packaging those assets.
+The cursor-glow subsystem and its Yaru-derived assets were removed in 0.8.42. Earlier distributed copies retain their original licensing obligations.
 
 The GNOME extension runs inside GPL-licensed GNOME Shell. Other integrations use separately installed system libraries and services, including PyGObject, GStreamer, PipeWire and libxkbcommon. These dependencies are not relicensed by this project. The Codex executable is neither included nor covered by this license.
 

@@ -10,7 +10,7 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY 
 
 ## Third-party material
 
-The Yaru-derived cursor assets and their preview retain upstream terms and attribution. See [SOURCE-LICENSE.txt](cursor-theme/CodexGlow-Yaru-candidate/SOURCE-LICENSE.txt), which identifies GPL and CC-BY-SA material. The project license does not replace those notices or grant rights in separately installed dependencies.
+The optional Yaru-derived cursor assets were removed with the cursor-glow feature in 0.8.42. They are not included in this release.
 
 GNOME Shell, PyGObject, GStreamer, PipeWire, libxkbcommon and the Codex application are separately installed dependencies. The Codex executable is not distributed here. This project does not claim OpenAI endorsement.
 

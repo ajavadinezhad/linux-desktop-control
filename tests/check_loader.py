@@ -7,7 +7,7 @@ with tempfile.TemporaryDirectory(prefix='desktop-plugin-loader-') as home:
     env=dict(os.environ,CODEX_HOME=home)
     # Materialize paths in a temporary copy, as install.sh does. Never dirty source.
     bundle=pathlib.Path(home)/'bundle'
-    shutil.copytree(ROOT,bundle,ignore=shutil.ignore_patterns('.git','__pycache__','recordings','test-evidence','work','extension-backups'))
+    shutil.copytree(ROOT,bundle,ignore=shutil.ignore_patterns('.git','__pycache__','recordings','test-evidence','work','extension-backups','outputs','release','AGENTS.previous.md'))
     plugin=bundle/'plugins/linux-desktop-control'
     subprocess.run(['/usr/bin/python3',str(bundle/'configure-runtime.py'),str(bundle)],
                    env=env,check=True,capture_output=True,text=True,timeout=5)
@@ -44,14 +44,14 @@ with tempfile.TemporaryDirectory(prefix='desktop-plugin-loader-') as home:
         inventory=rpc(2,'mcpServerStatus/list',{'serverName':'linux_desktop'})
         server=inventory['data'][0]
         expected={'desktop_start','desktop_observe','desktop_action','desktop_status','desktop_close','desktop_pause','desktop_resume'}
-        assert server['serverInfo']['version']=='0.8.34',server['serverInfo']
+        assert server['serverInfo']['version']=='0.8.42',server['serverInfo']
         assert server['toolsError'] is None,server['toolsError']
         assert set(server['tools'])==expected,server['tools']
         assert not server['tools']['desktop_status']['inputSchema']['properties']
         assert 'target_id' in server['tools']['desktop_action']['inputSchema']['properties']
         assert 'window_observation_id' in server['tools']['desktop_action']['inputSchema']['required']
         assert 'focus_transition' in server['tools']['desktop_action']['inputSchema']['properties']
-        assert server['tools']['desktop_start']['inputSchema']['properties']['cursor_glow']['type']=='boolean'
+        assert 'cursor_glow' not in server['tools']['desktop_start']['inputSchema']['properties']
         physical=server['tools']['desktop_start']['inputSchema']['properties']['physical_takeover']
         assert physical['type']=='boolean' and physical['default'] is False,physical
         assert 'administrator' in physical['description'] and 'raw' in physical['description'],physical

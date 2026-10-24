@@ -1,5 +1,7 @@
 # Performance pass — 0.8.17
 
+> The version and installation claims below describe historical checkpoints. Consult [release status](RELEASE_STATUS.md) for the recorded published baseline and remaining checks.
+
 The goal is less waiting between visible actions without removing consent, cancellation, foreground, mapping, endpoint or screenshot checks.
 
 ## Measured offline

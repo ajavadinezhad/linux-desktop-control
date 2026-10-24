@@ -17,7 +17,7 @@ export default class DesktopIndicator extends Extension {
         this._overviewSignals=['showing','hiding'].map(name=>Main.overview.connect(name,()=>this._contextChanged(false,true)));
         this._modeSignal=Main.sessionMode.connect('updated',()=>this._contextChanged(false,true));
         this._contextChanged(true);
-        this._label=new St.Label({text:'Mouse is being controlled by ChatGPT',style_class:'codex-control-indicator',reactive:false,can_focus:false,visible:false});
+        this._label=new St.Label({text:'Desktop sharing active',style_class:'codex-control-indicator',reactive:false,can_focus:false,visible:false});
         // Not tracked as chrome: no reserved workarea or input region.
         Main.uiGroup.add_child(this._label);
         this._export=Gio.DBusExportedObject.wrapJSObject(XML,this);this._export.export(Gio.DBus.session,PATH);
@@ -168,7 +168,7 @@ export default class DesktopIndicator extends Extension {
         if(!this._authorized(nonce,invocation)||this._failed){invocation.return_value(new GLib.Variant('(s)',[JSON.stringify({available:false,reason:'unavailable'})]));return;}
         this._contextChanged(false);const data=this._contextData();if(data.available)data.pointer=global.get_pointer().slice(0,2);invocation.return_value(new GLib.Variant('(s)',[JSON.stringify(data)]));
     }
-    GetDiagnostics(){return JSON.stringify({protocol_version:2,pointer_snapshot:true,auth_wait_protocol:this._authCapable()?3:0,auth_origin_binding:'contextual-window-only',physical_activity_candidate:this._physicalCapable(),physical_activity_opt_in:this._physicalGuard,physical_activity_latched:this._physicalActivity,failed:this._failed,active:this._active,visible:this._label.visible,reactive:false,can_focus:false,owner:this._owner,cursor_style:'system_unchanged',text:'Mouse is being controlled by ChatGPT'});}
+    GetDiagnostics(){return JSON.stringify({protocol_version:2,pointer_snapshot:true,auth_wait_protocol:this._authCapable()?3:0,auth_origin_binding:'contextual-window-only',physical_activity_candidate:this._physicalCapable(),physical_activity_opt_in:this._physicalGuard,physical_activity_latched:this._physicalActivity,failed:this._failed,active:this._active,visible:this._label.visible,reactive:false,can_focus:false,owner:this._owner,cursor_style:'system_unchanged',text:'Desktop sharing active'});}
     _clear(){this._authOriginWindow=null;this._authDialog=null;this._authAttemptId=null;this._physicalGuard=false;this._removePhysicalFilter();this._physicalActivity=false;const watch=this._watch;this._watch=0;this._owner=null;this._nonce=null;this._active=false;this._label?.hide();if(watch){try{Gio.bus_unwatch_name(watch);}catch(_){/* Visibility and ownership are already cleared. */}}}
     disable(){
         const clean=fn=>{try{fn();}catch(_){}};

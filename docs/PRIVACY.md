@@ -10,6 +10,6 @@ The optional native helper needs separate administrator approval. It receives ra
 
 It opens covered devices read-only, drops privileges and applies confinement. It does not grab input or change device ACLs. Device activity is not proof of human identity. See [the native privacy boundary](../native-activity/docs/PRIVACY.md).
 
-Pausing under retained-sharing policy stops backend capture/input while keeping the existing portal consent and monitor alive. Closing, privacy Stop, revocation, lock, faults and expiry end control. The default native budget is 120 seconds, optionally selected up to 600 before calibration; it cannot be renewed during the session.
+Manual Pause stops backend capture and input while keeping the existing portal consent alive. With explicit observation-during-takeover enabled, ordinary physical takeover pauses automated input while allowing guarded read-only observation; no action tokens are issued. Protected UI and authentication waiting still suspend observation. Closing, privacy Stop, revocation, lock, faults and expiry end control. The default native budget is 120 seconds, optionally selected up to 1200 at startup; it cannot be renewed during the session.
 
 Recordings are separate artifacts and require their own consent. Review them before sharing. The published bear edit hides unrelated tab titles; original recordings remain local.

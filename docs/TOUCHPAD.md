@@ -1,5 +1,7 @@
 # Touchpad support candidate
 
+> The version and installation claims below describe historical checkpoints. Consult [release status](RELEASE_STATUS.md) for the recorded published baseline and remaining checks.
+
 Plugin 0.8.18 and helper 0.8.7 are installed. The existing mouse protocol remains unchanged. Touchpad support has passed isolated tests and review plus one scoped live pause/automatic-return check on this setup.
 
 The new startup option selects a touchpad explicitly and requires native takeover monitoring with retained sharing. It negotiates a separate helper protocol and refuses older helpers rather than falling back to mouse coverage.

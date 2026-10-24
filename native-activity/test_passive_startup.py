@@ -41,6 +41,42 @@ def run(body, prefix=PREFIX):
 
 
 class PassiveStartupTests(unittest.TestCase):
+    def test_initial_release_accepts_keyboard_scan_without_motion_credit(self):
+        run(r'''int main(void){
+ setup(0);physical_key=1;assert(command("ARM_PASSIVE")==0);
+ assert(event(EV_MSC,MSC_SCAN,42)==0);physical_key=0;
+ assert(passive_tick(fixture_now)==0);assert(!passive_tracking&&!armed);
+ assert(event(EV_KEY,KEY_LEFTSHIFT,0)==0);
+ assert(event(EV_SYN,SYN_REPORT,0)==0);
+ assert(passive_tick(fixture_now)==0);assert(passive_tracking&&!armed);
+ advance(1500);assert(passive_tick(fixture_now)==0);assert(armed);
+ assert(motion_notices==0);return 0;
+}''')
+
+    def test_initial_release_accepts_only_supported_touchpad_tool_metadata(self):
+        for tool in ('MT_TOOL_FINGER', 'MT_TOOL_PALM'):
+            with self.subTest(tool=tool):
+                run(r'''int main(void){
+ setup(1);multi_contact_mode=true;touchpad_limits[0].mt=true;
+ touchpad_limits[0].slot_max=3;touchpad_limits[0].tracking_max=65535;
+ physical_contact=1;assert(command("ARM_PASSIVE")==0);
+ assert(event(EV_ABS,ABS_MT_TOOL_TYPE,TOOL)==0);
+ physical_contact=0;assert(passive_tick(fixture_now)==0);assert(!passive_tracking);
+ assert(event(EV_SYN,SYN_REPORT,0)==0);assert(passive_tick(fixture_now)==0);
+ assert(passive_tracking&&!armed&&motion_notices==0);return 0;
+}'''.replace('TOOL)', tool+')'))
+
+    def test_initial_release_still_rejects_unrelated_or_invalid_metadata(self):
+        cases = [
+            'setup(0);device_categories[0]=CATEGORY_POINTER;assert(command("ARM_PASSIVE")==0);assert(event(EV_MSC,MSC_SCAN,1)==-1);',
+            'setup(1);assert(command("ARM_PASSIVE")==0);assert(event(EV_ABS,ABS_MT_TOOL_TYPE,MT_TOOL_FINGER)==-1);',
+            'setup(1);touchpad_limits[0].mt=true;touchpad_limits[0].slot_max=3;touchpad_limits[0].tracking_max=65535;assert(command("ARM_PASSIVE")==0);assert(event(EV_ABS,ABS_MT_TOOL_TYPE,MT_TOOL_PALM)==-1);',
+            'setup(1);multi_contact_mode=true;touchpad_limits[0].mt=true;touchpad_limits[0].slot_max=3;touchpad_limits[0].tracking_max=65535;assert(command("ARM_PASSIVE")==0);assert(event(EV_ABS,ABS_MT_TOOL_TYPE,MT_TOOL_PEN)==-1);',
+        ]
+        for case in cases:
+            with self.subTest(case=case):
+                run('int main(void){'+case+'assert(!armed&&motion_notices==0);return 0;}')
+
     def test_delayed_authentication_records_are_discarded_before_tracking_fence(self):
         run(r'''int main(void){
  setup(1);physical_contact=1;assert(command("ARM_PASSIVE")==0);assert(!passive_tracking);

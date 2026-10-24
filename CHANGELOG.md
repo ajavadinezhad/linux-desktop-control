@@ -1,6 +1,46 @@
 # Changes
 
+## 0.8.42 — normal cursor and clearer documentation
+
+Remove the optional cursor-theme service, watchdog, generated assets, installer hook and glow-only tests. Keep the passive GNOME text indicator and all input/takeover checks. The removed `cursor_glow` startup argument is rejected rather than silently enabling legacy behavior. Move eleven version-specific investigation records into `docs/archive`, repair links, and correct the privacy/session and validation guidance. Test and installation results for this local change are recorded separately from historical release counts.
+
 Current status: see [release status](docs/RELEASE_STATUS.md). Older entries below are checkpoint records.
+
+## Adapter reliability and acceptance checkpoint
+
+Add a bounded read-only local-model client, synthetic recognition benchmark and explicit reliability acceptance matrix. Reject invalid frame identity before inference and discard results after observation loss, stream replacement or revision regression. Add notification/buffer stress coverage. Combined regression: 689 tests; seven-tool loading passes. One scoped live Calculator/Pause/resume/cleanup check passed; broad real-app and long-session acceptance remain open.
+
+## 0.8.41 — coalesced observation-change notifications
+
+Add explicit, consent-scoped MCP resource subscriptions and automatic metadata-only change hints, capped at one per second with no frame backlog. Expose the age/revision of the last published observation without claiming the model inspected it. Notices grant no input authority. The seven tools remain unchanged. Host-side automatic model wake is not implemented or claimed; the documented cloud webhook event path is a separate integration.
+
+## 0.8.40 — observation during physical takeover
+
+Add an explicit continuous-observation mode that keeps read-only frames during ordinary physical takeover without resuming input or issuing action tokens. Manual Pause and protected contexts still stop capture. Read-only publication checks bind consent, lease, stream, pause and foreground. Move compositor permission checks outside the frame-buffer lock so Stop remains bounded when a query stalls. Native helper unchanged. Live acceptance remains pending.
+
+## 0.8.39 — opt-in continuous frame observer
+
+Continuously consume the existing consented capture stream through one owner into a bounded latest-frame slot, with content revisions and interruptible change waiting through desktop_observe. Existing screenshot freshness and publication guards still apply. Pause, reconnect and close clear pixels and retire stream identity. The observer core has no compositor or model dependency; GNOME remains the only supported backend. All652 controller tests passed. A200-frame synthetic benchmark measured notification p50 0.014ms and p95 0.024ms, excluding capture and model latency; live acceptance and overall speed improvement remain unverified.
+
+## 0.8.38 — recoverable argument mistakes
+
+Return fixed corrective argument guidance with guarded refusal images. Invalid top-level options may retain sharing only after re-establishing the exact fresh observed context with zero input; stale/unknown contexts and faults retain their existing refusals. Text preflight now includes per-character portal overhead to reject oversized batches before input rather than running into the action deadline. Tool descriptions distinguish pointer destinations, scroll steps and window dragging.
+
+## Native helper 0.8.18 — passive release metadata
+
+The initial release drain now admits keyboard scan framing and supported multitouch finger/palm metadata already handled by later monitoring. Partial frames still block readiness, metadata grants no movement credit, and unsupported tools/records remain terminal. Tests reproduce the omitted records; the precise record from the LM Studio failure was not captured.
+
+## 0.8.37 — private launcher failure diagnostics
+
+Drain helper-launch stderr with bounded transient memory and expose only recognized fixed categories after cleanup. Unknown errors remain unknown; no raw stderr, account names or paths are returned. Authorization, readiness and cleanup checks are unchanged. This improves diagnosis, not the underlying LM Studio startup failure.
+
+## 0.8.36 — faster input checks and twenty-minute sessions
+
+Remove a redundant 100ms click wait, consolidate fresh pointer and foreground queries, avoid duplicate role queries, and simplify active skill guidance. Explicit initial sessions now support up to 1200 seconds with native helper 0.8.17; recording remains capped at 900 seconds. All 625 controller/recorder tests, 83 native checks, and tool loading pass. Installed operation and 1200-second startup were verified; a controlled overall speed comparison remains pending.
+
+## 0.8.35 — skip cosmetic click and scroll approaches
+
+Routine clicks and positioned scrolls move directly to their destination instead of animating a200ms approach. Arrival still requires two compositor observations, followed by an independent pre-effect endpoint check. Explicit moves and drags retain their pacing; cancellation, takeover, mapping, and capture checks remain intact. Overall live speed has not been measured.
 
 ## 0.8.34 — faster routine capture and direct operation
 

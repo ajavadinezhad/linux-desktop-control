@@ -26,7 +26,7 @@ The strongest candidate distinction is the combination of a single-use foregroun
 - **portal-use**, source snapshot `27fcfdf2288087db9b534aad7018ef4b9b023e3b`: [server](https://github.com/johnohhh1/portal_use/blob/27fcfdf2288087db9b534aad7018ef4b9b023e3b/server.py), [session](https://github.com/johnohhh1/portal_use/blob/27fcfdf2288087db9b534aad7018ef4b9b023e3b/portal/session.py), [input](https://github.com/johnohhh1/portal_use/blob/27fcfdf2288087db9b534aad7018ef4b9b023e3b/portal/input.py). In particular, server lines128–141 cover reconnection, lines345–361 cover drag dispatch, and input lines454–488 cover key-map text.
 - **wayhand-mcp**, source snapshot `fd81f11c1a33fb0e905955bff7bf72337f4b817d`: [README](https://github.com/TimLai666/wayhand-mcp/blob/fd81f11c1a33fb0e905955bff7bf72337f4b817d/README.md), [safety budget](https://github.com/TimLai666/wayhand-mcp/blob/fd81f11c1a33fb0e905955bff7bf72337f4b817d/src/safety.rs), [server](https://github.com/TimLai666/wayhand-mcp/blob/fd81f11c1a33fb0e905955bff7bf72337f4b817d/src/server.rs), and entry point. These establish existing screenshot budgeting, cancellation/release behavior and sandbox support; its reported demonstration results were not independently reproduced.
 
-Our source basis is the 0.8.4 audit in [SCENARIO_AUDIT.md](SCENARIO_AUDIT.md), including 304 isolated Python tests and eight native fixtures. These counts are not comparative proof of reliability.
+Our source basis is the 0.8.4 audit in [SCENARIO_AUDIT.md](archive/SCENARIO_AUDIT.md), including 304 isolated Python tests and eight native fixtures. These counts are not comparative proof of reliability.
 
 ## What would strengthen the claim
 

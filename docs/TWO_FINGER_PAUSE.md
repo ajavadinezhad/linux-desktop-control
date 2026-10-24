@@ -1,5 +1,7 @@
 # Two-finger contact pause
 
+> The version and installation claims below describe historical checkpoints. Consult [release status](RELEASE_STATUS.md) for the recorded published baseline and remaining checks.
+
 The 0.8.27 preview with helper 0.8.11 adds a bounded recovery path for ordinary two-finger touchpad contact. Enable native touchpad observation, retained sharing, and the existing pause-return click policy.
 
 Resting two fingers pauses capture and input, cancels remaining queued work, and retains sharing. Lifting only one finger does not resume automation. After both lift and the existing quiet interval passes, recovery requires a fresh view of the current window. It never replays interrupted actions or claims contact is pointer movement.

@@ -1,5 +1,7 @@
 # Supervised startup without a manual challenge
 
+> The version and installation claims below describe historical checkpoints. Consult [release status](RELEASE_STATUS.md) for the recorded published baseline and remaining checks.
+
 Plugin 0.8.20 and helper 0.8.8 are installed. All 472 controller tests and 33 native fixtures pass. A fresh matching provider completed passive startup with no manual challenge; device coverage correctly remained unverified. The subsequent App Center launch closed unexpectedly, so completed native-task acceptance is still pending a separate transition repair.
 
 Use `startup_verification="passive"` together with native physical observation and retained sharing when the user wants supervised operation without repeated keyboard/touchpad calibration. The existing challenge path remains the default and can be selected for diagnostics. Neither mode silently falls back to the other.

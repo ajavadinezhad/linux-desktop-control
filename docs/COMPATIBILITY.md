@@ -10,7 +10,6 @@ The installation preflight currently requires **GNOME Shell 51 on Wayland**. Oth
 | Displays | Tested primary screen in a two-monitor layout with scale 2 and a vertical offset; not general mixed-DPI acceptance |
 | Window fitting/moving | Explicit configured shortcuts; same window must fully arrive; ambiguous layouts refuse |
 | Physical takeover | Host-specific keyboard interruption, endpoint-based drag cleanup, and native relative-mouse yield/return trials across recorded versions; no universal device coverage |
-| Cursor glow | Visible and restored in scoped trials; custom app cursors may ignore it |
 | Reconfiguration | Layout, mode, scale, rotation, mirroring, ownership or topology mismatch refuses input; no seamless hotplug claim |
 
 ## Coordinates
@@ -19,4 +18,4 @@ Actions use selected-monitor logical coordinates. Screenshot pixels must be conv
 
 Rotation, mirroring and unsupported layout modes are refused. A pointer outside the selected monitor is not automatically reclaimed. Foreground and dispatch checks are asynchronous and cannot guarantee atomic priority over an event already sent.
 
-See [current status](RELEASE_STATUS.md) and [remaining physical checks](BETA_ACCEPTANCE.md).
+See [current status](RELEASE_STATUS.md) and [remaining physical checks](archive/BETA_ACCEPTANCE.md).

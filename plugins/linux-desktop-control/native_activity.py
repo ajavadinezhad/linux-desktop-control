@@ -56,8 +56,8 @@ class Controller:
                  credentials=peer_credentials, startup_timeout=60, notice=None,
                  retain_sharing=False, on_yield=None, on_quiet=None, session_seconds=120, pointer_source="mouse", startup_verification="challenge", allow_permission_wait=False, click_policy='close', on_intervention=None, keyboard_policy='close', multi_contact_policy='close'):
         # Dependency injections are for isolated tests, never model tool arguments.
-        if type(session_seconds) is not int or not 120<=session_seconds<=600:
-            raise ValueError("session_seconds must be an integer from 120 to 600")
+        if type(session_seconds) is not int or not 120<=session_seconds<=1200:
+            raise ValueError("session_seconds must be an integer from 120 to 1200")
         self.requested_session_seconds=session_seconds
         self.session_seconds=120
         self.lease_negotiation_started=False
@@ -94,6 +94,10 @@ class Controller:
         self.last_peer = None
         self.terminal_reason = None
         self.helper_exit_code = None
+        self.launch_diagnostic = None
+        self.launch_diagnostic_complete = False
+        self.stderr_thread = None
+        self.stderr_stop = threading.Event()
         self.armed_at_monotonic = None
         self.ended_at_monotonic = None
         self.helper_ready_at_monotonic = None
@@ -144,6 +148,39 @@ class Controller:
         self.post_arm_verified=False;self.post_arm_state='not-started';self.post_arm_deadline_monotonic=None
         self.post_arm_gate=False
         self.notice_phase='calibration'
+
+    def _drain_launch_stderr(self, stream):
+        # Bounded transient matching only. Never retain or publish raw stderr,
+        # which can contain account names, paths or authentication messages.
+        tail = b''
+        rules = ((b'no authentication agent', 'authentication-agent-unavailable'),
+                 (b'not authorized', 'authorization-denied'),
+                 (b'not been authorized', 'authorization-denied'),
+                 (b'error executing command', 'execution-failed'),
+                 (b'error while loading shared libraries', 'shared-library-unavailable'))
+        try:
+            fd = stream.fileno()
+            os.set_blocking(fd, False)
+            while True:
+                readable = select.select([fd], [], [], .05)[0]
+                if not readable:
+                    if self.stderr_stop.is_set(): break
+                    continue
+                try: chunk = os.read(fd, 4096)
+                except BlockingIOError: continue
+                if not chunk: break
+                text = tail + chunk.lower()
+                for phrase, category in rules:
+                    if phrase in text and self.launch_diagnostic is None:
+                        self.launch_diagnostic = category
+                tail = text[-128:]
+                if self.stderr_stop.is_set(): break
+        except (OSError, ValueError):
+            pass
+        finally:
+            tail = b''
+            stream.close()
+            self.launch_diagnostic_complete = True
 
     def _send(self, token):
         payload = (token + '\n').encode('ascii')
@@ -211,7 +248,11 @@ class Controller:
             self.listener.listen(1)
             self.listener.setblocking(False)
             self.process = self.launcher([PKEXEC, HELPER, '--socket', str(path)], stdin=subprocess.DEVNULL,
-                                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
+                                         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, close_fds=True)
+            stderr = getattr(self.process, 'stderr', None)
+            if stderr is not None:
+                self.stderr_thread = threading.Thread(target=self._drain_launch_stderr, args=(stderr,), daemon=True)
+                self.stderr_thread.start()
             deadline = time.monotonic() + self.startup_timeout
             while True:
                 if not self.active() or self.stop.is_set():
@@ -897,6 +938,8 @@ class Controller:
                 'human_provenance': False, 'raw_device_fds': False,
                 'error': self.error, 'cleanup_warning': self.cleanup_warning,
                 'terminal_reason':self.terminal_reason,'helper_exit_code':self.helper_exit_code,
+                'helper_launch_diagnostic':self.launch_diagnostic if self.closed and self.launch_diagnostic_complete else None,
+                'helper_launch_diagnostic_kind':'fixed-category' if self.closed and self.launch_diagnostic_complete and self.launch_diagnostic else 'unavailable',
                 'armed_at_monotonic':self.armed_at_monotonic,'elapsed_seconds':elapsed,
                 'session_seconds':self.session_seconds,'requested_session_seconds':self.requested_session_seconds,
                 'lease_remaining_seconds':None if lease_elapsed is None else max(0,self.session_seconds-lease_elapsed),
@@ -964,6 +1007,9 @@ class Controller:
                             self.helper_exit_code=self.process.wait(timeout=.5)
                         except (OSError, subprocess.TimeoutExpired):
                             self.cleanup_warning = 'Native helper exit unconfirmed; socket is closed'
+            self.stderr_stop.set()
+            if self.stderr_thread is not None and self.stderr_thread is not threading.current_thread():
+                self.stderr_thread.join(timeout=.2)
             if self.directory is not None:
                 shutil.rmtree(self.directory)
                 self.directory = None

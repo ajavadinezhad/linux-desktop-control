@@ -1,5 +1,7 @@
 # Waiting for trusted GNOME system authentication
 
+> The version and installation claims below describe historical checkpoints. Consult [release status](RELEASE_STATUS.md) for the recorded published baseline and remaining checks.
+
 Installed baseline: plugin 0.8.24 and helper 0.8.10. Candidate plugin 0.8.25 changes recognition to observer capability revision3 and is not installed or live verified. The loaded GNOME observer must advertise revision3; updating files alone does not establish that it is running.
 
 The operator enables `allow_permission_wait=true` at startup with native physical observation and retained sharing. A later observed Install click uses `wait_for_permission=true`, `focus_transition=true`, and `recording_stopped=true`. The last field is an operator attestation: all recorders owned by that operator must actually be stopped and finalized before the click. The backend cannot establish the state of unrelated external recorders.

@@ -29,6 +29,47 @@ class PacingTests(unittest.TestCase):
  def test_explicit_wait_does_not_add_a_second_unrequested_wait(self):
   d=self.backend();d.action({'type':'wait','seconds':.4})
   self.assertEqual(d.waits,[.4])
+ def test_click_skips_animation_but_verifies_arrival_and_prepress(self):
+  d=self.backend()
+  with mock.patch.object(d,'move_to',wraps=d.move_to) as move, mock.patch.object(d,'confirm_pointer_endpoint',wraps=d.confirm_pointer_endpoint) as confirm:
+   d.action({'type':'click','x':40,'y':50})
+  move.assert_called_once_with(40,50,0)
+  self.assertEqual(confirm.call_count,2)
+  self.assertEqual(len(d.reads),6)
+  self.assertFalse(d.held)
+  self.assertIn(.04,d.waits)
+  self.assertIn(.07,d.waits)
+  self.assertNotIn(.1,d.waits)
+  self.assertAlmostEqual(sum(d.waits),.142)
+ def test_eight_clicks_keep_endpoint_checks_without_blanket_waits(self):
+  d=self.backend()
+  d.action({'type':'sequence','steps':[{'type':'click','x':40,'y':50} for _ in range(8)]})
+  self.assertEqual(d.waits.count(.04),8)
+  self.assertEqual(d.waits.count(.07),8)
+  self.assertNotIn(.1,d.waits)
+  self.assertAlmostEqual(sum(d.waits),1.136)
+  self.assertFalse(d.held)
+ def test_cancel_during_click_press_still_releases(self):
+  d=self.backend()
+  def wait(seconds):
+   if seconds==.04:d.cancelled.set()
+   d.check()
+  d.wait_interruptibly=wait
+  with self.assertRaises(RuntimeError):d.action({'type':'click','x':40,'y':50})
+  self.assertFalse(d.held)
+  self.assertEqual(d.events[-1][3][-1],0)
+ def test_failed_fast_click_arrival_never_presses(self):
+  d=self.backend()
+  with mock.patch.object(d,'confirm_pointer_endpoint',side_effect=RuntimeError('arrival mismatch')):
+   with self.assertRaises(RuntimeError):d.action({'type':'click','x':40,'y':50})
+  self.assertFalse(any(event[1]=='NotifyPointerButton' for event in d.events))
+  self.assertFalse(d.held)
+ def test_scroll_skips_animation_and_still_checks_endpoint(self):
+  d=self.backend()
+  with mock.patch.object(d,'move_to',wraps=d.move_to) as move, mock.patch.object(d,'confirm_pointer_endpoint',wraps=d.confirm_pointer_endpoint) as confirm:
+   d.action({'type':'scroll','x':40,'y':50,'dy':1})
+  move.assert_called_once_with(40,50,0)
+  self.assertEqual(confirm.call_count,2)
  def test_cancel_at_end_of_drag_still_releases_button(self):
   d=self.backend()
   def wait(seconds):

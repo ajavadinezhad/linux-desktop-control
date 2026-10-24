@@ -16,7 +16,9 @@ The collector receives raw kernel codes and values internally and exports only f
 
 Covered movement may yield under explicitly negotiated retained-sharing mode. In touchpad mode contact immediately pauses automation and blocks quiet until released; unselected mouse movement remains terminal. Ordinary admitted clicks and consistent two-finger touchpad contact may pause under the explicit click pause-return policy; neither grants pointer-motion credit. A remaining finger or incomplete frame blocks recovery. Keys, unsupported activity, faults and lifecycle loss remain terminal. Trusted expected authentication waits are a separate human-only mode. The controller, not this helper, owns capture suspension and checked cursor return. It never replays an interrupted action. See [the mode contract](../docs/RETAINED_SHARING.md).
 
-Heartbeats use a one-second deadline. The absolute session budget defaults to 120 seconds and may be selected once, from 120–600, before calibration. Negotiation, heartbeat, pause and resume do not renew its original anchor. Device activity does not prove human identity; monitoring and input dispatch remain asynchronous.
+The twenty-minute lease is a candidate change requiring coordinated controller/helper installation; it is not established by an older installed helper.
+
+Heartbeats use a one-second deadline. The absolute session budget defaults to 120 seconds and may be selected once, from 120–1200, before calibration. Negotiation, heartbeat, pause and resume do not renew its original anchor. Device activity does not prove human identity; monitoring and input dispatch remain asynchronous.
 
 ## Build and review
 
@@ -41,7 +43,7 @@ The policy requires fresh administrator authorization for an active local sessio
 
 ## Verification
 
-The current helper passed 57 isolated native tests without opening physical input devices. Fixture scripts live alongside the source. They do not establish coverage of a new keyboard, mouse or transport. Follow the [beta checklist](../docs/BETA_ACCEPTANCE.md) for separate live acceptance.
+The current helper passed 57 isolated native tests without opening physical input devices. Fixture scripts live alongside the source. They do not establish coverage of a new keyboard, mouse or transport. Follow the [beta checklist](../docs/archive/BETA_ACCEPTANCE.md) for separate live acceptance.
 
 The old preopened-descriptor prototype has been removed; the production collector retains raw device access inside its own boundary. Earlier design tradeoffs remain in [DESIGN.md](DESIGN.md), explicitly as historical context.
 

@@ -31,7 +31,6 @@ class EnvironmentTests(unittest.TestCase):
   s=(p.parent/'install.sh').read_text();check=s.index('/usr/bin/python3 "$root/check_environment.py"\n')
   for mutation in ('/usr/bin/python3 "$root/configure-runtime.py" "$root"',
                    '/usr/bin/python3 "$root/install-indicator.py"',
-                   '/usr/bin/python3 "$root/install-cursor-theme.py"',
                    '"$codex_bin" plugin marketplace add', '"$codex_bin" plugin add'):
    self.assertLess(check,s.index(mutation),mutation)
 if __name__=='__main__':unittest.main()

@@ -17,7 +17,7 @@ import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import Gio, GLib, Gst
 
-VERSION = '0.8.34'
+VERSION = '0.8.42'
 CAPTURE_SETTLING_MS = 200
 # Freeze identity at module load: old providers must never report a new disk build.
 _build_spec = importlib.util.spec_from_file_location('_desktop_runtime_build', os.path.join(os.path.dirname(__file__), 'runtime_build.py'))
@@ -27,6 +27,12 @@ SERVER_BUILD = _runtime_build.fingerprint(os.path.dirname(__file__))
 _stream_spec = importlib.util.spec_from_file_location('_desktop_stream_metadata', os.path.join(os.path.dirname(__file__), 'stream_metadata.py'))
 _stream_metadata = importlib.util.module_from_spec(_stream_spec)
 _stream_spec.loader.exec_module(_stream_metadata)
+_observer_spec = importlib.util.spec_from_file_location('_desktop_frame_observer', os.path.join(os.path.dirname(__file__), 'frame_observer.py'))
+_frame_observer = importlib.util.module_from_spec(_observer_spec)
+_observer_spec.loader.exec_module(_frame_observer)
+_notifications_spec = importlib.util.spec_from_file_location('_desktop_change_notifications', os.path.join(os.path.dirname(__file__), 'change_notifications.py'))
+_change_notifications = importlib.util.module_from_spec(_notifications_spec)
+_notifications_spec.loader.exec_module(_change_notifications)
 
 def require_current_runtime():
     try:
@@ -53,6 +59,7 @@ class ClickContextPending(RuntimeError):
 
 class Desktop:
     requires_window_guard=True
+    supports_continuous_observation=True
     def __init__(self):
         Gst.init(None)
         self.loop = GLib.MainLoop()
@@ -63,6 +70,10 @@ class Desktop:
         self.monitor_mapping = None
         self.mapping_guard = None
         self.pipeline = None
+        self.continuous_observer = False
+        self.observe_during_takeover = False
+        self.takeover_capture_gate = None
+        self.frame_observer = None
         self.fd = None
         self.closed_sub = None
         self.portal_closed = False
@@ -204,6 +215,37 @@ class Desktop:
         self.pipeline.set_state(Gst.State.PLAYING)
         self.pipeline.get_state(3 * Gst.SECOND)
         self.check()
+        if getattr(self,'continuous_observer',False):
+            pipeline=self.pipeline;sink=self.sink
+            cancelled=self.cancelled;operation=getattr(self,'operation_cancelled',None)
+            def permitted():
+                return (self.pipeline is pipeline and not cancelled.is_set() and
+                        (operation is None or not operation.is_set() or self.takeover_capture_permitted()))
+            def read_frame(timeout):
+                sample=sink.emit('try-pull-sample',int(timeout*Gst.SECOND))
+                if sample:
+                    buf=sample.get_buffer()
+                    if buf.pts==Gst.CLOCK_TIME_NONE:return None
+                    size=buf.get_size()
+                    if not 24<=size<=_frame_observer.LatestFrameObserver.MAX_FRAME_BYTES:
+                        raise RuntimeError('Stream frame size invalid')
+                    return buf.extract_dup(0,size),int(buf.pts)
+                if pipeline.get_bus().pop_filtered(Gst.MessageType.ERROR):
+                    raise RuntimeError('Stream capture failed')
+                return None
+            self.frame_observer=_frame_observer.LatestFrameObserver(read_frame,permitted,on_fault=cancelled.set).start()
+
+    def takeover_capture_permitted(self):
+        gate=getattr(self,'takeover_capture_gate',None)
+        if not getattr(self,'observe_during_takeover',False) or not callable(gate):return False
+        try:return gate() is True
+        except Exception:return False
+
+    def stop_frame_observer(self):
+        observer=getattr(self,'frame_observer',None)
+        self.frame_observer=None
+        if observer is not None and not observer.close():
+            raise RuntimeError('Continuous observer did not stop')
 
     def on_session_closed(self,connection,sender,path,interface,name,parameters,user):
         if path==self.session:
@@ -223,6 +265,8 @@ class Desktop:
                 'input_release':dict(getattr(self,'release_counts',{'attempted':0,'confirmed':0,'failed':0})),
 
                 'cleanup_warning':getattr(self,'cleanup_warning',None),
+                'continuous_observer':{'enabled':getattr(self,'continuous_observer',False),
+                    'stream':self.frame_observer.snapshot() if getattr(self,'frame_observer',None) is not None else None},
                 'portal_closed_confirmed':getattr(self,'portal_closed',False) or (self.session is None and not getattr(self,'cleanup_warning',None))}
 
     def monitor_geometry(self):
@@ -258,6 +302,7 @@ class Desktop:
                 # Reconnect only capture, once, under the existing consent. No
                 # input, portal restart, or cached-frame timestamp substitution.
                 self.check()
+                self.stop_frame_observer()
                 self.pipeline.set_state(Gst.State.NULL)
                 self.pipeline=None
                 self.wait_interruptibly(.35)
@@ -266,9 +311,10 @@ class Desktop:
                 self.capture_info['pipeline_reconnected']=True
                 return png
 
-    def _capture_once(self,new_stream=False):
+    def _capture_once(self,new_stream=False,observation_check=None):
+        check=observation_check or self.check
         capture_started=time.monotonic()
-        self.check()
+        check()
         # Require a frame captured after a settling fence, not merely the next
         # PNG emitted by an encoder that may still be processing older input.
         clock=self.pipeline.get_clock()
@@ -276,7 +322,21 @@ class Desktop:
         fence=0 if new_stream else clock.get_time()-self.pipeline.get_base_time()+CAPTURE_SETTLING_MS*Gst.MSECOND
         deadline = time.monotonic()+5
         while time.monotonic() < deadline:
-            self.check()
+            check()
+            observer=getattr(self,'frame_observer',None)
+            if observer is not None:
+                minimum=max(int(fence),int(clock.get_time()-self.pipeline.get_base_time()-750*Gst.MSECOND))
+                try:frame=observer.wait_frame(minimum,max(0,deadline-time.monotonic()),check)
+                except _frame_observer.ObserverTimeout:raise CaptureTimeout('No fresh observer frame received') from None
+                age_ms=max(0,(clock.get_time()-self.pipeline.get_base_time()-frame['pts'])/Gst.MSECOND)
+                if age_ms>750:continue
+                self.capture_info={'frame_id':self.frames+1,'settling_ms':0 if new_stream else CAPTURE_SETTLING_MS,
+                    'frame_age_ms':age_ms,'freshness':'new_stream' if new_stream else 'post_settle_frame',
+                    'capture_duration_ms':max(0,round((time.monotonic()-capture_started)*1000)),
+                    'observer_stream_id':observer.stream_id,'observer_frame_id':frame['frame_id'],
+                    'content_revision':frame['revision'],'continuous_observer':True}
+                self.frames+=1
+                return frame['data']
             sample = self.sink.emit('try-pull-sample', 100 * Gst.MSECOND)
             if sample:
                 buf = sample.get_buffer()
@@ -445,7 +505,9 @@ class Desktop:
 
     @staticmethod
     def text_cost(value,mode='gnome_unicode'):
-        return sum(.28+.015*len(format(ord(c),'x')) if ord(c)>127 and mode=='gnome_unicode' else .005 for c in value)
+        # Include per-character portal/guard overhead observed in real typing,
+        # not just the explicit 5ms sleep. Reject oversized input before effects.
+        return sum(.28+.015*len(format(ord(c),'x')) if ord(c)>127 and mode=='gnome_unicode' else .02 for c in value)
 
     def type_character(self,char,mode):
         code=ord(char)
@@ -599,7 +661,11 @@ class Desktop:
                 if ('x' in a) != ('y' in a):
                     raise ValueError('Provide both x and y')
                 if kind in ('click','scroll') and 'x' in a:
-                    self.move_to(a['x'], a['y'],.2)
+                    # Routine effects need a verified destination, not a
+                    # cosmetic animated approach with repeated round trips.
+                    # position() still confirms arrival; the effect below
+                    # independently verifies it again immediately before use.
+                    self.move_to(a['x'], a['y'],0)
                 if kind == 'move':
                     self.move_to(a['x'],a['y'],float(a.get('seconds',.25)))
                 if kind == 'click':
@@ -663,7 +729,8 @@ class Desktop:
                 # Pointer arrival is already observed. Capture applies its own
                 # settling fence; do not add a blanket wait after every stroke,
                 # move, wheel operation or an explicitly requested wait.
-                if kind in ('click','keys','text'):
+                # Clicks already retain their interruptible press/release pacing.
+                if kind in ('keys','text'):
                     self.wait_interruptibly(.1)
             finally:
                 if self.release():
@@ -675,6 +742,10 @@ class Desktop:
                 raise RuntimeError('Sharing closed while pausing')
             if self.release():raise RuntimeError('Virtual input release failed while pausing')
             self.pointer_position=None
+            if self.takeover_capture_permitted():
+                self.action_deadline=None
+                return
+            self.stop_frame_observer()
             pipeline=self.pipeline
             if pipeline is not None:
                 done=threading.Event();failure=[]
@@ -692,6 +763,10 @@ class Desktop:
         # remote and portal session remain the original consented resources.
         with self.lock:
             self.check()
+            if self.pipeline is not None:
+                self.stop_frame_observer()
+                self.pipeline.set_state(Gst.State.NULL)
+                self.pipeline=None
             self._start_capture_pipeline()
 
     def close(self):
@@ -707,6 +782,8 @@ class Desktop:
                 if getattr(self,'portal_closed',False):self.session=None
             try:self.release()
             except Exception:self.cleanup_warning='Input release failed; portal closure attempted. Check GNOME sharing.'
+            try:self.stop_frame_observer()
+            except Exception:self.cleanup_warning='Continuous observer teardown incomplete; portal closure attempted.'
             if self.fd is not None:
                 try:os.close(self.fd)
                 except OSError:self.cleanup_warning='Capture descriptor cleanup failed; portal closure attempted.'
@@ -740,11 +817,31 @@ def text(value):
 def image(png):
     return {'type':'image','mimeType':'image/png','data':base64.b64encode(png).decode()}
 
+def action_argument_diagnostic(error):
+    # Only static corrective guidance; never echo unknown key names, text,
+    # accessibility data or other model-controlled values from exceptions.
+    reason=str(error)
+    rules=(
+        ('Position outside selected monitor','invalid-position','Move, click and scroll require finite x and y logical coordinates inside the shared monitor. Move is pointer movement, not a window move; dx/dy are scroll steps only.'),
+        ('Sequence must begin','focus-required','Start a sequence with a visible target click or supported focus-acquiring shortcut.'),
+        ('Input focus may have changed','focus-required','Keys and text require focus:{x,y}, a focused sequence, or a separately inspected editable target identity.'),
+        ('Text exceeds','input-budget-exceeded','Split text into shorter independently observed calls before sending input.'),
+        ('Sequence exceeds','input-budget-exceeded','Split this sequence into shorter independently observed calls before sending input.'),
+        ('Invalid button/count','invalid-click-options','Use button left, right or middle and integer count from 1 to 3.'),
+        ('Wheel steps must','invalid-scroll-steps','Scroll dx/dy must be integers from -50 to 50; x/y identify the observed scroll destination.'),
+        ('Unknown key:','unknown-key','Use individual supported key names in keys, such as ["Ctrl","s"], rather than a combined shortcut string.'),
+        ('Invalid drag','invalid-drag-path','Drag requires path containing 2 to 200 [x,y] logical-coordinate pairs inside the shared monitor.'),
+        ('Unknown action type','unsupported-action','Use move, click, scroll, keys, text, drag, wait or a bounded sequence.'),
+    )
+    for prefix,code,message in rules:
+        if reason.startswith(prefix):return {'code':code,'message':message}
+    return {'code':'invalid-action-arguments','message':'Check the advertised schema for this action type. No input was sent; inspect the returned image and choose a corrected request.'}
+
 ACTION_SCHEMA = {'type':'object','required':['type'],'properties':{
-    'type':{'type':'string','enum':['move','click','scroll','keys','text','drag','wait']},
+    'type':{'type':'string','enum':['move','click','scroll','keys','text','drag','wait'],'description':'move moves the pointer to x/y; click and scroll also require x/y. Window repositioning requires an observed title-bar drag, not move dx/dy.'},
     'unit':{'type':'string','enum':['steps']},
     'text_mode':{'type':'string','enum':['gnome_unicode','keysyms']},
-    'x':{'type':'number'},'y':{'type':'number'},'dx':{'type':'number'},'dy':{'type':'number'},
+    'x':{'type':'number','description':'Required for move/click/scroll: observed destination in logical monitor coordinates, not screenshot pixels.'},'y':{'type':'number','description':'Required for move/click/scroll: observed destination in logical monitor coordinates.'},'dx':{'type':'integer','minimum':-50,'maximum':50,'description':'Scroll only: discrete horizontal wheel steps, not pointer motion.'},'dy':{'type':'integer','minimum':-50,'maximum':50,'description':'Scroll only: discrete vertical wheel steps; positive is down.'},
     'button':{'type':'string','enum':['left','right','middle']},'count':{'type':'integer','minimum':1,'maximum':3},
     'keys':{'type':'array','items':{'type':'string'},'minItems':1,'maxItems':8},
     'text':{'type':'string','maxLength':4000},
@@ -760,13 +857,23 @@ ACTION_SCHEMA['properties']['stroke_batch']={'type':'boolean','default':False,'d
 
 def tools():
     specs=[
-      ('desktop_start','Operate directly in the user-facing agent; delegate live control only when the user explicitly requests delegation. Request personal GNOME consent for one monitor, keyboard and pointer; return a fresh screenshot. Optional cursor_glow temporarily changes the desktop-wide cursor theme and restores it on close.',{'context_change_policy':{'type':'string','enum':['close','pause-recover'],'default':'close','description':'Explicit native retained-sharing opt-in: ordinary foreground changes cancel pending work and recover a stable fresh context without replay or focus reclaim. A fresh observation is required before more input; protected UI and faults remain terminal.'},'multi_contact_policy':{'type':'string','enum':['close','pause-recover'],'default':'close','description':'Explicit retained native touchpad multi-contact intervention support through four fingers. Requires touchpad source and click_policy pause-return with exact MULTICONTACT1 acknowledgement. Waits through contact and private workspace UI until released quiet and stable ordinary context. No gesture emulation, pointer reclaim or motion credit; unsupported devices and faults remain terminal.'},'keyboard_policy':{'type':'string','enum':['close','pause-recover'],'default':'close','description':'Explicit physical keyboard intervention recovery after released quiet. Requires native retained sharing and click_policy pause-return with exact helper KEYPAUSE1 acknowledgement. Fresh ordinary context and no replay. All click/key interventions refresh context without pointer reclaim while enabled; Stop, locks and faults remain terminal.'},'click_policy':{'type':'string','enum':['close','pause-return'],'default':'close','description':'Explicit native retained-sharing opt-in: ordinary left/right/middle clicks pause, then after released quiet recover from a fresh context; no action replay or forced focus. Keys remain terminal unless keyboard_policy is selected; scrolling, protected UI and faults remain terminal.'},'allow_permission_wait':{'type':'boolean','default':False,'description':'Explicit native retained-sharing opt-in for trusted GNOME Polkit permission waiting for an already authorized task; human approval only. Requires helper AUTHMODE1 and observer protocol3.'},'startup_verification':{'type':'string','enum':['challenge','passive'],'default':'challenge','description':'Explicit passive supervised mode skips manual calibration and starts monitoring with coverage unverified. Requires native retained sharing and exact helper acknowledgement; automatic return additionally requires real selected-source motion in the current pause. Challenge retains diagnostic keyboard/pointer tests.'},'pointer_source':{'type':'string','enum':['mouse','touchpad'],'default':'mouse','description':'Retained native observation source. Touchpad requires physical_takeover and retain-sharing; verified single-finger indirect devices only.'},'session_seconds':{'type':'integer','minimum':120,'maximum':600,'default':120,'description':'Optional initial native-helper lease in seconds, physical_takeover required. Negotiated once before calibration; default120, hard maximum600. No active renewal; Stop and faults remain terminal.'},'physical_takeover':{'type':'boolean','default':False,'description':'Explicit opt-in to a separately installed native activity helper; administrator authorization follows personal GNOME sharing approval. Backend receives only coarse activity/fault notices, never raw input descriptors. Not human-provenance attestation.'},'cursor_glow':{'type':'boolean','description':'Explicit opt-in after explaining desktop-wide theme scope. Applies real themed cursor glow while active; custom app cursors may ignore it.'},'pointer_motion_return':{'type':'boolean','default':False,'description':'With retained sharing and native observation, yield on mouse movement and return once to the last confirmed point after physical quiet in the same app. No action replay.'},'interruption_policy':{'type':'string','enum':['close','retain-sharing'],'default':'close','description':'Opt-in retained consent for explicit pause/resume; physical observer faults remain terminal. No automatic cursor return or replay.'}}),
+      ('desktop_start','Operate directly in the user-facing agent; delegate live control only when the user explicitly requests delegation. Request personal GNOME consent for one monitor, keyboard and pointer; return a fresh screenshot. The passive text indicator leaves the system cursor unchanged.',{'context_change_policy':{'type':'string','enum':['close','pause-recover'],'default':'close','description':'Explicit native retained-sharing opt-in: ordinary foreground changes cancel pending work and recover a stable fresh context without replay or focus reclaim. A fresh observation is required before more input; protected UI and faults remain terminal.'},'multi_contact_policy':{'type':'string','enum':['close','pause-recover'],'default':'close','description':'Explicit retained native touchpad multi-contact intervention support through four fingers. Requires touchpad source and click_policy pause-return with exact MULTICONTACT1 acknowledgement. Waits through contact and private workspace UI until released quiet and stable ordinary context. No gesture emulation, pointer reclaim or motion credit; unsupported devices and faults remain terminal.'},'keyboard_policy':{'type':'string','enum':['close','pause-recover'],'default':'close','description':'Explicit physical keyboard intervention recovery after released quiet. Requires native retained sharing and click_policy pause-return with exact helper KEYPAUSE1 acknowledgement. Fresh ordinary context and no replay. All click/key interventions refresh context without pointer reclaim while enabled; Stop, locks and faults remain terminal.'},'click_policy':{'type':'string','enum':['close','pause-return'],'default':'close','description':'Explicit native retained-sharing opt-in: ordinary left/right/middle clicks pause, then after released quiet recover from a fresh context; no action replay or forced focus. Keys remain terminal unless keyboard_policy is selected; scrolling, protected UI and faults remain terminal.'},'allow_permission_wait':{'type':'boolean','default':False,'description':'Explicit native retained-sharing opt-in for trusted GNOME Polkit permission waiting for an already authorized task; human approval only. Requires helper AUTHMODE1 and observer protocol3.'},'startup_verification':{'type':'string','enum':['challenge','passive'],'default':'challenge','description':'Explicit passive supervised mode skips manual calibration and starts monitoring with coverage unverified. Requires native retained sharing and exact helper acknowledgement; automatic return additionally requires real selected-source motion in the current pause. Challenge retains diagnostic keyboard/pointer tests.'},'pointer_source':{'type':'string','enum':['mouse','touchpad'],'default':'mouse','description':'Retained native observation source. Touchpad requires physical_takeover and retain-sharing; verified single-finger indirect devices only.'},'session_seconds':{'type':'integer','minimum':120,'maximum':1200,'default':120,'description':'Optional initial native-helper lease in seconds, physical_takeover required. Negotiated once before calibration; default120, hard maximum1200. No active renewal; Stop and faults remain terminal.'},'physical_takeover':{'type':'boolean','default':False,'description':'Explicit opt-in to a separately installed native activity helper; administrator authorization follows personal GNOME sharing approval. Backend receives only coarse activity/fault notices, never raw input descriptors. Not human-provenance attestation.'},'pointer_motion_return':{'type':'boolean','default':False,'description':'With retained sharing and native observation, yield on mouse movement and return once to the last confirmed point after physical quiet in the same app. No action replay.'},'interruption_policy':{'type':'string','enum':['close','retain-sharing'],'default':'close','description':'Opt-in retained consent for explicit pause/resume; physical observer faults remain terminal. No automatic cursor return or replay.'}}),
       ('desktop_observe','Return a fresh screenshot and dimensions. Optional inspect_target binds a single-use editable accessibility identity; inspect before input.',{'inspect_target':{'type':'boolean'}}),
       ('desktop_action','Perform bounded input and return a fresh screenshot. Text/keys need same-call focus or a sequence beginning with a target click/focus shortcut. Coordinates use logical_size. Discrete wheel steps only. Text uses GNOME Unicode composition by default; verify actual results. Never replay uncertain input.',{'action':ACTION_SCHEMA,'target_id':{'type':'string','minLength':32,'maxLength':32},'recovery_observation_id':{'type':'string'},'window_observation_id':{'type':'string','minLength':32,'maxLength':32},'window_fit_shared':{'type':'boolean','description':'Separate opt-in Alt+F10 resize toggle fitting the current oversized focused window to the shared monitor. Exactly two verified monitors; center/titlebar midpoint and strictly largest intersection must identify the shared monitor. Same-window full containment required after; no focus activation or retry.'},'window_normalize_for_move':{'type':'boolean','description':'Separate opt-in Alt+F10 resize toggle of the currently focused window on the other of two verified monitors before a later monitor move. Only a frame not wholly source-contained is admitted; origin and center must identify that source; same-window full source containment required after. No focus activation or content observation.'},'window_move_to_shared':{'type':'boolean','description':'Opt-in single Super+Shift+Arrow move of the currently focused window from the other monitor to the shared monitor; exactly two unambiguous monitors and unchanged configured shortcut required. No focus activation or unseen-content claim.'},'wait_for_permission':{'type':'boolean','description':'One observed package Install left click then capture/input-free trusted GNOME authentication waiting; requires startup allow_permission_wait, native retained sharing and recording_stopped=true. No approval automation or action replay.'},'recording_stopped':{'type':'boolean','description':'Explicit operator attestation all owned recorders are stopped and finalized before a permission-wait gesture; not proof about external recorders.'},'await_context_change':{'type':'boolean','description':'Explicit launch-only opt-in with focus_transition: one left click or Return, then require an actual foreground context change within a hard five-second budget before publishing an image. No replay or app-identity guarantee.'},'focus_transition':{'type':'boolean','description':'Only one explicit left click, launcher/Return or Ctrl+s/Ctrl+Shift+s/Ctrl+o gesture may change foreground; no remaining batch. Inspect its returned image before further input.'}}),
       ('desktop_pause','Cancel current work, release virtual input and stop capture. Retaining sharing requires interruption_policy=retain-sharing at startup.',{}),
       ('desktop_resume','Explicitly resume retained sharing with a fresh screenshot and new observation tokens. Never replays input.',{'pause_id':{'type':'string','minLength':32,'maxLength':32}}),
       ('desktop_status','Read session and cleanup state without capturing or sending input.',{}),
       ('desktop_close','Close this session and release virtual input, capture and the portal. This is resource cleanup; a later session requires fresh GNOME consent.',{})]
+    for name,description,props in specs:
+        if name=='desktop_start':
+            props['continuous_observer']={'type':'boolean','default':False,'description':'Explicit opt-in: continuously consume the consented stream into one ephemeral latest-frame slot. Requires retained native context recovery. No recording, model video delivery, action replay or lease renewal.'}
+        if name=='desktop_start':
+            props['observe_during_takeover']={'type':'boolean','default':False,'description':'Explicit opt-in with continuous observation: retain read-only frames during ordinary physical takeover. Manual Pause, protected UI, Stop and faults still suspend capture. No input authority or unsolicited model video.'}
+        if name=='desktop_observe':
+            props.update({
+                'after_stream_id':{'type':'string','minLength':32,'maxLength':32,'description':'Continuous observer stream_id from an inspected response; not an input or target identity.'},
+                'after_revision':{'type':'integer','minimum':0,'description':'Wait for encoded frame content to change after this revision. Requires after_stream_id; does not imply semantic change.'},
+                'wait_for_change_seconds':{'type':'number','minimum':0,'maximum':30,'description':'Optional bounded change wait before a normal guarded fresh screenshot. Requires continuous mode and both stream identity and revision. Stop and pause remain interruptible.'}})
     return [{'name':n,'description':d,'inputSchema':{'type':'object','properties':props,'required':['action','window_observation_id'] if n=='desktop_action' else (['pause_id'] if n=='desktop_resume' else []),'additionalProperties':False},'annotations':{'readOnlyHint':n in ('desktop_status','desktop_observe'),'destructiveHint':n=='desktop_action','openWorldHint':True}} for n,d,props in specs]
 
 class RecoveryLedger:
@@ -841,6 +948,7 @@ class PermissionSignal:
 class Server:
     def __init__(self,factory=Desktop):
         self.factory=factory;self.backend=None;self.cancel_token=None;self.request_epoch=None
+        self.change_subscription=None;self.last_published_observation=None
         self.state_lock=threading.RLock();self.generation=0;self.state='closed';self.closure_reason=None
         # Opening a replacement session must wait until every owned resource
         # from the previous session has finished cleanup. Cancellation itself
@@ -852,7 +960,6 @@ class Server:
         self.pointer_motion_return=False;self.consent_id=None;self.native_pause_epoch=None;self.keyboard_wait_deadline=None;self.keyboard_context_wait=None;self.manual_pause_requested=False;self.manual_pause_latch=None;self.intervention_latch=None;self.click_context_pending=None
         self.return_state='disabled';self.return_attempted=set();self.return_record=None
         self.recovery=RecoveryLedger();self.target_provider=None;self.target_record=None
-        self.cursor_glow=None;self.cursor_glow_pending=None;self.cursor_glow_warning=None;self.cursor_glow_last=None
         self.physical_takeover=False;self.physical_takeover_warning=None;self.native_activity=None;self.native_activity_last=None;self.native_session_seconds=120;self.native_pointer_source="mouse";self.native_click_policy="close";self.native_keyboard_policy="close";self.native_multi_contact_policy="close";self.context_change_policy='close';self.context_recovery=None;self.context_observation_required=False;self.native_startup_verification='challenge';self.native_allow_permission_wait=False;self.permission_wait_stage=None;self.permission_wait_reason=None;self.permission_wait_failure_stage=None
         self.target_cleanup_warning=None;self.indicator=None;self.indicator_warning=None;self.window_record=None
 
@@ -921,15 +1028,157 @@ class Server:
             pause={'pause_id':self.pause_id,'reason':self.pause_reason,'automatic_return':self.pointer_motion_return,'automatic_resume':self.pointer_motion_return,
                 'return_state':self.return_state},
             recovery=self.recovery.snapshot(),fresh_observation_required=not active or self.recovery.inspection_required or self.context_observation_required)
+        watch_enabled=getattr(self.backend,'observe_during_takeover',False)
+        result['observe_during_takeover']=watch_enabled
+        if watch_enabled and not active:
+            try:watching=self.takeover_capture_allowed(self.backend,self.consent_id)
+            except Exception:watching=False
+            result['observation_only']=watching
+            result['capture_allowed']=watching
         if not active:result['logical_size']=[0,0]
         if self.target_cleanup_warning:result['accessibility_cleanup_warning']=self.target_cleanup_warning
         result['native_activity']=native
         result['physical_takeover']={'enabled':self.physical_takeover and native.get('active') is True,'classification':'native-device-source-activity','human_provenance':False}
         if self.physical_takeover_warning:result['physical_takeover_warning']=self.physical_takeover_warning
         if self.indicator_warning:result['indicator_warning']=self.indicator_warning
-        result['cursor_glow']=self.cursor_glow.status() if self.cursor_glow else (self.cursor_glow_pending.status() if self.cursor_glow_pending else (self.cursor_glow_last or {'active':False}))
-        if self.cursor_glow_warning:result['cursor_glow_warning']=self.cursor_glow_warning
         return result
+
+    def change_subscription_current(self,owner=None):
+        current=getattr(self,'change_subscription',None)
+        if current is None or (owner is not None and current is not owner):return False
+        backend,consent,_=current
+        if (self.backend is not backend or self.consent_id!=consent or backend.cancelled.is_set() or
+            not backend.session or self.state not in ('active','pausing','paused','resuming','auth-waiting') or
+            not getattr(backend,'continuous_observer',False)):return False
+        native=self.native_activity
+        return native is not None and native._yield_authorized() and native.status().get('observer_alive') is True
+
+    def change_resource(self):
+        backend=self.backend
+        state='closed';stream=None
+        if backend is not None and not backend.cancelled.is_set() and backend.session:
+            state=self.state if self.state in ('active','pausing','paused','resuming','auth-waiting') else 'unavailable'
+            observer=getattr(backend,'frame_observer',None)
+            if observer is not None and state in ('active','pausing','paused') and not self.manual_pause_pending():
+                # Metadata only. This is a hint, never permission to capture/input.
+                snap=observer.snapshot()
+                if snap['running'] and not snap['failed'] and snap['buffered_frames']==1:
+                    stream={'stream_id':snap['stream_id'],'revision':snap['revision'],'frame_age_ms':snap['frame_age_ms']}
+        prior=getattr(self,'last_published_observation',None)
+        published=None
+        if prior is not None and prior['consent']==self.consent_id and state!='closed':
+            published={k:prior[k] for k in ('stream_id','revision')}
+            published['age_ms']=max(0,round((time.monotonic()-prior['at'])*1000))
+        changed=None if stream is None or published is None else (stream['stream_id']!=published['stream_id'] or stream['revision']>published['revision'])
+        return {'session_state':state,'stream':stream,'last_published_observation':published,
+                'changed_since_last_publication':changed,'change_detection':'encoded-frame-bytes',
+                'notification_semantics':'observation-may-be-outdated','input_authority':False,
+                'contains_pixels':False,'model_wake_supported':False}
+
+    def change_notification_snapshot(self):
+        owner=getattr(self,'change_subscription',None)
+        if not self.change_subscription_current(owner):
+            if getattr(self,'change_subscription',None) is owner:self.change_subscription=None
+            return None
+        value=self.change_resource();stream=value['stream'] or {}
+        if not self.change_subscription_current(owner):return None
+        return owner,value['session_state'],stream.get('stream_id'),stream.get('revision')
+
+    def resource_request(self,method,params):
+        if type(params) is not dict:raise ValueError('Resource params must be an object')
+        uri=_change_notifications.URI
+        if method=='resources/list':
+            if params:raise ValueError('Resource list takes no parameters')
+            return {'resources':[{'uri':uri,'name':'Desktop observation freshness','mimeType':'application/json',
+                    'description':'Coalesced frame-change hints for a consented session; metadata only, no action authority or model wake guarantee.'}]}
+        if set(params)!={'uri'} or params.get('uri')!=uri:raise ValueError('Unknown desktop resource')
+        if method=='resources/read':
+            return {'contents':[{'uri':uri,'mimeType':'application/json','text':json.dumps(self.change_resource())}]}
+        if method=='resources/subscribe':
+            backend=self.backend
+            if (backend is None or backend.cancelled.is_set() or not backend.session or
+                not getattr(backend,'continuous_observer',False) or self.state not in ('active','paused')):
+                raise ValueError('Subscribe only after starting a consented continuous observer')
+            owner=getattr(self,'change_subscription',None)
+            if not self.change_subscription_current(owner):
+                owner=(backend,self.consent_id,uuid.uuid4().hex);self.change_subscription=owner
+            if not self.change_subscription_current(owner):
+                self.change_subscription=None;raise ValueError('Native session is not available for subscription')
+            return {}
+        if method=='resources/unsubscribe':self.change_subscription=None;return {}
+        raise ValueError('Unsupported resource operation')
+
+    def note_observation_publication(self):
+        capture=getattr(self.backend,'capture_info',{})
+        stream=capture.get('observer_stream_id');revision=capture.get('content_revision')
+        if type(stream) is str and type(revision) is int:
+            self.last_published_observation={'consent':self.consent_id,'stream_id':stream,
+                                             'revision':revision,'at':time.monotonic()}
+
+    def takeover_capture_allowed(self,backend,consent):
+        # Independent observation authority; never clears operation cancellation.
+        if (self.backend is not backend or self.consent_id!=consent or
+            not getattr(backend,'observe_during_takeover',False) or
+            self.interruption_policy!='retain-sharing' or self.manual_pause_pending() or
+            self.state not in ('active','pausing','paused') or backend.cancelled.is_set() or
+            not backend.session or self.permission_wait_stage in ('preparing','waiting-for-prompt','waiting')):return False
+        native=self.native_activity
+        if native is None or not native._yield_authorized():return False
+        status=native.status()
+        if status.get('observer_alive') is not True or not status.get('yielded') or status.get('auth_waiting'):return False
+        if self.state in ('pausing','paused') and self.pause_reason not in ('pointer-motion','physical-click','context-change'):return False
+        if not getattr(backend,'requires_window_guard',False) or self.indicator is None:return False
+        backend.mapping_guard()
+        context=self.indicator.context()
+        self.window_guard_module().WindowGuard.signature(context)
+        if context.get('available') is not True or context.get('kind')!='window':return False
+        return (self.backend is backend and self.consent_id==consent and not backend.cancelled.is_set()
+                and not self.manual_pause_pending() and self.state in ('active','pausing','paused')
+                and self.native_activity is native and native._yield_authorized()
+                and native.status().get('observer_alive') is True and native.status().get('yielded') is True)
+
+    def check_takeover_binding(self,binding):
+        backend=binding['backend']
+        if (self.cancel_token is not None and self.cancel_token.is_set()):raise RetainedPause('Observation cancelled')
+        if (self.generation!=binding['generation'] or self.pause_id!=binding['pause_id'] or
+            self.state not in ('pausing','paused') or
+            getattr(backend,'frame_observer',None) is not binding['observer'] or
+            not self.takeover_capture_allowed(backend,binding['consent'])):
+            raise RetainedPause('Read-only takeover observation ended')
+        context=self.indicator.context()
+        if self.window_guard_module().WindowGuard.signature(context)!=binding['context']:
+            raise RetainedPause('Takeover context changed during observation')
+        if (self.backend is not backend or self.consent_id!=binding['consent'] or
+            self.generation!=binding['generation'] or self.pause_id!=binding['pause_id'] or
+            self.manual_pause_pending() or backend.cancelled.is_set()):raise RetainedPause('Observation invalidated')
+
+    def observe_takeover(self,args):
+        self.takeover_publication=None
+        if args.get('inspect_target'):raise RetainedPause('Accessibility input targets are unavailable during takeover')
+        backend=self.backend;observer=getattr(backend,'frame_observer',None)
+        if observer is None or not self.takeover_capture_allowed(backend,self.consent_id):
+            raise RetainedPause('Takeover observation is suspended')
+        context=self.indicator.context()
+        binding={'backend':backend,'observer':observer,'consent':self.consent_id,'generation':self.generation,
+                 'pause_id':self.pause_id,'context':self.window_guard_module().WindowGuard.signature(context)}
+        check=lambda:self.check_takeover_binding(binding)
+        check();report=None
+        if any(k in args for k in ('after_stream_id','after_revision','wait_for_change_seconds')):
+            if 'after_stream_id' not in args or 'after_revision' not in args:raise ValueError('Change waiting requires stream identity and revision')
+            changed=observer.wait_change(args['after_stream_id'],args['after_revision'],args.get('wait_for_change_seconds',0),check)
+            report={'changed_before_capture':changed,'timed_out':not changed,'requested_seconds':args.get('wait_for_change_seconds',0)}
+        png=backend._capture_once(observation_check=check)
+        check()
+        # An observation-only image must never mint an action or recovery token.
+        self.window_record=None;self.target_record=None
+        import struct
+        w,h=struct.unpack('>II',png[16:24])
+        metadata=dict(self.status(),active=False,input_allowed=False,capture_allowed=True,
+                      observation_only=True,window_observation={'available':False},pixel_size=[w,h],
+                      capture=getattr(backend,'capture_info',{}),fresh_observation_required=True)
+        if report is not None:metadata['change_wait']=report
+        self.takeover_publication=binding
+        return [text(metadata),image(png)]
 
     def intervention_context_wait_enabled(self):
         return self.native_keyboard_policy=='pause-recover' or self.native_multi_contact_policy=='pause-recover'
@@ -1256,7 +1505,7 @@ class Server:
                 guard=module.WindowGuard(self.indicator,self.indicator.context(),lambda:self.foreground_lost(self.indicator))
                 if guard.baseline!=baseline:raise RuntimeError('Foreground changed before pointer return')
                 geometry=self.backend.monitor_geometry()
-                self.backend.pointer_reader=lambda:module.pointer_local(self.read_window_context(),geometry)
+                self.backend.pointer_reader=lambda:self.read_bound_pointer(guard,geometry,module.pointer_local)
                 self.backend.window_guard=guard;self.backend.endpoint_context=baseline
                 self.indicator.armed=guard
                 try:self.backend.position(*return_record['point'])
@@ -1583,50 +1832,6 @@ class Server:
         if not self.invalidate(expected_indicator=expected,warning='indicator'):return
         self.close_backend(expected_indicator=expected)
 
-    def cursor_glow_config(self):
-        path=os.path.join(os.path.dirname(__file__),'cursor_theme_config.json')
-        if os.path.getsize(path)>4096:raise RuntimeError('Invalid cursor theme configuration')
-        with open(path) as f:config=json.load(f)
-        if not isinstance(config,dict) or not all(isinstance(config.get(key),str) for key in ('theme','theme_root','state_dir')):raise RuntimeError('Cursor theme is not installed')
-        return config
-
-    def recover_cursor_glow(self):
-        if self.factory is not Desktop:return
-        try:
-            config=self.cursor_glow_config()
-            service=os.path.join(os.path.dirname(__file__),'cursor_glow_service.py')
-            import subprocess
-            result=subprocess.run(['/usr/bin/python3',service,'--theme',config['theme'],'--state',config['state_dir'],'--root',config['theme_root'],'--owner',str(os.getpid()),'--recover'],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=4)
-            if result.returncode:raise RuntimeError('Cursor theme recovery could not be confirmed')
-        except FileNotFoundError:pass
-        except Exception as error:self.cursor_glow_warning=str(error)
-
-    def show_cursor_glow(self):
-        if self.cursor_glow is not None:return
-        if self.cursor_glow_pending is not None:raise RuntimeError('Previous cursor restoration is unconfirmed; no new glow lease is allowed')
-        config=self.cursor_glow_config()
-        self.require_runtime()
-        path=os.path.join(os.path.dirname(__file__),'cursor_glow_service.py')
-        spec=importlib.util.spec_from_file_location('desktop_cursor_glow',path)
-        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
-        controller=module.Controller(config['theme'],config['state_dir'],config['theme_root'],active=lambda:self.state in ('active','pausing','paused','resuming') and self.backend is not None and self.backend.status().get('active') is True,on_failure=lambda error:self.cursor_glow_failed(controller,error))
-        self.own_observer('cursor_glow',controller)
-        self.cursor_glow_warning=None
-        try:controller.start()
-        except Exception:
-            with self.state_lock:
-                self.owner_cancel_events.pop('cursor_glow',None)
-                self.cursor_glow=None
-            raise
-
-    def cursor_glow_failed(self,expected,error):
-        self.cancel_observer('cursor_glow',expected)
-        with self.state_lock:
-            if self.cursor_glow is not expected:return
-            self.cursor_glow_warning=str(error)
-            indicator=self.indicator
-        if indicator is not None:self.foreground_lost(indicator)
-
     def defer_click_context_loss(self,expected):
         # Only the explicit click policy may briefly correlate a foreground
         # signal with native click evidence. No input/capture while correlating.
@@ -1841,12 +2046,12 @@ class Server:
 
     def _close_backend_owned(self):
         with self.state_lock:
+            self.change_subscription=None;self.last_published_observation=None
             if self.pause_watch_stop:self.pause_watch_stop.set()
             self.pause_watch_stop=None
             self.owner_cancel_events.clear()
             self.return_record=None;self.consent_id=None;self.native_pause_epoch=None
             self.return_state='closed';self.click_context_pending=None
-            glow=self.cursor_glow;self.cursor_glow=None
             native=self.native_activity;self.native_activity=None
             indicator=self.indicator;self.indicator=None
             self.physical_takeover=False
@@ -1858,11 +2063,6 @@ class Server:
             except Exception:self.physical_takeover_warning='Native observer closure unconfirmed; portal closure attempted.'
             self.native_activity_last=native.status()
         if indicator:indicator.close()
-        if glow is not None:
-            try:glow.close()
-            except Exception as error:
-                self.cursor_glow_warning=str(error);self.cursor_glow_pending=glow
-            self.cursor_glow_last=glow.status()
         self.target_record=None;self.window_record=None;self.close_target_provider()
         with self.state_lock:self.state='closed';self.pause_id=None;self.pause_reason=None
 
@@ -1913,6 +2113,15 @@ class Server:
             # This is read-only app-launch settling, never readiness or a retry.
             if callable(getattr(self.backend,'wait_interruptibly',None)):self.backend.wait_interruptibly(.05)
             else:time.sleep(.05)
+
+    def read_bound_pointer(self,window,geometry,pointer_local):
+        # observe_pointer retains its pre/post backend and mapping fences.
+        # Validate foreground and coordinates from one fresh observer reply,
+        # rather than issuing nested foreground queries for this same sample.
+        self.guard()
+        context=window.snapshot()
+        self.guard()
+        return pointer_local(context,geometry)
 
     def window_guard_module(self):
         self.require_runtime()
@@ -2023,19 +2232,26 @@ class Server:
             if not isinstance(startup_verification,str) or startup_verification not in ('challenge','passive'):raise ValueError('Invalid startup_verification')
             if startup_verification=='passive' and (not physical or policy!='retain-sharing'):raise ValueError('Passive supervision requires physical_takeover and retained sharing')
             session_seconds=args.get('session_seconds',120)
-            if type(session_seconds) is not int or not 120<=session_seconds<=600:raise ValueError('session_seconds must be an integer from 120 to 600')
+            if type(session_seconds) is not int or not 120<=session_seconds<=1200:raise ValueError('session_seconds must be an integer from 120 to 1200')
             if 'session_seconds' in args and not physical:raise ValueError('session_seconds requires physical_takeover')
             auto_return=args.get('pointer_motion_return',False)
             if type(auto_return) is not bool:raise ValueError('pointer_motion_return must be boolean')
             if auto_return and (policy!='retain-sharing' or not physical):raise ValueError('Automatic pointer return requires retained sharing and native activity observation')
+            continuous=args.get('continuous_observer',False)
+            if type(continuous) is not bool:raise ValueError('continuous_observer must be boolean')
+            if continuous and (not physical or policy!='retain-sharing' or context_policy!='pause-recover'):
+                raise ValueError('Continuous observation requires retained native context recovery')
+            watch=args.get('observe_during_takeover',False)
+            if type(watch) is not bool:raise ValueError('observe_during_takeover must be boolean')
+            if watch and not continuous:raise ValueError('Observation during takeover requires continuous_observer')
             if physical:self.preflight_physical_guard()
-            glow=args.get('cursor_glow',False)
-            if type(glow) is not bool:raise ValueError('cursor_glow must be boolean')
             self.ensure_backend()
+            if continuous and not getattr(self.backend,'supports_continuous_observation',False):
+                raise ValueError('Continuous observation is unavailable on this backend')
             if not self.backend.status().get('active'):
                 with self.state_lock:
                     previous_owned=(self.native_activity is not None or self.indicator is not None or
-                        self.cursor_glow is not None or self.target_provider is not None or
+                        self.target_provider is not None or
                         self.state in ('active','closing'))
                     if not previous_owned:
                         # Never clear an event captured by an old observer. Its
@@ -2048,6 +2264,10 @@ class Server:
                         self.interruption_policy=policy;self.pause_id=None;self.pause_reason=None
                         self.pointer_motion_return=auto_return;self.consent_id=uuid.uuid4().hex;self.backend.consent_id=self.consent_id
                         self.backend.confirmed_pointer_record=None;self.return_record=None;self.return_attempted=set();self.native_pause_epoch=None;self.manual_pause_requested=False;self.manual_pause_latch=None;self.intervention_latch=None;self.click_context_pending=None
+                        self.backend.continuous_observer=continuous
+                        self.backend.observe_during_takeover=watch
+                        owner=self.backend;consent=self.consent_id
+                        self.backend.takeover_capture_gate=lambda:self.takeover_capture_allowed(owner,consent)
                         self.return_state='ready' if auto_return else 'disabled'
                         self.state='opening';self.target_record=None;self.closure_reason=None
                 if previous_owned:
@@ -2070,12 +2290,11 @@ class Server:
                     else:
                         self.backend.start();self.show_indicator()
                     content=self.capture_result(('opening',))
-                    if glow:
-                        self.show_cursor_glow()
-                        metadata=json.loads(content[0]['text']);metadata.update(self.status());content[0]=text(metadata)
                     return content
                 except BaseException:self.close_backend();raise
             if 'allow_permission_wait' in args and allow_permission_wait!=self.native_allow_permission_wait:raise ValueError('An active permission-wait mode cannot change')
+            if 'observe_during_takeover' in args and watch!=getattr(self.backend,'observe_during_takeover',False):raise ValueError('An active takeover-observation mode cannot change')
+            if 'continuous_observer' in args and continuous!=getattr(self.backend,'continuous_observer',False):raise ValueError('An active continuous-observer mode cannot change')
             if 'startup_verification' in args and startup_verification!=self.native_startup_verification:raise ValueError('An active startup verification mode cannot be changed')
             if 'pointer_source' in args and pointer_source!=self.native_pointer_source:raise ValueError('An active input source cannot be changed')
             if 'context_change_policy' in args and context_policy!=self.context_change_policy:raise ValueError('An active context recovery policy cannot change')
@@ -2086,6 +2305,8 @@ class Server:
             if physical and not self.physical_takeover:raise RuntimeError('Device-source observation must be selected before a new consent session')
             expected=self.window_guard_module().WindowGuard.signature(self.window_record['context']) if self.window_record else None
             return self.capture_result(('active',),expected)
+        if name=='desktop_observe' and self.state in ('pausing','paused') and getattr(self.backend,'observe_during_takeover',False):
+            return self.observe_takeover(args)
         self.guard(('active',));self.ensure_backend()
         if name=='desktop_action':
             if self.context_observation_required:raise RetainedPause('Ordinary context recovered; inspect desktop_observe before further input')
@@ -2146,8 +2367,7 @@ class Server:
                         return content
                     geometry=self.backend.monitor_geometry() if callable(getattr(self.backend,'monitor_geometry',None)) else None
                     def pointer_reader():
-                        window.check()
-                        return module.pointer_local(self.read_window_context(),geometry)
+                        return self.read_bound_pointer(window,geometry,module.pointer_local)
                     self.backend.pointer_reader=pointer_reader
                     if normalize_window or fit_window:
                         module.validate_normalize_for_move(args['action'])
@@ -2211,6 +2431,20 @@ class Server:
                 if self.indicator:self.indicator.armed=None
                 self.recovery.finish(getattr(self.backend,'transaction_info',{}),failed=True)
                 progress=getattr(self.backend,'transaction_info',{})
+                if (isinstance(action_error,ValueError) and window is None and not permission and
+                    self.interruption_policy=='retain-sharing' and self.native_activity is not None and
+                    getattr(self.backend,'requires_window_guard',False) and window_record and
+                    args.get('window_observation_id')==window_record['id'] and
+                    window_record['generation']==self.generation and time.monotonic()-window_record['issued']<=60 and
+                    progress.get('input_events_attempted')==0 and progress.get('completed_steps')==0):
+                    # Top-level option validation can fail before binding the
+                    # guard. Re-establish that exact fresh observed context;
+                    # unknown tokens or a changed foreground gain no exception.
+                    def cancel_validation_window():
+                        if self.context_change_policy=='pause-recover':self.foreground_lost(self.indicator)
+                        else:self.backend.cancelled.set()
+                    window=self.make_window_guard(self.indicator,window_record['context'],cancel_validation_window)
+                    window.check()
                 if (isinstance(action_error,ValueError) and not permission and window is not None and
                     self.interruption_policy=='retain-sharing' and self.native_activity is not None and
                     progress.get('input_events_attempted')==0 and progress.get('completed_steps')==0):
@@ -2223,6 +2457,7 @@ class Server:
                     self.backend.mapping_guard();window.check();status=native.status()
                     if self.native_activity is not native or not native._yield_authorized() or status.get('active') is not True or status.get('observer_alive') is not True:raise RuntimeError('Native readiness changed before validation image')
                     metadata=json.loads(content[0]['text']);metadata['action_refused']='Invalid action arguments; zero input was sent. Inspect the fresh image before choosing a corrected action.'
+                    metadata['action_argument_error']=action_argument_diagnostic(action_error)
                     content[0]=text(metadata);return content
                 if permission:
                     if self.permission_wait_reason is None:
@@ -2237,6 +2472,23 @@ class Server:
             metadata['recovery']=self.recovery.snapshot()
             content[0]=text(metadata)
             return content
+        change_report=None
+        if name=='desktop_observe' and any(k in args for k in ('after_stream_id','after_revision','wait_for_change_seconds')):
+            observer=getattr(self.backend,'frame_observer',None)
+            if observer is None:raise ValueError('Change waiting requires an active continuous observer')
+            if 'after_stream_id' not in args or 'after_revision' not in args:
+                raise ValueError('Change waiting requires both stream identity and revision')
+            backend=self.backend
+            def check_change_wait():
+                self.guard(('active',))
+                if self.backend is not backend or getattr(backend,'frame_observer',None) is not observer:
+                    raise RetainedPause('Observation stream changed during wait')
+                if backend.cancelled.is_set() or not backend.session:
+                    raise RuntimeError('Desktop session closed during change wait')
+                operation=getattr(backend,'operation_cancelled',None)
+                if operation is not None and operation.is_set():raise RetainedPause('Change wait cancelled by intervention')
+            changed=observer.wait_change(args['after_stream_id'],args['after_revision'],args.get('wait_for_change_seconds',0),check_change_wait)
+            change_report={'changed_before_capture':changed,'timed_out':not changed,'requested_seconds':args.get('wait_for_change_seconds',0)}
         self.target_record=None
         target=None;target_error=None
         if name=='desktop_observe' and args.get('inspect_target') is True:
@@ -2249,6 +2501,7 @@ class Server:
         if name=='desktop_observe':
             self.context_observation_required=False
             metadata=json.loads(content[0]['text'])
+            if change_report is not None:metadata['change_wait']=change_report
             if args.get('inspect_target') is True:
                 if target is not None:
                     try:
@@ -2286,15 +2539,20 @@ class Server:
     def handle(self,request):
         method,params=request.get('method'),request.get('params',{})
         if method=='initialize':
-            result={'protocolVersion':'2025-06-18','capabilities':{'tools':{}},
+            result={'protocolVersion':'2025-06-18','capabilities':{'tools':{},'resources':{'subscribe':True,'listChanged':False}},
                     'serverInfo':{'name':'linux-desktop-control','version':VERSION}}
         elif method=='ping':result={}
         elif method=='tools/list':result={'tools':tools()}
+        elif method in ('resources/list','resources/read','resources/subscribe','resources/unsubscribe'):
+            try:result=self.resource_request(method,params)
+            except ValueError as error:return {'jsonrpc':'2.0','id':request.get('id'),'error':{'code':-32602,'message':str(error)}}
         elif method=='tools/call':
             try:
                 if request.get('_admission_error'):raise RuntimeError(request['_admission_error'])
                 result={'content':self.call(params['name'],params.get('arguments',{}))}
                 if params['name']=='desktop_resume':request['_generation']=self.generation
+                if params['name']=='desktop_observe' and result['content'] and getattr(self,'takeover_publication',None) is not None:
+                    request['_takeover_publication']=self.takeover_publication;self.takeover_publication=None
             except Exception as e:result=self.error_result(e,params.get('name'))
         elif method and method.startswith('notifications/'):return None
         else:return {'jsonrpc':'2.0','id':request.get('id'),'error':{'code':-32601,'message':'Method not found'}}
@@ -2304,6 +2562,14 @@ class Server:
     def fence_response(self,request,response):
         content=(response or {}).get('result',{}).get('content',[])
         if any(c.get('type')=='image' for c in content):
+            binding=request.get('_takeover_publication')
+            if binding is not None:
+                try:
+                    self.check_takeover_binding(binding)
+                    self.note_observation_publication()
+                    return response
+                except Exception:
+                    return {'jsonrpc':'2.0','id':request.get('id'),'result':self.error_result(RetainedPause('Read-only image discarded after takeover context changed'), 'desktop_observe')}
             permission_binding=(self.window_record or {}).get('permission_binding')
             if permission_binding is not None:
                 try:self.permission_publish_check(permission_binding)
@@ -2335,6 +2601,7 @@ class Server:
                     if permission_binding is not None:self.permission_publish_check(permission_binding)
                     if self.window_record and self.window_record.get('publication_deadline') is not None and time.monotonic()>=self.window_record['publication_deadline']:raise RuntimeError('Transition publication deadline expired')
                 except Exception as foreground_error:return {'jsonrpc':'2.0','id':request.get('id'),'result':self.error_result(foreground_error if isinstance(foreground_error,RetainedPause) else 'Foreground changed before publication; session closed',request.get('params',{}).get('name'),closure_reason='publication-foreground-fault')}
+            self.note_observation_publication()
         return response
 
     def shutdown(self):
@@ -2345,7 +2612,17 @@ class StdioTransport:
     """Serialize desktop work; read cancellation and closure independently."""
     def __init__(self,server):
         self.startup_responses=queue.Queue(maxsize=1);self.writer_stop=threading.Event();self.startup_writer=None
+        self.change_notifier=_change_notifications.ChangeNotifier(server.change_notification_snapshot,self.send_change_notification)
         self.server=server;self.output_lock=threading.Lock();self.output_stream=None;self.pending=queue.Queue();self.tokens={};self.token_lock=threading.Lock();self.disconnected=threading.Event()
+    def send_change_notification(self,owner):
+        # No lifecycle/state locks while writing; backpressure never grows a queue.
+        with self.output_lock:
+            if self.writer_stop.is_set() or self.disconnected.is_set() or not self.server.change_subscription_current(owner):return False
+            self.output_stream.write(json.dumps({'jsonrpc':'2.0','method':'notifications/resources/updated',
+                                                'params':{'uri':_change_notifications.URI}})+'\n')
+            self.output_stream.flush()
+            return True
+
     def interrupt(self,request_id=None,all_requests=False):
         with self.token_lock:
             for key,token in self.tokens.items():
@@ -2384,6 +2661,7 @@ class StdioTransport:
                             # is permitted for a duplicate in-flight request ID.
                             self.pending.put(({'_protocol_error':'Duplicate pending request ID','id':rid},threading.Event()))
                             continue
+                    if request['method']=='resources/unsubscribe' and params=={'uri':_change_notifications.URI}:self.server.change_subscription=None
                     if request['method']=='notifications/cancelled':self.interrupt(params.get('requestId'));continue
                     if request['method']=='tools/call':
                         if not isinstance(params.get('name'),str) or not isinstance(params.get('arguments',{}),dict):raise ValueError('Invalid tool arguments')
@@ -2419,6 +2697,7 @@ class StdioTransport:
         finally:self.disconnected.set();self.interrupt(all_requests=True);self.pending.put(None)
     def run(self,input_stream,output_stream):
         self.output_stream=output_stream
+        self.change_notifier.start()
         self.startup_writer=threading.Thread(target=self.write_startup_responses,daemon=True,name='startup-status-writer')
         self.startup_writer.start()
         threading.Thread(target=self.read,args=(input_stream,),daemon=True).start()
@@ -2453,11 +2732,12 @@ class StdioTransport:
                         rid=request.get('id')
                         if self.tokens.get(rid) is token:self.tokens.pop(rid,None)
         finally:
-            self.writer_stop.set();self.disconnected.set();self.interrupt(all_requests=True);self.server.shutdown()
+            self.writer_stop.set();self.disconnected.set();self.interrupt(all_requests=True);self.server.change_subscription=None
+            self.change_notifier.close();self.server.shutdown()
             self.startup_writer.join(timeout=.2)
 
 def main():
-    server=Server();server.recover_cursor_glow();transport=StdioTransport(server)
+    server=Server();transport=StdioTransport(server)
     def terminate(signum,frame):
         if server.backend:server.backend.cancelled.set()
         raise SystemExit(0)

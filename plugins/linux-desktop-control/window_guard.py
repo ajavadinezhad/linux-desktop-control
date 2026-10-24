@@ -11,11 +11,16 @@ class WindowGuard:
   return (identity,epoch,tuple(rect),kind)
  def fail(self):
   self.failed=True;self.cancel();raise self.failure('Foreground target changed or became unavailable; remaining input cancelled. Session must close; wait for explicit readiness.')
- def check(self):
+ def snapshot(self):
+  # One fresh reply supplies both the bound context and its pointer sample.
+  # Never reuse this reply for another endpoint confirmation or later effect.
   if self.failed:self.fail()
-  try:current=self.signature(self.bridge.context())
+  try:
+   context=self.bridge.context();current=self.signature(context)
   except Exception:self.fail()
-  if current!=self.baseline:self.fail()
+  if self.failed or current!=self.baseline:self.fail()
+  return context
+ def check(self):self.snapshot()
  def changed(self,epoch):
   # No D-Bus cleanup on this signal thread; cancellation wakes the input worker.
   if epoch>self.baseline[1]:self.failed=True;self.cancel()

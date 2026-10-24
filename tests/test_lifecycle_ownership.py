@@ -20,7 +20,7 @@ class Backend(Fake):
 class LifecycleOwnershipTests(unittest.TestCase):
     def test_old_observer_cleanup_finishes_before_close_and_reopen(self):
         entered = threading.Event();release = threading.Event();reopened = threading.Event()
-        native_closed = threading.Event();glow_closed = threading.Event()
+        native_closed = threading.Event()
         indicator_closed = threading.Event();provider_closed = threading.Event()
         class Native:
             def close(self):
@@ -31,7 +31,6 @@ class LifecycleOwnershipTests(unittest.TestCase):
         server = m.Server(Backend);server.call('desktop_start', {})
         server.backend.held = ['held']
         server.native_activity = Native()
-        server.cursor_glow = SimpleNamespace(close=glow_closed.set,status=lambda:{'active':False})
         server.indicator = SimpleNamespace(close=indicator_closed.set)
         server.target_provider = SimpleNamespace(close=provider_closed.set)
         old = threading.Thread(target=server.close_backend)
@@ -55,7 +54,7 @@ class LifecycleOwnershipTests(unittest.TestCase):
             release.set();old.join(1);worker.join(1)
             self.assertFalse(old.is_alive());self.assertFalse(worker.is_alive())
             self.assertEqual(errors, []);self.assertTrue(reopened.is_set())
-            for closed in (native_closed,glow_closed,indicator_closed,provider_closed):self.assertTrue(closed.is_set())
+            for closed in (native_closed,indicator_closed,provider_closed):self.assertTrue(closed.is_set())
             self.assertIs(server.indicator,new_indicator)
             self.assertFalse(new_indicator_closed.is_set())
             self.assertEqual(server.state,'active');self.assertTrue(server.backend.active)
@@ -225,7 +224,7 @@ class LifecycleOwnershipTests(unittest.TestCase):
         server.close_backend()
 
     def test_start_retires_each_attached_resource_before_refusing(self):
-        for attribute in ('native_activity','indicator','cursor_glow','target_provider'):
+        for attribute in ('native_activity','indicator','target_provider'):
             with self.subTest(attribute=attribute):
                 server=m.Server(Backend);closed=threading.Event()
                 resource=SimpleNamespace(close=closed.set,status=lambda:{'active':False})
